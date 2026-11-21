@@ -73,6 +73,7 @@ def test_main_writes_every_contract_key(tmp_path: Path, monkeypatch) -> None:
         "jumps",
         "clones",
         "meetings",
+        "spoofs",
         "watchlist",
         "watchlist_alerts",
         "watchlist_info",
@@ -100,6 +101,7 @@ def test_counts_match_the_events_written(tmp_path: Path, monkeypatch) -> None:
     assert counts["jumps"] == by_kind["jump"]
     assert counts["clones"] == by_kind["clone"]
     assert counts["meetings"] == by_kind["meeting"]
+    assert counts["spoofs"] == by_kind["spoof"]
     assert counts["vessels"] == len(payload["vessels"])
     assert counts["watchlist"] == len(payload["watchlist"]["alerts"]) + len(payload["watchlist"]["info"])
     assert counts["watchlist_alerts"] == len(payload["watchlist"]["alerts"])

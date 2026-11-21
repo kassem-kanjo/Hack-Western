@@ -1,9 +1,13 @@
-"""Tests for the GNSS spoofing / ghost-point detector (issue #100).
+"""Tests for the GNSS spoofing / ghost-point detector (issue #100 follow-up).
 
-The real fixture is the recorded St Petersburg case: six unrelated ships that sail normal tracks
-near the Neva approaches all report a patch of land about 25 km north of the city at different
-times in one afternoon. The synthetic tests pin the two rules and the false-positive guard that
-the fixture needs: sharing alone must not turn an ordinary shipping lane into a spoofing event.
+A ghost point is a place several unrelated ships *teleported to and back from*: their tracks are
+normal before and after, but a fix tens of kilometres away implies an impossible speed in and an
+impossible speed out. Ports and anchorages cannot look like that, because moored ships sit still
+instead of jumping.
+
+The real fixture is the recorded St Petersburg case: six unrelated ships sail normal tracks near
+the Neva approaches, and five of them appear at a patch of land about 25 km north of the city at
+different times in one afternoon.
 """
 
 from __future__ import annotations
@@ -33,11 +37,26 @@ def _fixture_pings(name: str) -> list[Ping]:
     return pings
 
 
-def _cluster(mmsi: int, lat: float, lon: float, *, minutes: int = 2) -> list[Ping]:
-    """A few fixes in one place, enough for the sharing rule but not a moving track."""
+def _teleport(mmsi: int, lat: float = LAT, lon: float = LON, *, minutes: int = 5) -> list[Ping]:
+    """A vessel on a real track ~50 km south that appears at (lat, lon) and then returns.
+
+    The two false fixes are one minute apart; the jump in and the jump out are each about 50 km in
+    five minutes, roughly 320 knots, which no hull class can do.
+    """
+    origin_lat = lat + 0.45
     return [
-        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=minute), lat=lat, lon=lon, sog=7.5)
-        for minute in range(minutes)
+        Ping(mmsi=mmsi, t=T0, lat=origin_lat, lon=lon, sog=8.0),
+        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=minutes), lat=lat, lon=lon, sog=8.0),
+        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=minutes + 1), lat=lat, lon=lon, sog=8.0),
+        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=minutes + 6), lat=origin_lat, lon=lon, sog=8.0),
+    ]
+
+
+def _moored(mmsi: int, lat: float, lon: float, *, minutes: int = 30) -> list[Ping]:
+    """A stationary hull at a berth: a continuous track at one point, speed over ground zero."""
+    return [
+        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=minute), lat=lat, lon=lon, sog=0.0)
+        for minute in range(0, minutes, 5)
     ]
 
 
@@ -56,16 +75,54 @@ def test_real_fixture_has_exactly_one_ghost_point() -> None:
     assert ghost.start < ghost.end
     assert len(ghost.evidence["vessels"]) == ghost.evidence["n_vessels"]
     assert 0.0 < ghost.severity <= 1.0
-    # Without a coastline the detector cannot know the point is inland, but it can see that the
-    # reporting ships are nowhere near it on their own tracks.
+    assert "jumped to the same point and back" in ghost.explanation
+    assert "km from their real tracks" in ghost.explanation
+    # Without a coastline the detector cannot know the point is inland; the out-and-back rule is
+    # what found it.
     assert ghost.evidence["on_land"] is False
     assert ghost.evidence["inland_km"] == 0.0
 
+    for vessel in ghost.evidence["vessels"]:
+        assert set(vessel) == {
+            "mmsi",
+            "n_reports",
+            "first",
+            "last",
+            "jump_in_kn",
+            "jump_out_kn",
+            "offset_km",
+        }
+        assert vessel["offset_km"] > 5.0
+
+
+def test_a_moored_port_is_not_a_ghost_point() -> None:
+    # Ten hulls at the same quay with speed over ground zero and continuous tracks: exactly the
+    # shared-position pattern that produced 784 false events on five hours of Baltic data.
+    tracks = {mmsi: _moored(mmsi, LAT, LON) for mmsi in range(111, 121)}
+
+    assert ghost_points(tracks) == []
+
+
+def test_three_vessels_teleporting_out_and_back_are_one_ghost_point() -> None:
+    tracks = {mmsi: _teleport(mmsi) for mmsi in (111, 222, 333)}
+
+    ghosts = ghost_points(tracks)
+
+    assert len(ghosts) == 1
+    ghost = ghosts[0]
+    assert ghost.evidence["n_vessels"] == 3
+    assert abs(ghost.lat - LAT) < 0.001
+    assert abs(ghost.lon - LON) < 0.001
+    for vessel in ghost.evidence["vessels"]:
+        assert vessel["jump_in_kn"] > 300.0
+        assert vessel["jump_out_kn"] > 300.0
+        assert vessel["offset_km"] > 5.0
+
 
 def test_a_synthetic_land_square_marks_the_point_inland() -> None:
-    # Three ships at one point inside a square large enough that the point is > 1 km from every
-    # edge; the negative buffer therefore keeps the whole cluster.
-    tracks = {mmsi: _cluster(mmsi, LAT, LON) for mmsi in (111, 222, 333)}
+    # Three ships teleport to a point > 1 km inside a square; land is reported as extra evidence
+    # on an event the out-and-back rule already found.
+    tracks = {mmsi: _teleport(mmsi, LAT, LON) for mmsi in (111, 222, 333)}
     land = box(LON - 0.1, LAT - 0.1, LON + 0.1, LAT + 0.1)
 
     ghosts = ghost_points(tracks, land=land)
@@ -78,31 +135,28 @@ def test_a_synthetic_land_square_marks_the_point_inland() -> None:
     assert ghost.severity == 0.7  # 3 / 6 sharing, plus 0.2 for land
 
 
-def test_one_ship_inland_is_still_a_ghost_point() -> None:
-    # Criterion (b) stands alone: a single hull that puts itself 10 km inside land cannot be there.
-    tracks = {111: _cluster(111, LAT, LON)}
+def test_inland_positions_alone_are_not_a_ghost_point() -> None:
+    # Four hulls moored well inside land: impossible, but a river berth looks the same and the
+    # land signal must never be the trigger.
+    tracks = {mmsi: _moored(mmsi, LAT, LON) for mmsi in (111, 222, 333, 444)}
     land = box(LON - 0.1, LAT - 0.1, LON + 0.1, LAT + 0.1)
 
-    ghosts = ghost_points(tracks, land=land)
-
-    assert len(ghosts) == 1
-    assert ghosts[0].evidence["n_vessels"] == 1
-    assert ghosts[0].evidence["on_land"] is True
+    assert ghost_points(tracks, land=land) == []
 
 
 def test_two_vessels_only_are_not_a_ghost_point() -> None:
-    tracks = {111: _cluster(111, LAT, LON), 222: _cluster(222, LAT, LON)}
+    tracks = {111: _teleport(111), 222: _teleport(222)}
 
     assert ghost_points(tracks) == []
 
 
 def test_a_shared_point_across_a_cell_boundary_is_found() -> None:
-    # The three fixes fall in adjacent 0.005-degree cells but within a few tens of metres of each
-    # other; only the neighbourhood lookup connects them into one candidate.
+    # The three false fixes fall in adjacent 0.005-degree cells but within a few tens of metres of
+    # each other; only the neighbourhood lookup connects them into one candidate.
     tracks = {
-        111: _cluster(111, 59.0002, 21.0002),
-        222: _cluster(222, 58.9998, 20.9998),
-        333: _cluster(333, 59.0000, 21.0000),
+        111: _teleport(111, 59.0002, 21.0002),
+        222: _teleport(222, 58.9998, 20.9998),
+        333: _teleport(333, 59.0000, 21.0000),
     }
 
     ghosts = ghost_points(tracks)
@@ -112,9 +166,8 @@ def test_a_shared_point_across_a_cell_boundary_is_found() -> None:
 
 
 def test_ordinary_traffic_through_a_shared_point_is_not_a_ghost() -> None:
-    # Every ship reports the shared point once, but also reports ~1.1 km away a minute before and
-    # after. That is a passage through a lane, not a falsified position: all three vessels are
-    # ordinary traffic, so the sharing rule alone must not fire.
+    # Every ship passes through the shared point continuously, ~1.1 km a minute. That is a lane,
+    # not a falsified position: no leg is long enough to be a teleport.
     tracks: dict[int, list[Ping]] = {}
     for mmsi in (111, 222, 333):
         tracks[mmsi] = [
@@ -141,7 +194,7 @@ def _jump(lat: float, lon: float, evidence: dict[str, object] | None = None) -> 
 
 
 def test_filter_explained_jumps_drops_only_jumps_at_a_ghost() -> None:
-    tracks = {mmsi: _cluster(mmsi, LAT, LON) for mmsi in (111, 222, 333)}
+    tracks = {mmsi: _teleport(mmsi) for mmsi in (111, 222, 333)}
     ghosts = ghost_points(tracks)
     ghost = ghosts[0]
 

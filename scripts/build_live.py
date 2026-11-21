@@ -38,6 +38,7 @@ from typing import Any
 
 from darkfleet.core import kinematics
 from darkfleet.core.encounters import meetings
+from darkfleet.core.geo import distance_km
 from darkfleet.core.speeds import max_speed_knots
 from darkfleet.core.spoofing import filter_explained_jumps, ghost_points
 from darkfleet.core.tracks import (
@@ -79,6 +80,23 @@ never treated as a member: an untyped hull cannot prove it is a cargo ship or a 
 
 ALERT_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
 """Watchlist categories that are an alert; detention is context, not an accusation."""
+
+
+def _drop_spoofed_clones(clones: list[Event], spoofs: list[Event], km: float = 2.0) -> list[Event]:
+    """A 'clone' whose second position is a ghost point is a spoofing victim, not two transmitters.
+
+    Found on real data: MMSIs flip-flopping between their real track and the St Petersburg ghost
+    point looked like cloned identities; the spoof event already names them, so drop the clone.
+    """
+    centres = [(s.lat, s.lon) for s in spoofs]
+    kept = []
+    for event in clones:
+        ends = [event.evidence.get(k) for k in ("cluster_a", "cluster_b")]
+        ends = [e for e in ends if isinstance(e, (list, tuple)) and len(e) == 2]
+        near = any(distance_km(e[0], e[1], c[0], c[1]) <= km for e in ends for c in centres)
+        if not near:
+            kept.append(event)
+    return kept
 
 
 def resolve_region_dir(region: str) -> Path:
@@ -329,6 +347,7 @@ def build(
     # spoofing; their "jumps" to that point are the spoof, not the ships, so drop those jumps.
     spoof_events = ghost_points(tracks, land=land_geom)
     jump_events = filter_explained_jumps(jump_events, spoof_events)
+    clone_events = _drop_spoofed_clones(clone_events, spoof_events)
 
     watch = _watchlist_rows(tracks, vessels, sanctions)
     watchlist = _split_watchlist(watch)
