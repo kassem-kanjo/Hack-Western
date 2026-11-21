@@ -23,3 +23,6 @@ Stretch: our own ship detection on fresh Sentinel-1 radar images of the strait (
 ## Fallback
 If live Hormuz AIS is too thin (< 50 vessels/hour), layer 1 shows the Baltic engine labelled as such and
 Hormuz leads with layers 2-3.
+
+## Approval
+Approved by Kassem (CEO) in chat, Sat 21 Nov, 13:09 ET ("story approved"): Hormuz radar opens, then the live Baltic findings, then the Patrol unit at the QNX table.
