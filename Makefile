@@ -16,3 +16,6 @@ dev-api:
 
 dev-web:
 	cd web && npm run dev
+
+health:
+	bash scripts/health.sh
