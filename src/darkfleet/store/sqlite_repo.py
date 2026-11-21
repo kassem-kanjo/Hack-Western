@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
 from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
 
@@ -77,7 +78,26 @@ CREATE TABLE IF NOT EXISTS positions (
     lat REAL NOT NULL,
     lon REAL NOT NULL,
     sog REAL,
+    cog REAL,
+    heading INTEGER,
+    nav_status INTEGER,
     PRIMARY KEY (mmsi, ts)
+);
+
+CREATE TABLE IF NOT EXISTS vessels_static (
+    mmsi TEXT PRIMARY KEY,
+    imo INTEGER,
+    name TEXT,
+    callsign TEXT,
+    ship_type INTEGER,
+    length_m REAL,
+    destination TEXT,
+    last_seen TEXT
+);
+
+CREATE TABLE IF NOT EXISTS coverage_minutes (
+    minute TEXT PRIMARY KEY,
+    n_msgs INTEGER NOT NULL
 );
 """
 
@@ -175,6 +195,59 @@ ON CONFLICT(mmsi, ts) DO UPDATE SET
     sog = excluded.sog
 """
 
+# Raw AIS pings share the positions table with GFW rows; the AIS-only columns stay NULL for
+# GFW writes and the GFW-only columns are absent on a ping, so one upsert per writer.
+_PING_UPSERT = """
+INSERT INTO positions (mmsi, ts, lat, lon, sog, cog, heading, nav_status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(mmsi, ts) DO UPDATE SET
+    lat = excluded.lat,
+    lon = excluded.lon,
+    sog = excluded.sog,
+    cog = excluded.cog,
+    heading = excluded.heading,
+    nav_status = excluded.nav_status
+"""
+
+_PING_SELECT = """
+SELECT mmsi, ts, lat, lon, sog, cog, heading, nav_status
+FROM positions
+WHERE ts >= ? AND ts <= ?
+ORDER BY ts, mmsi
+"""
+
+_VESSEL_UPSERT = """
+INSERT INTO vessels_static (mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(mmsi) DO UPDATE SET
+    imo = excluded.imo,
+    name = excluded.name,
+    callsign = excluded.callsign,
+    ship_type = excluded.ship_type,
+    length_m = excluded.length_m,
+    destination = excluded.destination,
+    last_seen = excluded.last_seen
+"""
+
+_VESSEL_SELECT = """
+SELECT mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen
+FROM vessels_static
+ORDER BY mmsi
+"""
+
+_COVERAGE_UPSERT = """
+INSERT INTO coverage_minutes (minute, n_msgs)
+VALUES (?, ?)
+ON CONFLICT(minute) DO UPDATE SET n_msgs = excluded.n_msgs
+"""
+
+_COVERAGE_SELECT = """
+SELECT minute, n_msgs
+FROM coverage_minutes
+WHERE minute >= ? AND minute <= ?
+ORDER BY minute
+"""
+
 _DARK_HOURS_BY_REGION = """
 SELECT substr(start_ts, 1, 10) AS day,
        SUM(duration_hours) AS dark_hours,
@@ -216,6 +289,18 @@ def _day_after(value: date) -> str:
     return (value + timedelta(days=1)).isoformat()
 
 
+def _migrate_positions(conn: sqlite3.Connection) -> None:
+    """Add the AIS columns to a positions table created before issue #72.
+
+    ``CREATE TABLE IF NOT EXISTS`` cannot widen an existing table, and the local SQLite cache
+    survives code changes, so the upgrade has to happen in place or every insert fails.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+    for column, declaration in (("cog", "REAL"), ("heading", "INTEGER"), ("nav_status", "INTEGER")):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {column} {declaration}")
+
+
 class SqliteRepo:
     """SQLite-backed repository; the default for local development and tests."""
 
@@ -228,6 +313,8 @@ class SqliteRepo:
             self._path = path
         self._conn = sqlite3.connect(self._path)
         self._conn.executescript(_SCHEMA)
+        with self._conn:
+            _migrate_positions(self._conn)
 
     def upsert_gaps(self, region: str, gaps: Sequence[GapEvent]) -> int:
         params = [
@@ -302,6 +389,84 @@ class SqliteRepo:
         with self._conn:
             self._conn.executemany(_POSITION_UPSERT, params)
         return len(params)
+
+    def add_pings(self, pings: Sequence[Ping]) -> int:
+        params = [
+            (
+                str(ping.mmsi),
+                _ts(ping.t),
+                ping.lat,
+                ping.lon,
+                ping.sog,
+                ping.cog,
+                ping.heading,
+                ping.nav_status,
+            )
+            for ping in pings
+        ]
+        with self._conn:
+            self._conn.executemany(_PING_UPSERT, params)
+        return len(params)
+
+    def pings_between(self, start: datetime, end: datetime) -> list[Ping]:
+        rows = self._conn.execute(_PING_SELECT, (_ts(start), _ts(end))).fetchall()
+        return [
+            Ping(
+                mmsi=int(row[0]),
+                t=_parse_ts(row[1]),
+                lat=row[2],
+                lon=row[3],
+                sog=row[4],
+                cog=row[5],
+                heading=row[6],
+                nav_status=row[7],
+            )
+            for row in rows
+        ]
+
+    def upsert_vessels(self, vessels: Sequence[VesselInfo]) -> int:
+        params = [
+            (
+                str(vessel.mmsi),
+                vessel.imo,
+                vessel.name,
+                vessel.callsign,
+                vessel.ship_type,
+                vessel.length_m,
+                vessel.destination,
+                None if vessel.last_seen is None else _ts(vessel.last_seen),
+            )
+            for vessel in vessels
+        ]
+        with self._conn:
+            self._conn.executemany(_VESSEL_UPSERT, params)
+        return len(params)
+
+    def vessels(self) -> list[VesselInfo]:
+        rows = self._conn.execute(_VESSEL_SELECT).fetchall()
+        return [
+            VesselInfo(
+                mmsi=int(row[0]),
+                imo=row[1],
+                name=row[2],
+                callsign=row[3],
+                ship_type=row[4],
+                length_m=row[5],
+                destination=row[6],
+                last_seen=None if row[7] is None else _parse_ts(row[7]),
+            )
+            for row in rows
+        ]
+
+    def set_coverage(self, minutes: Sequence[CoverageMinute]) -> int:
+        params = [(_ts(item.minute), item.n_msgs) for item in minutes]
+        with self._conn:
+            self._conn.executemany(_COVERAGE_UPSERT, params)
+        return len(params)
+
+    def coverage_between(self, start: datetime, end: datetime) -> list[CoverageMinute]:
+        rows = self._conn.execute(_COVERAGE_SELECT, (_ts(start), _ts(end))).fetchall()
+        return [CoverageMinute(minute=_parse_ts(row[0]), n_msgs=int(row[1])) for row in rows]
 
     def gaps_in(self, region: str, start: date, end: date) -> list[GapEvent]:
         rows = self._conn.execute(_GAP_SELECT, (region, start.isoformat(), _day_after(end))).fetchall()
