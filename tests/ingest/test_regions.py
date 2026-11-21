@@ -53,7 +53,7 @@ def test_baltic_watch_bbox():
 
 
 def test_regions_keys():
-    assert set(REGIONS) == {"HORMUZ", "BALTIC_WATCH"}
+    assert set(REGIONS) == {"HORMUZ", "BALTIC_WATCH", "GULF_OF_OMAN_CONTROL"}
 
 
 def test_region_geometry_returns_a_copy():
@@ -70,3 +70,9 @@ def test_region_geometry_unknown_name():
 
     assert "HORMUZ" in str(excinfo.value)
     assert "BALTIC_WATCH" in str(excinfo.value)
+
+
+def test_parse_sar_report_tolerates_null_day():
+    from darkfleet.ingest.gfw import parse_sar_report
+
+    assert parse_sar_report({"entries": [{"public-global-sar-presence:v3.0": None}]}) == []
