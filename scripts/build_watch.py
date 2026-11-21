@@ -1165,10 +1165,14 @@ def build(
         if sanctions_path is not None and sanctions_path.is_file()
         else {}
     )
+    # Only an exact IMO hit labels a ship. imo_watchlist also returns name-only matches
+    # (strong_name/weak_name); on live data that labelled innocent ferries (AURORA, ROMINA) as
+    # sanctioned because their names appear on the list for other hulls. A name is not an
+    # identity (docs/insights.md #10), so name hits never reach the UI or the alert rules.
     categories = {
         mmsi: str(case["category"])
         for mmsi, case in cases.items()
-        if case.get("category") in SUSPICIOUS_CATEGORIES
+        if case.get("category") in SUSPICIOUS_CATEGORIES and case.get("strength") == "imo"
     }
     watch_rows = [{"mmsi": mmsi, "category": category} for mmsi, category in categories.items()]
 
