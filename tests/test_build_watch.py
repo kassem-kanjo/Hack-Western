@@ -161,13 +161,15 @@ def _write_sanctions(root: Path) -> Path:
     return path
 
 
-def _build(root: Path, *, land: Path | None = None) -> dict[str, Any]:
+def _build(root: Path, *, land: Path | None = None, unseen: Path | None = None) -> dict[str, Any]:
+    """Build with the fixture's own paths; a missing ``unseen.json`` is the no-radar case."""
     return build_watch.build(
         hours=12,
         ais_dir=root / "ais",
         out=root / "out",
         sanctions=root / "maritime.csv",
         land=land,
+        unseen=unseen if unseen is not None else root / "unseen.json",
     )
 
 
@@ -192,6 +194,36 @@ def _write_land(root: Path, bbox: tuple[float, float, float, float]) -> Path:
         ],
     }
     path = root / "land.geojson"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _write_unseen(root: Path) -> Path:
+    """A tiny radar-vs-AIS snapshot: two well-covered days and one low-coverage last day.
+
+    The excluded day is the newest in the file on purpose: the alert must fall back to the
+    latest *well-covered* day, not simply the last row.
+    """
+    payload = {
+        "region": "HORMUZ",
+        "period": {"start": "2026-11-18", "end": "2026-11-20"},
+        "daily": [
+            {"day": "2026-11-18", "seen": 700, "broadcasting": 350, "dark": 350, "dark_share": 0.5},
+            {"day": "2026-11-20", "seen": 40, "broadcasting": 30, "dark": 10, "dark_share": 0.25},
+            {"day": "2026-11-19", "seen": 600, "broadcasting": 300, "dark": 300, "dark_share": 0.5},
+        ],
+        "grid": [
+            {"lat": 26.6, "lon": 56.3, "n": 5},
+            {"lat": 26.1, "lon": 56.1, "n": 9},
+        ],
+        "summary": {
+            "median_dark_share": 0.5,
+            "n_days_used": 2,
+            "excluded_days": ["2026-11-20"],
+        },
+        "source": "Global Fishing Watch SAR vessel detections (Sentinel-1)",
+    }
+    path = root / "unseen.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -359,3 +391,100 @@ def test_explain_flag_prints_removed_candidate_counts(
     assert code == 0
     assert "explain dark:" in printed
     assert "removed type 1" in printed
+
+
+def test_written_watch_json_round_trips_to_the_returned_payload(tmp_path: Path) -> None:
+    # The compact writer is hand-rolled, so prove the file and the return value are the same JSON.
+    unseen = _write_unseen(tmp_path)
+    _write_ais(tmp_path)
+    _write_sanctions(tmp_path)
+
+    payload = _build(tmp_path, unseen=unseen)
+    on_disk = json.loads((tmp_path / "out" / "watch.json").read_text(encoding="utf-8"))
+
+    assert on_disk == payload
+    assert any(alert["kind"] == "radar_unmatched" for alert in on_disk["alerts"])
+
+
+def test_dark_alert_trail_is_time_ordered_and_decimated(tmp_path: Path) -> None:
+    _write_ais(tmp_path)
+    _write_sanctions(tmp_path)
+
+    payload = _build(tmp_path)
+    alert = next(alert for alert in payload["alerts"] if alert["kind"] == "dark")
+    trail = alert["trail"]
+
+    # The fixture has 66 fixes before the silence, so the 60-point cap must bite.
+    assert len(trail) == build_watch.TRAIL_MAX_POINTS
+    times = [point[2] for point in trail]
+    assert times == sorted(times)
+    assert len(set(times)) == len(times)
+    # Both ends survive: the first fix six hours back and the last fix before the silence.
+    assert trail[0] == [56.1, 26.1, "2026-11-21T00:00:00Z"]
+    assert trail[-1][2] == alert["t_start"]
+
+
+def test_trail_window_is_six_hours_before_and_two_after_end() -> None:
+    start = T0 + timedelta(hours=12)
+    end = start + timedelta(hours=1)
+    track = [
+        build_watch.Ping(mmsi=1, t=start - timedelta(hours=7), lat=1.0, lon=1.0),
+        build_watch.Ping(mmsi=1, t=start - timedelta(hours=6), lat=2.0, lon=2.0),
+        build_watch.Ping(mmsi=1, t=start - timedelta(minutes=30), lat=2.5, lon=2.5),
+        build_watch.Ping(mmsi=1, t=start, lat=3.0, lon=3.0),
+        build_watch.Ping(mmsi=1, t=end + timedelta(minutes=30), lat=3.5, lon=3.5),
+        build_watch.Ping(mmsi=1, t=end + timedelta(hours=2), lat=4.0, lon=4.0),
+        build_watch.Ping(mmsi=1, t=end + timedelta(hours=3), lat=5.0, lon=5.0),
+    ]
+
+    trail = build_watch._trail(track, start, end)
+
+    assert [point[:2] for point in trail] == [[2.0, 2.0], [2.5, 2.5], [3.0, 3.0], [3.5, 3.5], [4.0, 4.0]]
+    assert [point[2] for point in trail] == sorted(point[2] for point in trail)
+
+
+def test_radar_alert_uses_latest_well_covered_day(tmp_path: Path) -> None:
+    unseen = _write_unseen(tmp_path)
+
+    payload = build_watch.build(
+        hours=12,
+        ais_dir=tmp_path / "no-ais",
+        out=tmp_path / "out",
+        sanctions=None,
+        land=None,
+        unseen=unseen,
+    )
+    radar = next(alert for alert in payload["alerts"] if alert["kind"] == "radar_unmatched")
+
+    assert radar["status"] == "ended"
+    assert radar["area_id"] == "HORMUZ_STRAIT"
+    assert radar["name"] is None
+    assert radar["mmsi"] == 0
+    assert radar["label"] == "Radar: 300 vessels not broadcasting"
+    assert radar["severity"] == 0.9
+    assert radar["t_start"] == "2026-11-19T00:00:00Z"
+    assert radar["t_end"] == "2026-11-19T23:59:59Z"
+    assert radar["last"]["lat"] == pytest.approx(25.6)
+    assert radar["last"]["lon"] == pytest.approx(56.3)
+    assert radar["trail"] == []
+    assert radar["contacts"] == []
+
+    evidence = radar["evidence"]
+    assert evidence["day"] == "2026-11-19"
+    assert evidence["seen"] == 600
+    assert evidence["unmatched"] == 300
+    assert evidence["share"] == pytest.approx(0.5)
+    assert evidence["median_share_well_covered_days"] == pytest.approx(0.5)
+    assert evidence["days_used"] == 2
+    assert evidence["source"] == "Powered by Global Fishing Watch"
+    # Densest cell first, [lon, lat], and the low-coverage day's cells are not used.
+    assert evidence["cells"] == [[56.1, 26.1], [56.3, 26.6]]
+
+
+def test_missing_unseen_file_adds_no_radar_alert(tmp_path: Path) -> None:
+    _write_ais(tmp_path)
+    _write_sanctions(tmp_path)
+
+    payload = _build(tmp_path)
+
+    assert all(alert["kind"] != "radar_unmatched" for alert in payload["alerts"])

@@ -86,7 +86,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
   done
   STATS_TMP="$(mktemp "${TMPDIR:-/tmp}/darkfleet-stats.XXXXXX")"
   "$UV" run python scripts/export_stats.py --output "$STATS_TMP"
-  "$UV" run python scripts/numbers.py --merge-stats "$STATS_TMP"
+  "$UV" run python scripts/pitch_numbers.py --merge-stats "$STATS_TMP"
   rm -f "$STATS_TMP"
   STATS_TMP=""
 else
@@ -125,7 +125,7 @@ else
 fi
 
 step "6/6 write the numbers sheet"
-"$UV" run python scripts/numbers.py
+"$UV" run python scripts/pitch_numbers.py
 
 log "SUNDAY READY"
 printf 'out/numbers.md\n'

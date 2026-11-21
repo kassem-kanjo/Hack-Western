@@ -1,4 +1,4 @@
-"""Prove scripts/numbers.py turns a snapshot into the sheet the pitch reads.
+"""Prove scripts/pitch_numbers.py turns a snapshot into the sheet the pitch reads.
 
 The fixture is deliberately tiny: only the fields the sheet reads, in the shapes the
 builders write. That keeps the test about the extraction rules (rounding like the UI,
@@ -13,11 +13,11 @@ import importlib.util
 import json
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "numbers.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "pitch_numbers.py"
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location("numbers", SCRIPT)
+    spec = importlib.util.spec_from_file_location("pitch_numbers", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
