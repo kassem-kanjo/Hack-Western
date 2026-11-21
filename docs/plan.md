@@ -28,6 +28,25 @@ Scoreboard: every claim has a validation number from a test we pre-declared.
 | Sun 06:00-08:30 | **M8 Submit** | final data refresh, snapshot, video, Devpost with tracks matching the live site, submit by 08:30 |
 | Sun 10:00 / 11:30 | Judging | QNX sponsor table (if Pi) · main demo fair |
 
+## UX principles (every screen, every level)
+1. **One question per screen.** Overview: "how much is suspicious, and how much is cleared?" Case/event:
+   "what happened, and what proves it?" Baltic: "what is happening right now?"
+2. **Eye path:** the big number top-left, then the map, then the one detail you clicked. Nothing competes.
+3. **Progressive disclosure:** summary first; numbers, sources and caveats one click deeper, never all at once.
+4. **Colour means something or it isn't there:** neutral greys for structure; amber gap, violet zone, blue
+   radar, pink meeting, red only for an alert. Never decoration.
+5. **Motion only to explain** (a lens growing, a ship jumping); off under reduced motion; no idle animation.
+6. **Plain words:** labels a non-expert understands at 1 m; jargon (prism, AUC) always paired with what it means.
+7. **Calm density:** generous spacing, at most ~7 items visible in a list, one primary action per view.
+
+## UI in levels (always shippable)
+| Level | What judges see | Issues | Done by |
+|---|---|---|---|
+| **UI V1 (guaranteed)** | Current console (overview, case file, evidence panel) + **Baltic screen** with vessel dots, event markers by kind, event list, click → event detail with the numbers; one nav bar across Global / Baltic / Edge; offline | #81, #82 | Sat 12:00 |
+| **UI V2 (target)** | **Presentation mode**: a guided 3-minute walkthrough (big captions, step through the demo-script beats, keyboard → / ←); **physics explainers** drawn on the map (silence: the lens growing; jump: required speed vs cap; clone: two clusters flipping; meeting: the two tracks converging); **replay slider** over the recorded window; smooth transitions; edge panel live | #83, #84, #85 | Sat 20:00 |
+| **UI V3 (stretch)** | Landing/explainer page for the live URL, 3D globe overview, animated intro for the video, phone-friendly read-only view | #86 | only if V2 is done by CP3 |
+Rule: never start a level before the previous one passes the screenshot gate and the 3:00 rehearsal.
+
 ## Never cut
 Validation numbers · global case file · Baltic kinematics with at least one real finding · offline snapshot ·
 rehearsed 3:00 script. **Cut order if behind:** satellite quicklooks → Entire → live SSE (keep replay) →
