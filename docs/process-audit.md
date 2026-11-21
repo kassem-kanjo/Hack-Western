@@ -43,3 +43,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 5:** ~100% DeepSeek.
 - **Rule breaks:** none.
 - **Change for next 30 min:** remaining build items need Kassem (story decision, Vultr, MLH codes, Pi), so the health loop drops to hourly overnight to save tokens; inputs for a worker always go into the worker's worktree (or the brief), never the main checkout.
+
+## Sat 21 Nov, 04:25 ET (audit 7, covers 02:51-04:40, overnight swarm)
+- **Went well:** two swarm waves (11 DeepSeek lanes) integrated by Chief with one commit per lane; every wave run on real recorded data before merge, which found 4 real problems (half-written gzip tail, global vs local coverage, 10-min clone window, 19k port "meetings") and 3 real findings (IMO-matched sanctioned ships in the Baltic, a cloned identity, a GNSS-spoofing ghost point 25 km inland from St Petersburg); Hormuz unseen fleet measured (typical day ~39% of radar-seen ships not broadcasting).
+- **Went wrong:** repeated the `exit`-inside-`until` shell bug once more; diffed worker patches against moved main once (fixed: diff against the worker's own HEAD); guessed a timestamp in a branch name; I put the spoofing wiring in two briefs at once (caught before dispatch).
+- **Code share since audit 6:** ~95% DeepSeek; Chief wrote the shared contract (tracks.py), the multi-region recorder, the gzip-tail fix.
+- **Rule breaks:** none new beyond the above.
+- **Change for next 30 min:** wait loops only via a function with `return` (never `exit`); before dispatch, grep all queued briefs for overlapping file paths.
