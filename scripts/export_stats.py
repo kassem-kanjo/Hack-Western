@@ -29,14 +29,10 @@ DEFAULT_DAYS = 30
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Write daily dark hours to data/snapshot/stats.json."
-    )
+    parser = argparse.ArgumentParser(description="Write daily dark hours to data/snapshot/stats.json.")
     parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help="size of the window in days")
     parser.add_argument("--start", type=date.fromisoformat, help="first UTC day, inclusive")
-    parser.add_argument(
-        "--end", type=date.fromisoformat, help="last UTC day, inclusive (default: today UTC)"
-    )
+    parser.add_argument("--end", type=date.fromisoformat, help="last UTC day, inclusive (default: today UTC)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="snapshot path")
     parser.add_argument(
         "--sqlite", type=Path, default=DEFAULT_SQLITE, help="SQLite file when no DATABASE_URL"

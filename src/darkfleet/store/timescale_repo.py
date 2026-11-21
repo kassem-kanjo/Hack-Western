@@ -337,10 +337,7 @@ class TimescaleRepo:
         if refresh:
             self._conn.execute(_REFRESH_RANGE, (start_ts, end_ts))
         rows = self._conn.execute(_DARK_HOURS_RANGE, (start_ts, end_ts)).fetchall()
-        return [
-            DarkHoursBucket(day=row[0], hours=float(row[1]), gaps=int(row[2]))
-            for row in rows
-        ]
+        return [DarkHoursBucket(day=row[0], hours=float(row[1]), gaps=int(row[2])) for row in rows]
 
     def close(self) -> None:
         self._conn.close()
