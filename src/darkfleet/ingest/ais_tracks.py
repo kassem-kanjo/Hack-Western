@@ -20,6 +20,7 @@ import gzip
 import heapq
 import json
 import re
+import zlib
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -242,11 +243,16 @@ def _parsed_file(path: Path, order: int) -> Iterator[tuple[datetime, int, int, P
     small arrival-order jitter the live socket leaves in the recording.
     """
     rows: list[tuple[datetime, int, Ping | VesselInfo]] = []
-    with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
-        for index, line in enumerate(handle):
-            obj = parse_line(line)
-            if obj is not None:
-                rows.append((_sort_key(obj), index, obj))
+    # The recorder appends to the current hour's file while we read it, so its tail is often a
+    # half-written deflate block. Keep every complete line before the break instead of failing.
+    try:
+        with gzip.open(path, "rt", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                obj = parse_line(line)
+                if obj is not None:
+                    rows.append((_sort_key(obj), index, obj))
+    except (EOFError, zlib.error, OSError):
+        pass
     rows.sort(key=lambda row: (row[0], row[1]))
     for t, index, obj in rows:
         yield t, order, index, obj
