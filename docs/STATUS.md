@@ -1,23 +1,24 @@
 # STATUS (live)
 
-Updated: Fri 20 Nov, ~11:45 PM ET · next checkpoint: CP1 briefing Sat 9 AM
+Updated: Sat 21 Nov, 00:24 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
 ## In flight
-- Builders: GFW client + store (#4, #6), region scan F4 (#20), edge unit (#7).
-- **Baltic AIS recorder running since Fri 23:18 ET** (`logs/record_baltic.log`, data in `data/cache/ais/`); must run until the demo. Laptop must stay awake and online.
+- #27 rescue test (Brownian bridge, pre-registered) on branch feat/validation-bb.
+- PRs in CI: #41 API (#10), #42 Tiger aggregate (#31), #43 offline basemap (#30), #44 validation (#27). All code by DeepSeek except the validation runner.
+- Baltic AIS recorder (hole 23:48-23:59 during commute); health + audit loop every 30 min.
 
-## Done
-- Scaffold (#1), research (#9), design (#8, Critic/Director pass pending), core prisms + matching (#2, #3; 18 tests).
+## Key results tonight
+- Re-rank (#28): of 109 radar-backed gaps, 90 ruled out with a reason, 19 unexplained.
+- Validation (#27): radar-in-prism does NOT beat chance (ratio 1.07, CI 0.91-1.25): prisms too large to be specific. Prism geometry itself is right (truth inside 96-100%).
+- **Decision for Kassem at 9 AM** if the bridge test also fails: story = "clear the false alarms with physics" vs "likelihood-ranked zone".
 
-## Next
-- Own gap detection from recorded AIS (#19) once a few hours of data exist.
-- M1: API + snapshot (#10), console (#11), scoring + sanctions (#12).
+## Done (merged)
+#1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
+#8 design · #9 research · #20 region scan (109 of 5,624 gaps with radar in prism) · #21 CI fix ·
+plan v2.1 after Opus Auditor review · #29 API schema frozen.
 
-## Pivots tonight (evidence in docs/feasibility-dark-fleet.md)
-- GFW publishes gaps only > 50 nm offshore → Baltic and Hormuz have ~0 gap events.
-- GFW per-vessel presence API is down (404 "temporarily unavailable") → can't rebuild history.
-- Plan: (1) Baltic = our own recorded AIS, our own gap detection, prisms, rendezvous, live;
-  (2) satellite view = unmatched SAR in Hormuz; (3) prism+SAR case from wherever the region scan finds overlap.
+## Key finding of the night
+Auditor showed the planned opener (CL YICHUN) fails our own physics → validation (#27) is the headline.
 
 ## Blocked / waiting on Kassem
 - Delete ~/Downloads/tiger-cloud-hack-western-credentials.env (plain-text password; copy now in .env).

@@ -10,11 +10,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import Protocol, TypedDict, overload
 
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
 
 __all__ = [
+    "DarkHoursBucket",
     "DarkHoursDay",
     "PositionRow",
     "Repository",
@@ -34,11 +35,19 @@ class PositionRow:
 
 @dataclass(frozen=True, slots=True)
 class DarkHoursDay:
-    """Aggregate of dark time for one UTC day."""
+    """Region-scoped daily aggregate (the original shape, kept for existing callers)."""
 
     day: date
     dark_hours: float
     gap_count: int
+
+
+class DarkHoursBucket(TypedDict):
+    """One UTC day of the fleet-wide dark-hours aggregate."""
+
+    day: date
+    hours: float
+    gaps: int
 
 
 class Repository(Protocol):
@@ -72,12 +81,31 @@ class Repository(Protocol):
         """SAR cells whose UTC day falls in ``[start, end]``, ordered by day, lat, lon."""
         ...
 
+    @overload
     def dark_hours_daily(self, region: str) -> list[DarkHoursDay]:
-        """One row per UTC day on which a gap *started*, ordered by day.
+        """One row per UTC day on which a gap *started*, for one region, ordered by day.
 
         ``dark_hours`` sums ``duration_hours`` for gaps starting that day and
         ``gap_count`` counts them. A gap is attributed to its start day only, even
         when it ends on a later day. Both backends follow this rule.
+        """
+        ...
+
+    @overload
+    def dark_hours_daily(
+        self,
+        start: date,
+        end: date,
+        *,
+        refresh: bool = False,
+    ) -> list[DarkHoursBucket]:
+        """Fleet-wide daily dark hours for gap start days in ``[start, end]``.
+
+        Returns one ``{"day", "hours", "gaps"}`` bucket per UTC day that had at least
+        one gap, ordered by day. ``hours`` sums ``duration_hours`` of gaps starting
+        that day and ``gaps`` counts them (a gap belongs to its start day only).
+        ``refresh=True`` asks the backend to bring the daily aggregate up to date for
+        the window before reading it; backends that compute on read ignore it.
         """
         ...
 

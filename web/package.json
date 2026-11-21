@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "make-land": "node scripts/make-land.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "9.1.14",
@@ -15,8 +16,10 @@
     "maplibre-gl": "6.16.0"
   },
   "devDependencies": {
+    "topojson-client": "3.1.0",
     "typescript": "5.8.3",
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "world-atlas": "2.0.2"
   },
   "engines": {
     "node": ">=22"

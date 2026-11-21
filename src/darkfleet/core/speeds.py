@@ -1,6 +1,8 @@
 """Maximum plausible vessel speeds.
 
-Source: docs/research.md (typical service speeds by vessel class). We add a 15% margin so the
+ASSUMED SERVICE SPEEDS, NO PRIMARY SOURCE FOUND. docs/research.md section 5 gives no sourced
+figure for these classes, so every speed in the table below is our own working assumption
+(issue #28), not a measured or published value. Each is multiplied by the 1.15 margin so the
 prism errs towards "could have been there"; a too-tight bound would hide real candidates.
 """
 
@@ -8,14 +10,15 @@ from __future__ import annotations
 
 MARGIN = 1.15
 _TABLE_KNOTS = {
-    "tanker": 17.0,
-    "cargo": 17.0,
-    "carrier": 17.0,
-    "other_non_fishing": 17.0,
-    "fishing": 14.0,
-    "passenger": 25.0,
+    "cargo": 14.0,
+    "bulk": 14.0,
+    "tanker": 15.0,
+    "fishing": 12.0,
+    "carrier": 15.0,
+    "passenger": 20.0,
+    "other_non_fishing": 14.0,
 }
-_DEFAULT_KNOTS = 18.0
+_DEFAULT_KNOTS = 14.0
 
 
 def max_speed_knots(vessel_type: str | None) -> float:

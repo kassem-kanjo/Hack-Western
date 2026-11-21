@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
-from .geo import GEOD, Fix, distance_km_array
+from .geo import GEOD, Fix, distance_km, distance_km_array
 from .prism import _reach_km, day_lens_polygon, footprint_polygon, is_consistent, lens_polygon
 
 Gap = tuple[Fix, Fix, float]
@@ -98,6 +98,43 @@ def candidate_sightings(
             continue
         out.append(Candidate(c, _slack(a, b, v_kn, c, step_minutes)))
     return out
+
+
+def verdict_at_scene(
+    a: Fix, b: Fix, v_kn: float, cell: SarCell, scene_time: datetime
+) -> tuple[bool, float, str]:
+    """Could the vessel have been inside `cell` at the instant `scene_time`?
+
+    Returns (inside, slack, reason). `inside` is True if the cell square (cell.size_deg wide, centred on
+    cell.lat/cell.lon) intersects lens_polygon(a, b, v_kn, scene_time). `slack` is in [0, 1]: 0 on the lens
+    edge or outside, 1 deep inside; it is the cell centre's margin to the lens boundary divided by the best
+    possible margin at that instant.
+    """
+    if not is_consistent(a, b, v_kn):
+        return (False, 0.0, "gap not consistent at this speed")
+    if not (a.t <= scene_time <= b.t):
+        return (False, 0.0, "scene time outside the gap")
+    lens = lens_polygon(a, b, v_kn, scene_time)
+    if lens.is_empty:
+        return (False, 0.0, "no lens at scene time")
+    h = cell.size_deg / 2.0
+    square = box(cell.lon - h, cell.lat - h, cell.lon + h, cell.lat + h)
+    if not lens.intersects(square):
+        return (False, 0.0, "outside lens at scene time")
+    r1 = _reach_km(v_kn, (scene_time - a.t).total_seconds())
+    r2 = _reach_km(v_kn, (b.t - scene_time).total_seconds())
+    da = distance_km(a.lat, a.lon, cell.lat, cell.lon)
+    db = distance_km(cell.lat, cell.lon, b.lat, b.lon)
+    d_ab = distance_km(a.lat, a.lon, b.lat, b.lon)
+    margin = min(r1 - da, r2 - db)
+    best = (r1 + r2 - d_ab) / 2.0
+    if best <= 1e-9:
+        slack = 1.0 if margin >= -1e-6 else 0.0
+    else:
+        slack = max(0.0, min(1.0, margin / best))
+    if slack == 0.0:
+        return (True, slack, "inside lens at scene time, on its edge")
+    return (True, slack, "inside lens at scene time")
 
 
 def _area_km2(poly) -> float:

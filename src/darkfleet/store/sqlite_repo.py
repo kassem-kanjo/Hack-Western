@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursDay, PositionRow
+from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
 
 __all__ = ["SqliteRepo"]
 
@@ -175,12 +175,24 @@ ON CONFLICT(mmsi, ts) DO UPDATE SET
     sog = excluded.sog
 """
 
-_DARK_HOURS = """
+_DARK_HOURS_BY_REGION = """
 SELECT substr(start_ts, 1, 10) AS day,
        SUM(duration_hours) AS dark_hours,
        COUNT(*) AS gap_count
 FROM gap_events
 WHERE region = ?
+GROUP BY day
+ORDER BY day
+"""
+
+# Gap start days in [start, end], fleet-wide. start_ts is stored as UTC ISO-8601, so the
+# half-open string range on the leading timestamp prefix is an index-friendly day filter.
+_DARK_HOURS_RANGE = """
+SELECT date(start_ts) AS day,
+       SUM(duration_hours) AS hours,
+       COUNT(*) AS gaps
+FROM gap_events
+WHERE start_ts >= ? AND start_ts < ?
 GROUP BY day
 ORDER BY day
 """
@@ -354,13 +366,39 @@ class SqliteRepo:
             for row in rows
         ]
 
-    def dark_hours_daily(self, region: str) -> list[DarkHoursDay]:
-        rows = self._conn.execute(_DARK_HOURS, (region,)).fetchall()
+    def dark_hours_daily(
+        self,
+        start: date | str,
+        end: date | None = None,
+        *,
+        refresh: bool = False,
+    ) -> list[DarkHoursDay] | list[DarkHoursBucket]:
+        """Daily dark hours. ``dark_hours_daily(region)`` keeps the region-scoped shape;
+        ``dark_hours_daily(start, end)`` returns fleet-wide ``{day, hours, gaps}`` buckets.
+
+        SQLite answers from the rows themselves, so ``refresh`` is accepted and ignored.
+        """
+        if isinstance(start, str):
+            if end is not None:
+                raise TypeError("dark_hours_daily(region) takes no end date")
+            rows = self._conn.execute(_DARK_HOURS_BY_REGION, (start,)).fetchall()
+            return [
+                DarkHoursDay(
+                    day=date.fromisoformat(row[0]),
+                    dark_hours=float(row[1]),
+                    gap_count=int(row[2]),
+                )
+                for row in rows
+            ]
+
+        if end is None:
+            raise TypeError("dark_hours_daily(start, end) needs both dates")
+        rows = self._conn.execute(_DARK_HOURS_RANGE, (start.isoformat(), _day_after(end))).fetchall()
         return [
-            DarkHoursDay(
+            DarkHoursBucket(
                 day=date.fromisoformat(row[0]),
-                dark_hours=float(row[1]),
-                gap_count=int(row[2]),
+                hours=float(row[1]),
+                gaps=int(row[2]),
             )
             for row in rows
         ]
