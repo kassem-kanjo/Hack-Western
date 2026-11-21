@@ -1,0 +1,21 @@
+[Unit]
+Description=Dark Fleet watch snapshot builder (live alerts, rebuilt every 60s)
+Documentation=https://github.com/kassem-kanjo/Hack-Western
+After=network-online.target darkfleet-recorder.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=darkfleet
+Group=darkfleet
+WorkingDirectory=/opt/darkfleet
+# Reads the recorder's gzipped AIS files and rewrites the JSON the API serves from
+# /opt/darkfleet/data/snapshot. No network access of its own.
+ExecStart=/opt/darkfleet/.venv/bin/python scripts/build_watch.py --loop 60 --ais /opt/darkfleet/data/ais --out /opt/darkfleet/data/snapshot
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

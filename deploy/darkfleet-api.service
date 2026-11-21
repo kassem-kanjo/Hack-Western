@@ -13,6 +13,9 @@ WorkingDirectory=/opt/darkfleet
 Environment=DARKFLEET_WEB_DIST=/opt/darkfleet/web/dist
 Environment=DARKFLEET_DATA=/opt/darkfleet/data/snapshot
 Environment=DARKFLEET_AIS_DIR=/opt/darkfleet/data/ais
+# Public deployment: hides /docs and the demo controls. EDGE_DEMO_CONTROLS is deliberately
+# left unset here; setting it would re-enable those controls in production.
+Environment=DARKFLEET_PUBLIC=1
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/darkfleet/.venv/bin/uvicorn darkfleet.api.app:app --host 127.0.0.1 --port 8000
 Restart=always
