@@ -4,9 +4,9 @@ Runs on the Pi::
 
     python -m darkfleet.edge.status_http --status ~/darkfleet/edge_status.json --port 7071
 
-Only ``GET /edge_status.json`` is served, straight from the file the supervisor
-writes (which it replaces atomically). There are no CORS headers and no write
-paths: the browser never talks to the Pi, ``api/edge.py`` does.
+``GET /edge_status.json`` and ``GET /latest.jpg`` are served straight from files the
+supervisor and detector replace atomically. There are no CORS headers and no write paths:
+the browser never talks to the Pi, ``api/edge.py`` does.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 STATUS_PATH = "/edge_status.json"
+FRAME_PATH = "/latest.jpg"
+LATEST_FRAME_NAME = "latest.jpg"
 _NOT_FOUND = 404
 _UNAVAILABLE = 503
 
@@ -30,6 +32,8 @@ class _StatusServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], status_path: Path) -> None:
         super().__init__(address, _StatusHandler)
         self.status_path = status_path
+        # A fixed sibling path, never derived from the request: this server stays read-only.
+        self.latest_path = status_path.parent / LATEST_FRAME_NAME
 
 
 class _StatusHandler(BaseHTTPRequestHandler):
@@ -42,20 +46,37 @@ class _StatusHandler(BaseHTTPRequestHandler):
         self._reply(send_body=False)
 
     def _reply(self, send_body: bool) -> None:
-        if self.path.split("?", 1)[0] != STATUS_PATH:
+        route = self.path.split("?", 1)[0]
+        if route == STATUS_PATH:
+            self._serve_status(send_body)
+        elif route == FRAME_PATH:
+            self._serve_frame(send_body)
+        else:
             self._send(_NOT_FOUND, b'{"error":"not found"}', send_body)
-            return
+
+    def _serve_status(self, send_body: bool) -> None:
         try:
             body = self.server.status_path.read_bytes()  # type: ignore[attr-defined]
             json.loads(body)  # a half-written file must not look like fresh status
         except (OSError, ValueError):
             self._send(_UNAVAILABLE, b'{"error":"status unavailable"}', send_body)
             return
-        self._send(200, body, send_body)
+        self._send(200, body, send_body, "application/json")
 
-    def _send(self, code: int, body: bytes, send_body: bool) -> None:
+    def _serve_frame(self, send_body: bool) -> None:
+        try:
+            body = self.server.latest_path.read_bytes()  # type: ignore[attr-defined]
+        except OSError:
+            self._send(_NOT_FOUND, b'{"error":"no frame"}', send_body)
+            return
+        if not body:
+            self._send(_NOT_FOUND, b'{"error":"no frame"}', send_body)
+            return
+        self._send(200, body, send_body, "image/jpeg")
+
+    def _send(self, code: int, body: bytes, send_body: bool, content_type: str = "application/json") -> None:
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()

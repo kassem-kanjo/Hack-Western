@@ -32,6 +32,8 @@ _POLL_S = 0.1
 _STARTUP_WAIT_S = 5.0
 _STOP_GRACE_S = 2.0
 _EVENTS_KEEP = 20
+_CONTROL_DIR = "control"
+_KILL_FILE = "kill_detector"
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,10 @@ class SupervisorConfig:
     @property
     def alerts_path(self) -> str:
         return os.path.join(self.state_dir, "alerts.jsonl")
+
+    @property
+    def kill_signal_path(self) -> str:
+        return os.path.join(self.state_dir, _CONTROL_DIR, _KILL_FILE)
 
 
 @dataclass
@@ -164,6 +170,8 @@ class Supervisor:
             cfg.source,
             "--socket",
             cfg.socket_path,
+            "--state-dir",
+            cfg.state_dir,
             "--fps",
             str(cfg.fps),
         ]
@@ -188,6 +196,8 @@ class Supervisor:
         """One watchdog turn. Restarts are scheduled, not slept, so status keeps updating."""
         now = time.monotonic()
         now_wall = time.time()
+
+        self._check_operator_kill()
 
         # The safety core is trusted and simple; if it dies, bring it back and say so.
         if self.safety.proc is not None and self.safety.proc.poll() is not None:
@@ -235,6 +245,22 @@ class Supervisor:
                 self.stats.recovery_ms_history.append(self.stats.last_recovery_ms)
                 self._event("detector recovered", recovery_ms=self.stats.last_recovery_ms)
                 self._death_wall = None
+
+    def _check_operator_kill(self) -> None:
+        """Consume the operator's kill file; the normal restart + recovery path then applies."""
+        path = self.config.kill_signal_path
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            return
+        except OSError:
+            return
+        proc = self.detector.proc
+        if proc is None or proc.poll() is not None:
+            return
+        proc.kill()
+        proc.wait()
+        self._event("detector killed by operator")
 
     def _silent_for(self, now_wall: float) -> float:
         """Seconds since the detector last sent anything, counting from its own start."""
