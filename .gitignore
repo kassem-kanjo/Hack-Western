@@ -20,6 +20,7 @@ data/cache/
 # agent scratch
 .worktrees/
 logs/
+out/
 data/models
 data/cases/
 data/snapshot/
