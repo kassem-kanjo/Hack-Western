@@ -92,3 +92,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 12:** 100% DeepSeek (Chief: runs, review, issue hygiene).
 - **Rule breaks:** none shipped; the absolute path was caught before commit.
 - **Change for next 30 min:** before closing an issue, open its output and read the result line, not just check the file exists; print summaries with explicit field picks, never whole objects. Lanes: w14-empty (Black Sea empty state), w14-hchart (Hormuz chart on phones), w14-recall.
+
+## Sat 21 Nov, 10:50 ET (audit 14, covers 10:30-10:50)
+- **Went well:** a scary number (silence recall 8.4%) was traced to its cause instead of being hidden or "fixed": scope (only underway ships) took it to 51.8%, and a diagnosis script showed every remaining miss sat inside our own recorder outages (55/55 where receivers were up). Became insight #15, a README line and thought piece #2 (lane running). README got a hero image from the demo video.
+- **Went wrong:** I typed "86 vessel-days" into the README from memory of an earlier run; the committed run says 87.1. Caught on a re-read, fixed in #151.
+- **Code share since audit 13:** ~85% DeepSeek; Chief: in-scope recall split (small core change), README words, insight #15.
+- **Rule breaks:** a number written from memory (fixed before anyone saw it).
+- **Change for next 30 min:** numbers in public docs are pasted from the generated file in the same command that edits the doc, never retyped.
