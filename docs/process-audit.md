@@ -106,3 +106,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 14:** ~95% DeepSeek; Chief: two-line edit to the piece, README figure fix.
 - **Rule breaks:** none.
 - **Change for next 30 min:** w17 builds `make sunday` (rebuild, Tiger refresh, validation, demo-check, generated numbers sheet) so Sunday's numbers are pasted, not retyped. Product scope for V2 is done; remaining lanes are polish or gated on Kassem, so I am spending fewer tokens per cycle until CP3 (15:00).
+
+## Sat 21 Nov, 11:50 ET (audit 16, covers 11:25-11:50)
+- **Went well:** `make sunday` merged (#155) after checking its numbers sheet against every public figure (all match) and its .env handling (never echoed); a home-path leak through a symlinked data folder was caught and fixed in review.
+- **Went wrong:** nothing shipped wrong. Still no reply from Kassem since the 08:50 briefing; QNX Pi cut-off is 12:00.
+- **Code share since audit 15:** ~95% DeepSeek; Chief: path-display fix.
+- **Rule breaks:** none.
+- **Change for next 30 min:** at the 12:20 check, if no Pi: write decision 0003 (drop the hardware demo, keep the Patrol software tab and the QNX path as roadmap) and close #36 as not planned. No new lanes until CP3 (15:00) unless Kassem replies: V2 scope is done and tokens are scarce.
