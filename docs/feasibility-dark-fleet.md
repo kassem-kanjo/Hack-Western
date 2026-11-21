@@ -44,3 +44,15 @@
 | F6 storage | **PASS** | Tiger Cloud service up: TimescaleDB 2.32.1 on PostgreSQL 18.7 (trial, $1,000 credit, no card). |
 
 **Decision (Chief, Fri 23:55): live layer = Baltic / Danish-straits watchlist** (591 vessels/min coverage): track sanctioned tankers live and alert when one goes silent. Investigation (satellite + prisms) stays in Hormuz. Same shadow fleet, two theatres.
+
+## Live coverage check, first hour of the six-region recorder (Sat 03:51-04:55 ET)
+| Region | Messages | Positions | Unique vessels | Msgs/min | Verdict |
+|---|---|---|---|---|---|
+| Baltic | 46,861 | 26,236 | 3,465 | 732 | Strong: all detectors |
+| Malaysia EOPL | 3,069 | 2,420 | 668 | 50 | Usable: watchlist (IMO), ship-to-ship meetings; silences only with local coverage |
+| Black Sea | 1,276 | 959 | 156 | 21 | Thin: watchlist only |
+| Hormuz | 65 | 62 | 16 | 1.5 | **Not usable live** (~4 positions per ship per hour) |
+| Laconia, Red Sea | 0 | 0 | 0 | 0 | None |
+
+**Decision (Chief):** Hormuz stays the lead story on satellite radar + GFW history (Decision 0002 fallback);
+live detection runs on the Baltic and Malaysia EOPL. Recorder keeps all six regions in case coverage changes.
