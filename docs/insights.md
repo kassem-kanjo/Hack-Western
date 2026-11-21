@@ -37,3 +37,13 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     matches an OFAC SDN entry by name and hull number, but GFW's registry has no IMO for its MMSI and shows it
     once broadcast as "60658". Why it matters: screening tools that match on names flood analysts; ours
     separates strong from weak matches and says when identity is unconfirmed.
+11. **GPS spoofing shows up as a shared impossible point.** In 5.5 h of our own Baltic recording, five unrelated
+    ships each "jumped" 49 km from their real route to the same point on land near St Petersburg and back. A
+    first, naive rule (many ships at one point) flagged 784 places, almost all ports; the physics rule (an
+    impossible jump in AND out) left exactly one. Why it matters: GNSS interference is a navigation-safety
+    problem in the Baltic, and the right test is kinematic, not statistical.
+12. **Our clone detector was fooled by spoofing, and physics caught it.** Two "cloned identities" turned out to
+    flip between their real track and the spoof point. Folding them into the spoof event made the claim
+    narrower and truer.
+13. **Robust numbers change the headline.** Hormuz "not broadcasting" share: mean 51% with thin days, median 41%
+    over well-covered days. We publish the median and say which 25 days we dropped and why.
