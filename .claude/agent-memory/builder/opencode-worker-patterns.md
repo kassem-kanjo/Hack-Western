@@ -26,3 +26,8 @@ Delegating to `opencode-go/deepseek-v4.1-flash` via `delegate.sh` worked for bot
 - Use `git apply --include=<path>` when one patch carries an extra file you do not want yet.
 - A foreground `sleep` longer than a few seconds is blocked by the harness. Wait with `run_in_background` plus an until-loop, and read the notification.
 - Never call SubagentHandback mid-pipeline: it ends the run. Only hand back when every DoD item is done.
+
+## Third run: validation stats (#27, 2026-11-21)
+- deepseek-v4.1-flash did a pure-stats module + 16 tests (133 s) and a report renderer (~5 min) cleanly, both check exit 0. Give the second piece a scratch file and paste it in when the target file has a single writer.
+- `multiprocessing` fork Pool hung silently on macOS (a worker died on a GEOS TopologyException; pool.map waits forever). Use spawn + initializer, and wrap core prism calls in try/except GEOSException with a different `step_minutes`.
+- GFW 4Wings SAR `group-by=VESSEL_ID/MMSI` returned 404 "temporarily unavailable" on 2026-11-20; no detection-to-vessel attribution.
