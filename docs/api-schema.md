@@ -7,9 +7,16 @@ Changing a field after this point needs a PR that updates this file, the fixture
 ## GET /api/cases?limit=50&status=candidate|ruled_out|all
 ```json
 { "generated_at": "2026-11-21T06:00:00Z",
-  "totals": { "gaps_scanned": 5624, "with_candidates": 109, "ruled_out": 0, "meetings": 0 },
+  "totals": { "gaps_scanned": 5624, "with_candidates": 109, "ruled_out": 90, "candidates_final": 19,
+              "meetings": 0,
+              "funnel": [ { "stage": "scanned", "label": "Gaps scanned", "count": 5624 },
+                          { "stage": "radar", "label": "Radar inside prism", "count": 109 },
+                          { "stage": "unexplained", "label": "Unexplained after physics checks", "count": 19 } ] },
   "cases": [ CaseSummary, ... ] }
 ```
+`totals.candidates_final`: gaps whose status is `candidate` after the physics checks (19); `with_candidates` stays
+the 109 radar-backed baseline before the filters. `totals.funnel` is the ordered three-step funnel the UI prints
+above the case list, each entry carrying a stable `stage`, a display `label` and a computed `count`.
 `CaseSummary`:
 ```json
 { "id": "gap:<gfw event id>", "vessel": { "name": "CL YICHUN", "mmsi": "538...", "flag": "MHL", "type": "cargo" },
