@@ -71,3 +71,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 9:** ~90% DeepSeek; Chief: README fact-check edits, briefing, integration.
 - **Rule breaks:** merge before green CI (once).
 - **Change for next 30 min:** merge only after `gh run watch <id> --exit-status` returns 0 for the PR's run; never copy into the main checkout (worktrees only). Follow-up from the gate: #138 (replay chips should follow the playhead).
+
+## Sat 21 Nov, 09:21 ET (audit 11, covers 08:55-09:21)
+- **Went well:** health all green (recorder: Baltic ~3,800 msgs/5 min, EOPL ~265, Black Sea ~80); idle capacity spotted and filled at once with 4 DeepSeek lanes on disjoint files: #138 replay chips, #86 phone view, #15 deploy kit (ready before Kassem's Vultr sign-up), #18 Devpost draft.
+- **Went wrong:** the lane waiter died on a zsh glob with no match, and I read lane output at the wrong depth (delegate.sh nests `--out` as out/<name>/<name>). Caught in one cycle; waiter now runs under bash with `grep -s`.
+- **Code share since audit 10:** 100% DeepSeek (Chief: briefs only).
+- **Rule breaks:** none.
+- **Change for next 30 min:** wait loops run under `bash -c` (no zsh glob errors); Devpost draft gets a Comms-style fact pass by Chief before merge (numbers only from README/docs).
