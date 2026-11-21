@@ -12,10 +12,11 @@
  * address bar.
  *
  * Replay (#85) is time travel V1: the strip's axis becomes a scrubber over the
- * recorded window and `t` gates the events the map, the hero number and the
- * rail show. The snapshot has event start/end times and vessel last positions
- * only, so replay moves the findings clock, not the ships: no invented track
- * between fixes. Leaving replay restores the live view from the same data.
+ * recorded window and `t` gates the events the map, the hero number, the kind
+ * chips and the rail show. The snapshot has event start/end times and vessel
+ * last positions only, so replay moves the findings clock, not the ships: no
+ * invented track between fixes. Leaving replay restores the live view from the
+ * same data.
  */
 
 import "../styles/live.css";
@@ -35,6 +36,7 @@ import {
   KIND_LABEL,
   eventsOfKinds,
   fmtCoverage,
+  kindCounts,
   rankRows,
   snapshotNow,
   sortEvents,
@@ -201,19 +203,6 @@ function kindGlyph(kind: EventKind): SVGSVGElement {
   return glyph;
 }
 
-/** Chip counts come from every event, not from the filtered view, so a chip never lies. */
-function kindCounts(events: LiveEvent[]): Record<EventKind, number> {
-  const counts: Record<EventKind, number> = {
-    silence: 0,
-    jump: 0,
-    clone: 0,
-    meeting: 0,
-    spoof: 0,
-  };
-  for (const event of events) counts[event.kind] += 1;
-  return counts;
-}
-
 /**
  * Paint the Live screen into `app`.
  *
@@ -281,14 +270,13 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     const label = regionLabel(region);
     const hours = windowHours(summary.window);
     const recorded = new Set(regions.map((entry) => entry.region));
-    const counts = kindCounts(all);
 
     // ---- replay clock ----
     //
     // V1 time travel moves one cursor, `t`, across the recorded window. Every
     // view derives from it: the map draws events with start <= t, the hero
-    // counts them, the rail ranks them. The window comes from the summary, so a
-    // different snapshot needs no code change.
+    // counts them, the chips count them per kind, the rail ranks them. The
+    // window comes from the summary, so a different snapshot needs no code change.
     const windowStartMs = Date.parse(summary.window.start);
     const windowEndMs = Date.parse(summary.window.end);
     const windowSpanMs = windowEndMs - windowStartMs;
@@ -544,10 +532,49 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       }
     }
 
+    /**
+     * Each chip's live count node and button, so the replay clock can refresh the
+     * numbers every frame without rebuilding the row of controls (and its
+     * listeners). Keyed by kind, which is unique on the chip row.
+     */
+    const chipParts = new Map<EventKind, { button: HTMLButtonElement; count: HTMLSpanElement }>();
+    /** Last painted counts, so a frame that reached no new event touches no DOM. */
+    let chipSignature = "";
+
+    /**
+     * Paint one chip's count. A zero at the cursor is still a filter worth
+     * offering, so the chip stays visible and clickable; it just takes the same
+     * 0.45 the stylesheet gives an off chip (this brief owns no stylesheet, and
+     * `.live-chip[aria-pressed="false"]` is the existing quiet state).
+     */
+    function paintChip(kind: EventKind, count: number): void {
+      const parts = chipParts.get(kind);
+      if (parts === undefined) return;
+      parts.count.textContent = String(count);
+      parts.button.style.opacity = count === 0 ? "0.45" : "";
+    }
+
+    /**
+     * Re-count the chips from the set the list ranks: everything the clock has
+     * reached, before the pressed-kind filter. `filtered` is that same set
+     * narrowed by the chips, so with every chip on the counts add up to the list
+     * and a chip can never advertise an event the list cannot show.
+     */
+    function refreshChipCounts(): void {
+      const counts = kindCounts(upToNow());
+      const signature = EVENT_KINDS.map((kind) => counts[kind]).join(",");
+      if (signature === chipSignature) return;
+      chipSignature = signature;
+      for (const kind of EVENT_KINDS) paintChip(kind, counts[kind]);
+    }
+
     function renderChips(): void {
       chips.replaceChildren();
+      chipParts.clear();
+      const counts = kindCounts(upToNow());
       for (const kind of EVENT_KINDS) {
         const on = active.has(kind);
+        const count = h("span", { class: "live-chip-count" }, String(counts[kind]));
         const chip = h(
           "button",
           {
@@ -557,11 +584,14 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
           },
           kindGlyph(kind),
           KIND_LABEL[kind],
-          h("span", { class: "live-chip-count" }, String(counts[kind])),
+          count,
         );
         chip.addEventListener("click", () => toggleKind(kind));
+        chipParts.set(kind, { button: chip, count });
         chips.append(chip);
       }
+      chipSignature = EVENT_KINDS.map((kind) => counts[kind]).join(",");
+      for (const kind of EVENT_KINDS) paintChip(kind, counts[kind]);
     }
 
     function renderRows(): void {
@@ -795,13 +825,14 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
 
     /**
      * Re-derive every time-dependent view from `t`. Only the rail re-renders
-     * when the visible set changed; the ticks just dim, which is what keeps a
-     * 60 fps scrub calm.
+     * when the visible set changed; the chips only re-number and the ticks only
+     * dim, which is what keeps a 60 fps scrub calm.
      */
     function applyTime(): void {
       const before = filtered.length;
       filtered = eventsOfKinds(upToNow(), active);
       updateHero();
+      refreshChipCounts();
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
       // The visible set is monotone in t, so an unchanged count means the same
       // rows; re-rendering them every frame would only cost layout.
@@ -914,6 +945,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       replayControls.slider.remove();
       filtered = eventsOfKinds(upToNow(), active);
       updateHero();
+      refreshChipCounts();
       renderRows();
       renderTicks();
       updateScrub();

@@ -1,0 +1,21 @@
+# Reverse proxy for Dark Fleet. The app itself listens only on 127.0.0.1:8000.
+# provision.sh replaces the site address below with DOMAIN (HTTPS via Let's Encrypt),
+# or with :80 for plain IP access.
+{$DOMAIN::80} {
+	encode zstd gzip
+
+	# SSE: never buffer or time out a long-lived live stream.
+	@stream {
+		# The concrete route is repeated in case the wildcard is read segment-wise.
+		path /api/*stream* /api/live/*/stream
+	}
+	handle @stream {
+		reverse_proxy 127.0.0.1:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
+}

@@ -44,6 +44,27 @@ export function eventsOfKinds(events: LiveEvent[], kinds: ReadonlySet<EventKind>
   return events.filter((event) => kinds.has(event.kind));
 }
 
+/**
+ * How many findings of each kind are in one event set.
+ *
+ * The kind chips and the ranked list must both derive from the same set — the
+ * events the replay clock has reached, before the kind filter — so their
+ * numbers can never describe different moments. With every chip on, these
+ * counts add up to the list's size; pick one kind and its chip count is exactly
+ * the number of rows the list would show for that kind.
+ */
+export function kindCounts(events: readonly LiveEvent[]): Record<EventKind, number> {
+  const counts: Record<EventKind, number> = {
+    silence: 0,
+    jump: 0,
+    clone: 0,
+    meeting: 0,
+    spoof: 0,
+  };
+  for (const event of events) counts[event.kind] += 1;
+  return counts;
+}
+
 /** Trims the list to what the panel can show, so the biggest findings are the ones kept. */
 export function rankRows(events: LiveEvent[], max = 7): LiveEvent[] {
   return events.slice(0, max);

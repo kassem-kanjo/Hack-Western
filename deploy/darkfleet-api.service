@@ -1,0 +1,24 @@
+[Unit]
+Description=Dark Fleet API and web console
+Documentation=https://github.com/kassem-kanjo/Hack-Western
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=darkfleet
+Group=darkfleet
+WorkingDirectory=/opt/darkfleet
+# Serve the built SPA and the API from one process on one port (behind Caddy).
+Environment=DARKFLEET_WEB_DIST=/opt/darkfleet/web/dist
+Environment=DARKFLEET_DATA=/opt/darkfleet/data/snapshot
+Environment=DARKFLEET_AIS_DIR=/opt/darkfleet/data/ais
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/darkfleet/.venv/bin/uvicorn darkfleet.api.app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
