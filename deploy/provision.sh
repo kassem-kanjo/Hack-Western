@@ -103,6 +103,7 @@ echo "==> Building the web console"
 echo "==> Installing systemd units"
 install -m 644 "$SCRIPT_DIR/darkfleet-api.service" /etc/systemd/system/darkfleet-api.service
 install -m 644 "$SCRIPT_DIR/darkfleet-recorder.service" /etc/systemd/system/darkfleet-recorder.service
+install -m 644 "$SCRIPT_DIR/darkfleet-watch.service" /etc/systemd/system/darkfleet-watch.service
 systemctl daemon-reload
 
 echo "==> Configuring Caddy"
@@ -118,11 +119,12 @@ systemctl reload caddy 2>/dev/null || systemctl restart caddy
 echo "==> Starting services"
 systemctl enable --now darkfleet-api.service
 systemctl enable --now darkfleet-recorder.service
-systemctl restart darkfleet-api.service darkfleet-recorder.service
+systemctl enable --now darkfleet-watch.service
+systemctl restart darkfleet-api.service darkfleet-recorder.service darkfleet-watch.service
 
 echo
 echo "Done."
 echo "  App:      http://${DOMAIN:-<this-ip>}/"
 echo "  API:      curl -s http://127.0.0.1:8000/api/health"
-echo "  Logs:     journalctl -u darkfleet-api -f   /   journalctl -u darkfleet-recorder -f"
-echo "  Snapshot: rsync -av data/snapshot/ root@<ip>:/opt/darkfleet/data/snapshot/"
+echo "  Logs:     journalctl -u darkfleet-api -f   /   journalctl -u darkfleet-recorder -f   /   journalctl -u darkfleet-watch -f"
+echo "  Snapshot: deploy/sync-data.sh root@<ip>   (run from the laptop repo root)"
