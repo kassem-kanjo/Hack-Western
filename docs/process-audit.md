@@ -148,3 +148,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 20:** ~85% DeepSeek; Chief: QNX priority/grace fixes, qnxcam.c, Pi deploy/test, app import fix, integration.
 - **Rule breaks:** an unverified number in a user-facing widget (corrected in the same reply).
 - **Change for next 30 min:** every lane that adds a launcher or app gets one real launch before merge, not only mocked tests; numbers in widgets come from a command run in the same turn. CP3 (Opus review) moves to after V2 QA so it reviews the final V2.
+
+## Sat 21 Nov, 15:51 ET (audit 22, covers 15:35-15:51)
+- **Went well:** Kassem's live use of the app exposed what tests and screenshots missed (Hormuz empty, radar alert dead on click, "191 in reach / none listed" contradiction, static dots, an old build in his app). Response: Opus external auditor + two Sonnet builders (Watch/Hormuz/live motion/Palantir look; Pi end-to-end) + five DeepSeek feature lanes on issues #182-#186, each on its own branch (Kassem: "use GitHub properly").
+- **Went wrong:** I verified code paths, not the product as a user experiences it: I never clicked the Hormuz alert myself before calling V2 near done. The desktop app kept serving an old web build after merges.
+- **Code share since audit 21:** builders/lanes ~95%; Chief: orchestration, merges (#181), stack restarts.
+- **Rule breaks:** none new; declined to label days-old radar as "live" (kept honest, made it feel alive with a time-lapse instead).
+- **Change for next 30 min:** after every merge that touches the web app, rebuild web/dist and reload the running app; before saying "done", click every alert type and every area as a judge would.
