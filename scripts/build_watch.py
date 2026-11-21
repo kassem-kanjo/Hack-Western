@@ -1124,6 +1124,9 @@ def _ships(
                 "lon": last.lon,
                 "t": _iso(last.t),
                 "sog": last.sog,
+                # Last known course in degrees, null when the hull sent none. The map turns a
+                # chevron by it; a stopped or course-less hull is drawn as a dot.
+                "cog": last.cog,
                 "class": ship_class(info.ship_type if info else None),
                 "watchlist": categories.get(mmsi),
                 "alert_ids": alert_ids.get(mmsi, []),

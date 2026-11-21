@@ -1,0 +1,183 @@
+/* Dark Fleet console tokens, V2 ("instrument"). Drop-in replacement for web/src/styles/tokens.css.
+   Rule of the system: colour means state. Chrome is grey; the only saturated pixels on screen are
+   ships and events that need a decision. Interaction (selection, focus, primary button) is ice-white,
+   never a hue, so it can't be confused with a state.
+   Contrast (WCAG 2.x) on --surface-1 #121920: text-1 14.9, text-2 8.6, text-3 6.0 (4.8 on surface-sel); every --st-* >= 5.7 (>= 4.5 on surface-3).
+   Legacy aliases at the bottom keep existing CSS compiling while files migrate. */
+
+@import "@fontsource/ibm-plex-sans/300.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+:root {
+  color-scheme: dark;
+
+  /* ---- surfaces: one canvas + three elevations. Elevation = lighter + hairline + (3 only) shadow */
+  --surface-0: #0C1218;   /* map sea, video well: the canvas */
+  --surface-1: #121920;   /* docked chrome: top bar, rails, status bar */
+  --surface-2: #18212A;   /* raised: section headers, hover, panels floating on the map */
+  --surface-3: #1F2933;   /* overlay: popovers, tooltips, toasts, menus */
+  --surface-sel: #212C38; /* selected row / active segment */
+
+  /* ---- map */
+  --map-sea:       var(--surface-0);
+  --map-land:      #19222C;
+  --map-coast:     #2B3744;
+  --map-graticule: rgba(150, 172, 196, 0.07);
+  --map-grat-label:#5B6876;
+  --map-area:      rgba(201, 214, 227, 0.22);  /* watched-area outline, dashed */
+
+  /* ---- lines: alpha so one value works on every surface */
+  --line-1: rgba(150, 172, 196, 0.12);  /* hairline: dividers, panel edges */
+  --line-2: rgba(150, 172, 196, 0.20);  /* control borders, table header rule */
+  --line-3: rgba(150, 172, 196, 0.34);  /* hover border, strong rule */
+  --edge-hi: inset 0 1px 0 rgba(255, 255, 255, 0.035); /* top highlight on raised surfaces */
+
+  /* ---- text */
+  --text-1: #E6ECF2;  /* primary, names, key numbers */
+  --text-2: #A9B6C3;  /* body, values */
+  --text-3: #8A98A6;  /* labels, axis, captions (AA on surface-1/2) */
+  --text-4: #56626F;  /* disabled, decorative ticks only: never for information */
+
+  /* ---- interaction: ice, not a hue */
+  --accent:        #DDE6EF;  /* selection edge, focus ring, primary button fill */
+  --accent-ink:    #0C1218;  /* text on accent */
+  --accent-weak:   rgba(221, 230, 239, 0.08);
+
+  /* ---- state colours: the only hues in the product. Each has a weak fill for chips/bands */
+  --st-dark:        #F0A33A;  --st-dark-weak:        rgba(240, 163, 58, 0.14);   /* AIS off: went dark */
+  --st-sanctioned:  #F26457;  --st-sanctioned-weak:  rgba(242, 100, 87, 0.14);   /* on a sanctions list (IMO match) */
+  --st-spoof:       #B591FF;  --st-spoof-weak:       rgba(181, 145, 255, 0.14);  /* false position broadcast */
+  --st-radar:       #56B3EA;  --st-radar-weak:       rgba(86, 179, 234, 0.14);   /* seen by radar, not broadcasting */
+  --st-ok:          #46C486;  --st-ok-weak:          rgba(70, 196, 134, 0.14);   /* live, healthy, cleared */
+  --st-degraded:    #E3B341;  --st-degraded-weak:    rgba(227, 179, 65, 0.14);   /* partial data, AI restarting */
+  --st-error:       var(--st-sanctioned);
+
+  /* ---- geometry on the map */
+  --geo-vessel:      #8797A9;              /* every broadcasting ship: neutral */
+  --geo-vessel-dim:  rgba(135, 151, 169, 0.45);
+  --geo-track:       #A9B6C3;              /* known track, solid 1.25 px */
+  --geo-gap:         var(--st-dark);       /* dark leg, dashed 4 3 */
+  --geo-reach:       #C9D6E3;              /* reach boundary: 1 px, fill 4 % */
+  --geo-reach-fill:  rgba(201, 214, 227, 0.04);
+  --geo-halo:        rgba(12, 18, 24, 0.85); /* 2 px halo behind map labels and glyphs */
+
+  /* ---- type */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-10: 10px;  /* map graticule labels only */
+  --fs-11: 11px;  /* captions, axis, status bar */
+  --fs-12: 12px;  /* labels, table headers, mono ids */
+  --fs-13: 13px;  /* body / table cells: the workhorse */
+  --fs-14: 14px;  /* list primary (vessel names) */
+  --fs-16: 16px;  /* panel title */
+  --fs-20: 20px;  /* focus title (vessel name) */
+  --fs-28: 28px;  /* secondary figure */
+  --fs-48: 48px;  /* the one headline figure per screen */
+  --lh-tight: 1.15;
+  --lh-ui: 1.35;
+  --lh-read: 1.5;
+  --fw-light: 300;  /* headline figures only */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --track-tight: -0.02em; /* >= 28 px */
+  --track-label: 0.01em;
+  --numeric: tabular-nums lining-nums;
+
+  /* ---- space: 4 px grid */
+  --sp-0: 2px; --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px;
+
+  /* ---- radii: docked = 0, controls = 2, floating = 4. Nothing rounder except status dots */
+  --r-0: 0;
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-dot: 50%;
+
+  /* ---- shadows: only overlays cast them */
+  --shadow-float: 0 1px 0 rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.35);
+  --shadow-overlay: 0 0 0 1px var(--line-2), 0 12px 32px rgba(0,0,0,0.5);
+
+  /* ---- motion */
+  --dur-1: 80ms;    /* hover, press */
+  --dur-2: 160ms;   /* selection, row expand, chip toggle */
+  --dur-3: 240ms;   /* panel slide in */
+  --dur-cam: 900ms; /* map camera fly */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-move: cubic-bezier(0.45, 0, 0.2, 1);
+
+  /* ---- z layers */
+  --z-map: 0;
+  --z-map-ui: 10;   /* zoom, legend, scale, cursor readout */
+  --z-rail: 20;
+  --z-sticky: 25;
+  --z-popover: 40;
+  --z-toast: 50;
+  --z-modal: 60;
+  --z-tooltip: 70;
+
+  /* ---- layout at 1440 x 900 */
+  --topbar-h: 40px;
+  --statusbar-h: 24px;
+  --rail-l-w: 320px;
+  --rail-r-w: 360px;
+  --timeline-h: 56px;
+  --row-h: 28px;       /* data table row */
+  --row-h-list: 52px;  /* alert queue row */
+  --ctl-h: 28px;       /* buttons, inputs, segmented */
+  --ctl-h-s: 22px;     /* chips, map buttons in groups */
+
+  /* ---- legacy aliases (remove after migration) */
+  --c-bg: var(--surface-0);
+  --c-sea: var(--map-sea);
+  --c-land: var(--map-land);
+  --c-land-stroke: var(--map-coast);
+  --c-panel: var(--surface-1);
+  --c-panel-raised: var(--surface-2);
+  --c-line: var(--line-1);
+  --c-line-strong: var(--line-2);
+  --c-grid: var(--map-graticule);
+  --c-text-1: var(--text-1);
+  --c-text-2: var(--text-2);
+  --c-text-3: var(--text-3);
+  --c-ais: var(--geo-vessel);
+  --c-gap: var(--st-dark);
+  --c-dark: var(--st-dark);
+  --c-prism-stroke: var(--geo-reach);
+  --c-prism-fill: var(--geo-reach-fill);
+  --c-prism-likely: rgba(201, 214, 227, 0.10);
+  --c-sar: var(--st-radar);
+  --c-candidate: var(--text-1);
+  --c-candidate-ring: var(--st-radar);
+  --c-rdv: var(--st-spoof);
+  --c-rdv-fill: var(--st-spoof-weak);
+  --c-risk-low: var(--st-ok);
+  --c-risk-med: var(--st-dark);
+  --c-risk-high: var(--st-sanctioned);
+  --c-live: var(--st-ok);
+  --c-snapshot: var(--text-2);
+  --c-error: var(--st-error);
+  --c-ok: var(--st-ok);
+  --c-degraded: var(--st-degraded);
+  --c-focus: var(--accent);
+  --map-land-legacy: var(--map-land);
+  --fs-caption: var(--fs-11);
+  --fs-body: var(--fs-13);
+  --fs-label: var(--fs-12);
+  --fs-h3: var(--fs-14);
+  --fs-h2: var(--fs-16);
+  --fs-h1: var(--fs-20);
+  --fs-num-m: var(--fs-28);
+  --fs-num-l: var(--fs-48);
+  --fs-num-xl: var(--fs-48);
+  --lh-body: var(--lh-ui);
+  --fw-bold: var(--fw-semibold);
+  --r-3: var(--r-2);
+  --r-pill: var(--r-1);
+  --rail-w: var(--rail-r-w);
+}
