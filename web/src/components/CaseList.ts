@@ -19,17 +19,22 @@ function caseRow(c: CaseSummary, index: number, selectedId: string | null): HTML
   const flag = c.vessel.flag?.trim() || "no flag";
   const type = c.vessel.type ? c.vessel.type.replace(/_/g, " ") : "unknown type";
 
+  // Status and risk share one wrapping line so the pair can never push into
+  // the hours column at the 440 px rail width.
+  const tags = h(
+    "div",
+    { class: "case-tags" },
+    statusChip(c.status),
+    c.score !== null ? riskChip(c.band, c.score) : null,
+    h("span", { class: "mono case-radar" }, `${fmtInt(c.n_candidates)} radar`),
+  );
+
   const middle = h(
     "div",
-    null,
+    { class: "case-main" },
     h("div", { class: "vessel" }, vesselLabel(c.vessel)),
     h("div", { class: "sub" }, `${flag} \u00b7 ${type}`),
-    h(
-      "div",
-      { class: "sub" },
-      statusChip(c.status),
-      h("span", { class: "mono" }, ` ${fmtInt(c.n_candidates)} radar`),
-    ),
+    tags,
   );
 
   if (c.score !== null) {
@@ -40,11 +45,11 @@ function caseRow(c: CaseSummary, index: number, selectedId: string | null): HTML
     middle.append(h("div", { class: `bar ${bandClass}` }, fill));
   }
 
+  // Hours stand alone on the right; the risk chip moved to the status line.
   const right = h(
     "div",
     { class: "right" },
     h("span", { class: "hours mono" }, fmtHours(c.hours)),
-    c.score !== null ? h("span", { class: "score" }, riskChip(c.band, c.score)) : null,
   );
 
   const selected = c.id === selectedId;
