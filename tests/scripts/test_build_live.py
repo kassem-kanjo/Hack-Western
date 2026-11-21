@@ -13,6 +13,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
+from darkfleet.core.tracks import Event
+
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ais" / "baltic_sample.jsonl"
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build_live.py"
 
@@ -209,3 +211,73 @@ def test_coverage_holes_merge_adjacent_quiet_minutes() -> None:
         {"start": "2026-11-21T04:01:00Z", "end": "2026-11-21T04:02:00Z"},
         {"start": "2026-11-21T04:04:00Z", "end": "2026-11-21T04:04:00Z"},
     ]
+
+
+def _meeting(lat: float, lon: float, severity: float) -> Event:
+    """A meeting event with the shape ``core.encounters`` produces, for context tests."""
+    return Event(
+        kind="meeting",
+        mmsi=111111111,
+        other_mmsi=222222222,
+        start=datetime(2026, 11, 21, 4, 0, tzinfo=UTC),
+        end=datetime(2026, 11, 21, 4, 45, tzinfo=UTC),
+        lat=lat,
+        lon=lon,
+        severity=severity,
+        explanation="Two vessels stayed within 200 m of each other for 45 min.",
+        evidence={"minutes": 45.0},
+    )
+
+
+def _only_meeting(payload: dict) -> dict:
+    events = [event for event in payload["events"] if event["kind"] == "meeting"]
+    assert len(events) == 1
+    return events[0]
+
+
+def test_meeting_inside_singapore_anchorage_gets_context_and_half_severity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    region_dir = _write_recording(tmp_path)
+    monkeypatch.setattr(build_live, "meetings", lambda *args, **kwargs: [_meeting(1.28, 103.95, 0.8)])
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out")
+
+    event = _only_meeting(payload)
+    assert event["severity"] == 0.4
+    assert event["evidence"]["context"] == {
+        "name": "Singapore Eastern anchorage",
+        "kind": "bunkering",
+        "note": "approximate box drawn by hand, not an official boundary",
+    }
+    assert "In a known anchorage (Singapore Eastern anchorage)" in event["explanation"]
+    assert "bunkering" in event["explanation"]
+
+
+def test_meeting_in_open_water_keeps_its_severity_and_no_context(tmp_path: Path, monkeypatch) -> None:
+    region_dir = _write_recording(tmp_path)
+    monkeypatch.setattr(build_live, "meetings", lambda *args, **kwargs: [_meeting(58.0, 19.0, 0.8)])
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out")
+
+    event = _only_meeting(payload)
+    assert event["severity"] == 0.8
+    assert "context" not in event["evidence"]
+    assert "known anchorage" not in event["explanation"]
+
+
+def test_meeting_with_a_watchlist_alert_is_floored_at_point_nine(tmp_path: Path, monkeypatch) -> None:
+    region_dir = _write_recording(tmp_path)
+    monkeypatch.setattr(build_live, "meetings", lambda *args, **kwargs: [_meeting(58.0, 19.0, 0.5)])
+    monkeypatch.setattr(
+        build_live,
+        "_watchlist_rows",
+        lambda *args, **kwargs: [{"mmsi": 222222222, "category": "sanctioned"}],
+    )
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out")
+
+    event = _only_meeting(payload)
+    assert event["severity"] == 0.9
+    assert event["evidence"]["watchlist"] == ["sanctioned"]
+    assert event["explanation"].endswith(" One vessel is on a sanctions list.")

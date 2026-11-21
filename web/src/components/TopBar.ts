@@ -8,15 +8,19 @@ export const DEFAULT_LIVE_REGION = "BALTIC_WATCH";
 
 /**
  * Header (01-nav): brand, three places (Global, Live, Patrol unit), Present, and one mode
- * badge in the same slot on every screen. The case file stays reachable as a depth link
- * (caseHref) rather than a top-level tab, per design/v2/00-ia.md.
+ * badge in the same slot on every screen. The case file stays reachable by clicking a case
+ * rather than as a top-level tab, per design/v2/00-ia.md.
+ *
+ * `caseHref` and `demoHref` are accepted but ignored: old screens still pass them, and
+ * removing the props there is outside this change. No header renders a "Case file" tab or
+ * a "Start demo" button.
  */
 export function topBar(opts: {
   active: "overview" | "case" | "live" | "patrol";
   mode: ConsoleMode;
   generatedAt: string | null;
-  caseHref: string | null;
-  demoHref: string | null;
+  caseHref?: string | null;
+  demoHref?: string | null;
   liveRegion?: string;
 }): HTMLElement {
   const tab = (label: string, href: string, isActive: boolean): HTMLElement =>
@@ -28,9 +32,6 @@ export function topBar(opts: {
     tab("Live", liveHref, opts.active === "live"),
     tab("Patrol unit", "#/patrol", opts.active === "patrol"),
   ];
-  if (opts.caseHref !== null) {
-    tabs.push(tab("Case file", opts.caseHref, opts.active === "case"));
-  }
 
   const modeClass = opts.mode.toLowerCase();
   const modeText =
@@ -39,14 +40,6 @@ export function topBar(opts: {
         ? `SNAPSHOT ${fmtUtcFull(opts.generatedAt)}`
         : "SNAPSHOT"
       : opts.mode;
-
-  // The demo always opens a physics-ruled-out case on its first radar pass, so
-  // the four-way story (AIS gap, lens, detection, "not the ship") is on screen
-  // immediately without hunting through the list.
-  const demoLink =
-    opts.demoHref !== null
-      ? h("a", { class: "demo-link", href: opts.demoHref }, "Start demo")
-      : null;
 
   // Presentation mode (design/v2/04-present.png). The click is handled by
   // document delegation in present.ts, because this bar is rebuilt on navigation.
@@ -67,7 +60,6 @@ export function topBar(opts: {
     { class: "topbar" },
     h("span", { class: "brand" }, "Dark Fleet"),
     h("nav", { class: "tabs" }, ...tabs),
-    demoLink,
     h("span", { class: "topbar-spacer" }),
     present,
     h(

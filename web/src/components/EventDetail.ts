@@ -7,8 +7,8 @@
  * never parsed as markup, and every figure is read defensively from
  * `event.evidence`: evidence keys differ by kind and may be missing.
  *
- * Presentation only: the only arithmetic here is unit formatting, simple ratios
- * for bar widths, and picking a position on a time axis.
+ * Presentation only: unit formatting and the words stay here; the pictures'
+ * geometry and motion live in explainers.ts.
  */
 
 import type { LiveEvent, LiveVessel, LiveWatchlistEntry } from "../model/live";
@@ -17,10 +17,18 @@ import {
   bigNumber,
   formatDuration,
   timeAgo,
-  timelineFraction,
   vesselName,
 } from "../model/liveFacts";
 import { h } from "./dom";
+import {
+  cloneExplainer,
+  jumpExplainer,
+  meetingExplainer,
+  silenceExplainer,
+  spoofExplainer,
+  svgEl,
+  type Explainer,
+} from "./explainers";
 
 export interface EventDetailProps {
   event: LiveEvent;
@@ -35,8 +43,6 @@ export interface EventDetailProps {
   regionLabel: string;
   nowMs: number;
 }
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 /* -------------------------------------------------------------------------
  * Defensive readers
@@ -141,15 +147,6 @@ function clockValue(iso: string): string | null {
 /* -------------------------------------------------------------------------
  * Small DOM helpers
  * ---------------------------------------------------------------------- */
-
-function svgEl<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attrs: Record<string, string | number>,
-): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG_NS, tag) as SVGElementTagNameMap[K];
-  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, String(value));
-  return el;
-}
 
 /** The stand-in for a proof block whose key evidence is missing. */
 function missingPicture(): HTMLElement {
@@ -258,46 +255,72 @@ function headBlock(props: EventDetailProps, vessel: LiveVessel | null): HTMLElem
  * 6: proof pictures
  * ---------------------------------------------------------------------- */
 
-/** One labelled bar: the track is the shared scale, the fill is drawn with a numeric percent. */
-function barRow(label: string, value: string, percent: number, muted: boolean): HTMLElement {
-  const fill = h("div", {
-    class: muted ? "event-detail__bar-fill is-muted" : "event-detail__bar-fill",
+/**
+ * The replay control under a picture. The icon is a small circular arrow; the
+ * word beside it keeps the control findable without a tooltip.
+ */
+function replayFoot(replay: () => void): HTMLElement {
+  const icon = svgEl("svg", {
+    viewBox: "0 0 16 16",
+    width: 13,
+    height: 13,
+    class: "event-detail__replay-icon",
+    "aria-hidden": "true",
   });
-  fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-
-  return h(
-    "div",
-    { class: "event-detail__bar-row" },
-    h(
-      "div",
-      { class: "event-detail__bar-head" },
-      h("span", { class: "event-detail__bar-label" }, label),
-      h("span", { class: "event-detail__bar-value" }, value),
-    ),
-    h("div", { class: "event-detail__bar" }, fill),
+  icon.append(
+    svgEl("path", { d: "M2.6 8a5.4 5.4 0 1 0 1.6-3.8" }),
+    svgEl("path", { d: "M2.4 2.6v3.8h3.8" }),
   );
+
+  const button = h(
+    "button",
+    {
+      type: "button",
+      class: "event-detail__replay",
+      "aria-label": "Replay this explanation",
+      title: "Replay",
+    },
+    icon,
+    "Replay",
+  );
+  button.addEventListener("click", () => replay());
+
+  return h("div", { class: "event-detail__proof-foot" }, button);
+}
+
+/** Picture, the words that carry it, and its replay control, in that order. */
+function proofBlock(scene: Explainer, ...body: Array<HTMLElement | null>): HTMLElement {
+  return h("div", { class: "event-detail__proof" }, scene.el, ...body, replayFoot(scene.replay));
 }
 
 function jumpProof(event: LiveEvent): HTMLElement {
-  // Engine keys (core/kinematics.py jumps): km, minutes, implied_kn, cap_kn.
+  // Engine keys (core/kinematics.py jumps): km, minutes, implied_kn, cap_kn, ratio.
   const km = num(event.evidence, "km");
   const minutes = num(event.evidence, "minutes");
   const implied = num(event.evidence, "implied_kn");
   const cap = num(event.evidence, "cap_kn");
-  if (km === null || minutes === null || implied === null || cap === null || implied <= 0) {
+  if (
+    km === null ||
+    minutes === null ||
+    implied === null ||
+    cap === null ||
+    implied <= 0 ||
+    cap <= 0
+  ) {
     return missingPicture();
   }
 
-  return h(
-    "div",
-    { class: "event-detail__proof" },
-    barRow(
-      `Speed needed to cover ${fmt1(km)} km in ${fmtInt(minutes)} min`,
-      `${fmt1(implied)} kn`,
-      100,
-      false,
-    ),
-    barRow("Fastest this ship can go", `${fmt1(cap)} kn`, (cap / implied) * 100, true),
+  const scene = jumpExplainer({
+    neededLabel: `Speed needed to cover ${fmt1(km)} km in ${fmtInt(minutes)} min`,
+    neededValue: `${fmt1(implied)} kn`,
+    capLabel: "Fastest this ship can go",
+    capValue: `${fmt1(cap)} kn`,
+    capFraction: cap / implied,
+    ratio: num(event.evidence, "ratio") ?? implied / cap,
+  });
+
+  return proofBlock(
+    scene,
     h(
       "p",
       { class: "event-detail__caption" },
@@ -307,10 +330,11 @@ function jumpProof(event: LiveEvent): HTMLElement {
 }
 
 /**
- * The axis is the gap itself: last heard on the left, heard again on the right.
- * That is what the picture is about, and its two labels are then the two event
- * times rather than two ends of a 24 h window that would squeeze the gap into a
- * sliver. The coverage window is only a fallback for an unusable event span.
+ * The axis is labelled with the gap itself: last heard on the left, heard again
+ * on the right. That is what the picture is about, and its two labels are then
+ * the two event times rather than two ends of a 24 h window that would squeeze
+ * the gap into a sliver. The coverage window is only a fallback for an unusable
+ * event span.
  */
 function timeAxis(
   event: LiveEvent,
@@ -329,31 +353,6 @@ function timeAxis(
   return null;
 }
 
-let hatchSeq = 0;
-
-/** Amber hatching drawn as an SVG pattern: a hatch, but no gradient and no colour outside the palette. */
-function amberHatch(): SVGSVGElement {
-  hatchSeq += 1;
-  const id = `event-hatch-${hatchSeq}`;
-
-  const pattern = svgEl("pattern", {
-    id,
-    width: 6,
-    height: 6,
-    patternUnits: "userSpaceOnUse",
-    patternTransform: "rotate(45)",
-  });
-  pattern.append(svgEl("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "event-detail__hatch-line" }));
-
-  const defs = svgEl("defs", {});
-  defs.append(pattern);
-
-  const svg = svgEl("svg", { class: "event-detail__hatch", "aria-hidden": "true" });
-  svg.append(defs);
-  svg.append(svgEl("rect", { x: 0, y: 0, width: "100%", height: "100%", fill: `url(#${id})` }));
-  return svg;
-}
-
 function silenceProof(
   event: LiveEvent,
   coverage: { start: string; end: string },
@@ -362,62 +361,11 @@ function silenceProof(
   const axis = timeAxis(event, coverage);
   if (minutes === null || axis === null) return missingPicture();
 
-  const startPct = timelineFraction(event.start, axis) * 100;
-  const endPct = timelineFraction(event.end, axis) * 100;
-  const gapLeft = Math.min(startPct, endPct);
-  const gapWidth = Math.abs(endPct - startPct);
-
-  const before = h("span", { class: "event-detail__dots" });
-  before.style.left = "0%";
-  before.style.width = `${gapLeft}%`;
-
-  const after = h("span", { class: "event-detail__dots" });
-  after.style.left = `${gapLeft + gapWidth}%`;
-  after.style.right = "0";
-
-  const gap = h(
-    "div",
-    { class: "event-detail__gap" },
-    amberHatch(),
-    h("span", { class: "event-detail__gap-label" }, formatDuration(minutes)),
-  );
-  gap.style.left = `${gapLeft}%`;
-  gap.style.width = `${Math.max(1, gapWidth)}%`;
-
-  const shipTrack = h("div", { class: "event-detail__track" }, before, gap, after);
-
-  // The other row is dense on purpose: many thin ticks = "still being heard".
-  const TICKS = 72;
-  const ticks = h("div", { class: "event-detail__track is-ticks" });
-  for (let i = 0; i < TICKS; i += 1) {
-    const tick = h("span", { class: "event-detail__tick" });
-    tick.style.left = `${(i / (TICKS - 1)) * 100}%`;
-    ticks.append(tick);
-  }
-
-  const rows = h(
-    "div",
-    { class: "event-detail__time-grid" },
-    h("span", { class: "event-detail__time-name" }, "This ship"),
-    shipTrack,
-    h("span", { class: "event-detail__time-name" }, "Ships within 60 km"),
-    ticks,
-  );
-
-  const axisRow =
-    utcHm(axis.start) !== null && utcHm(axis.end) !== null
-      ? h(
-          "div",
-          { class: "event-detail__axis" },
-          h("span", null),
-          h(
-            "span",
-            { class: "event-detail__axis-times" },
-            h("span", null, utcHm(axis.start)),
-            h("span", null, `${utcHm(axis.end)} UTC`),
-          ),
-        )
-      : null;
+  const scene = silenceExplainer({
+    gapLabel: formatDuration(minutes),
+    startLabel: utcHm(axis.start) ?? "",
+    endLabel: utcHm(axis.end) ?? "",
+  });
 
   const others = num(event.evidence, "local_other_vessels");
   const gapWords = formatDuration(minutes);
@@ -440,7 +388,7 @@ function silenceProof(
           ".",
         );
 
-  return h("div", { class: "event-detail__proof" }, rows, axisRow, caption);
+  return proofBlock(scene, caption);
 }
 
 function cloneProof(event: LiveEvent): HTMLElement {
@@ -448,56 +396,10 @@ function cloneProof(event: LiveEvent): HTMLElement {
   const separation = num(event.evidence, "separation_km");
   if (separation === null) return missingPicture();
 
-  const svg = svgEl("svg", {
-    class: "event-detail__schematic",
-    viewBox: "0 0 300 110",
-    preserveAspectRatio: "xMidYMid meet",
-    "aria-hidden": "true",
+  const scene = cloneExplainer({
+    separationLabel: `${fmt1(separation)} km`,
+    flips: num(event.evidence, "flips"),
   });
-
-  svg.append(
-    svgEl("line", {
-      x1: 44,
-      y1: 76,
-      x2: 256,
-      y2: 32,
-      class: "event-detail__schema-line",
-    }),
-  );
-
-  for (const [cx, cy] of [
-    [44, 76],
-    [256, 32],
-  ] as const) {
-    svg.append(svgEl("circle", { cx, cy, r: 4, class: "event-detail__schema-dot" }));
-  }
-
-  const lineLabel = svgEl("text", {
-    x: 150,
-    y: 46,
-    "text-anchor": "middle",
-    class: "event-detail__schema-label is-strong",
-  });
-  lineLabel.textContent = `${fmt1(separation)} km`;
-  svg.append(lineLabel);
-
-  const labelA = svgEl("text", {
-    x: 44,
-    y: 96,
-    "text-anchor": "middle",
-    class: "event-detail__schema-label",
-  });
-  labelA.textContent = "Position A";
-  svg.append(labelA);
-
-  const labelB = svgEl("text", {
-    x: 256,
-    y: 16,
-    "text-anchor": "middle",
-    class: "event-detail__schema-label",
-  });
-  labelB.textContent = "Position B";
-  svg.append(labelB);
 
   // The clusters' own coordinates are the proof the two places are real places.
   const clusterA = coordValue(coord(event.evidence, "cluster_a"));
@@ -525,7 +427,7 @@ function cloneProof(event: LiveEvent): HTMLElement {
         )
       : null;
 
-  return h("div", { class: "event-detail__proof" }, svg, sentence, places);
+  return proofBlock(scene, sentence, places);
 }
 
 function meetingProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
@@ -535,30 +437,16 @@ function meetingProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
   const sog = num(event.evidence, "mean_sog");
   if (closest === null || minutes === null) return missingPicture();
 
-  const together = `${fmtInt(minutes)} min`;
+  const scene = meetingExplainer({
+    closestM: closest,
+    widestM: num(event.evidence, "max_distance_m") ?? closest,
+    minutes,
+  });
+
   const other = event.other_mmsi;
 
-  return h(
-    "div",
-    { class: "event-detail__proof" },
-    h(
-      "div",
-      { class: "event-detail__pair" },
-      h(
-        "div",
-        { class: "event-detail__stat" },
-        h("span", { class: "event-detail__stat-label" }, "Closest"),
-        h("span", { class: "event-detail__stat-value" }, `${fmtInt(closest)} m`),
-      ),
-      h(
-        "div",
-        { class: "event-detail__stat" },
-        h("span", { class: "event-detail__stat-label" }, "Together"),
-        h("span", { class: "event-detail__stat-value" }, together),
-        // The speed is a qualifier, not the headline, so it sits under the figure.
-        sog !== null ? h("span", { class: "event-detail__stat-note" }, `at ${fmt1(sog)} kn`) : null,
-      ),
-    ),
+  return proofBlock(
+    scene,
     other !== null
       ? h(
           "p",
@@ -571,7 +459,10 @@ function meetingProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
     h(
       "p",
       { class: "event-detail__caption" },
-      "Two ships stayed this close and this still.",
+      // The speed is a qualifier, not the headline; it stays in the sentence.
+      sog !== null
+        ? `Two ships stayed this close and this still, at ${fmt1(sog)} kn.`
+        : "Two ships stayed this close and this still.",
     ),
   );
 }
@@ -580,6 +471,10 @@ function spoofProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
   // Engine keys (core/spoofing.py): vessels [{mmsi, n_reports, first, last}], n_vessels, on_land, inland_km.
   const mmsis = evidenceMmsis(event.evidence);
   if (mmsis.length === 0) return missingPicture();
+
+  // n_vessels is authoritative; the MMSI list is the fallback (same rule as bigNumber).
+  const ships = num(event.evidence, "n_vessels") ?? mmsis.length;
+  const scene = spoofExplainer({ ships: Math.max(1, Math.round(ships)) });
 
   const list = h("ul", { class: "event-detail__mmsis" });
   for (const mmsi of mmsis) {
@@ -595,9 +490,8 @@ function spoofProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
 
   const onLand = flag(event.evidence, "on_land");
 
-  return h(
-    "div",
-    { class: "event-detail__proof" },
+  return proofBlock(
+    scene,
     list,
     h(
       "p",
