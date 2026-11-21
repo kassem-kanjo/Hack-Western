@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 from pyproj import Transformer
-from shapely import make_valid
+from shapely import affinity, make_valid
 from shapely.errors import GEOSException
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
@@ -21,6 +21,31 @@ from .geo import GEOD, KNOT_KM_H, Fix, distance_km
 
 EPS_KM = 1e-6
 _MIN_R_KM = 1e-3  # avoids degenerate zero-radius circles at t0 / t1
+
+
+def unwrap_lon(lon, ref_lon):
+    """Shift longitude(s) by a multiple of 360° so they lie within ±180° of `ref_lon`.
+
+    ``GEOD.fwd`` normalises output longitudes to [-180, 180], so a footprint that crosses
+    the antimeridian comes back with vertices jumping from +180 to -180. Fed to shapely that
+    ring is self-intersecting and its point-in-polygon answer disagrees with ``in_footprint``.
+    Unwrapping relative to the polygon's own centre keeps the ring continuous; the result may
+    legitimately lie outside [-180, 180]. Congruent mod 360, so callers must unwrap the points
+    they test against the polygon the same way.
+    """
+    lons = np.asarray(lon, dtype=float)
+    refs = np.asarray(ref_lon, dtype=float)
+    out = lons + 360.0 * np.round((refs - lons) / 360.0)
+    return float(out) if out.ndim == 0 else out
+
+
+def unwrap_polygon(poly: Polygon, ref_lon: float) -> Polygon:
+    """Translate a lon/lat polygon by a multiple of 360° so it sits within ±180° of `ref_lon`."""
+    if poly is None or poly.is_empty:
+        return poly
+    centre = float(poly.centroid.x)
+    shift = float(unwrap_lon(centre, ref_lon)) - centre
+    return affinity.translate(poly, xoff=shift) if shift else poly
 
 
 def _polygonal(geom) -> Polygon:
@@ -101,11 +126,15 @@ def _midpoint(a: Fix, b: Fix) -> tuple[float, float]:
 
 
 def _circle(lat: float, lon: float, r_km: float, n: int) -> list[tuple[float, float]]:
-    """Geodesic circle as (lon, lat) vertices; exact vertices, chord edges."""
+    """Geodesic circle as (lon, lat) vertices; exact vertices, chord edges.
+
+    Vertices are unwrapped relative to the circle centre, so a circle straddling the
+    antimeridian stays a continuous ring instead of jumping between +180 and -180.
+    """
     r_m = max(r_km, _MIN_R_KM) * 1000.0
     az = np.linspace(0.0, 360.0, n, endpoint=False)
     lons, lats, _ = GEOD.fwd(np.full(n, lon), np.full(n, lat), az, np.full(n, r_m))
-    return list(zip(lons, lats, strict=True))
+    return list(zip(unwrap_lon(lons, lon), lats, strict=True))
 
 
 def _aeqd(lat: float, lon: float) -> tuple[Transformer, Transformer]:
@@ -147,8 +176,8 @@ def lens_polygon(a: Fix, b: Fix, v_kn: float, t: datetime, n: int = 128) -> Poly
     inter = _valid(inter)
     if inter.is_empty:
         return Polygon()
-    xs, ys = inv.transform(*inter.exterior.xy)
-    out = Polygon(zip(xs, ys, strict=True))
+    lons, lats = inv.transform(*inter.exterior.xy)
+    out = Polygon(zip(unwrap_lon(lons, mlon), lats, strict=True))
     return out if out.is_valid else _valid(out)
 
 
@@ -211,4 +240,4 @@ def footprint_polygon(a: Fix, b: Fix, v_kn: float, n: int = 128) -> Polygon:
         lo = np.where(inside, mid, lo)
         hi = np.where(inside, hi, mid)
     lons, lats, _ = GEOD.fwd(np.full(n, mlon), np.full(n, mlat), az, lo)
-    return Polygon(zip(lons, lats, strict=True))
+    return Polygon(zip(unwrap_lon(lons, mlon), lats, strict=True))

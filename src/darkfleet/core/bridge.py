@@ -23,7 +23,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from darkfleet.core.geo import GEOD, Fix, distance_km, distance_km_array
-from darkfleet.core.prism import _circle, _reach_km, lens_polygon
+from darkfleet.core.prism import _circle, _reach_km, lens_polygon, unwrap_polygon
 
 S2_FLOOR_KM2 = 1.0  # variance floor so the density is finite at t0 and t1
 
@@ -99,7 +99,7 @@ def bridge_ellipse(
     lens = lens_polygon(a, b, v_kn, t)
     if lens.is_empty:
         return Polygon()
-    return ellipse.intersection(lens)
+    return unwrap_polygon(ellipse, float(lens.centroid.x)).intersection(lens)
 
 
 def bridge_logpdf(a: Fix, b: Fix, sigma: float, lat: float, lon: float, t: datetime) -> float:
