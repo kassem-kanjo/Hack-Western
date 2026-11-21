@@ -177,3 +177,40 @@ Fixed in advance:
 - Primary metric: real count of gaps with at least one candidate cell divided by the mean shifted count, with a gap-bootstrap 95% interval. Signal if and only if the interval's lower bound is above 1.
 - Secondary (reported, not decisive): the Experiment 2 procedure unchanged (sigma = 21.62 from `data/validation/bridge_results.json`, gaps of 48 hours or less, scoring rule and count above the null 95th percentile, no moving or recurring-cell filter), signal under the Experiment 2 rule on the count ratio interval or the mean-score p-value.
 - No other analysis counts. Budget: at most 1,500 live GFW requests. Whatever the result, it is reported as it comes out; if there are too few gaps with any radar to say anything, the verdict is "inconclusive", not "signal".
+
+### Results (Experiment 3)
+Live GFW requests: 567. 100,330 gap events in 2026-05-01 to 2026-08-14; 133 non-gear gaps of 6 to 96 h have their midpoint in the 13 cells, of which 123 are moving gaps. 4 of the 13 cells have any radar in the window.
+
+| Cell | Gaps | Radar cells fetched |
+| --- | --- | --- |
+| 40..45N, 170..175E | 1 | 0 |
+| 0..5N, 165..170E | 23 | 0 |
+| -20..-15N, -80..-75E | 48 | 334 |
+| 5..10N, -50..-45E | 3 | 99 |
+| 10..15N, -170..-165E | 0 | 0 |
+| 40..45N, 155..160E | 8 | 0 |
+| 40..45N, 175..180E | 4 | 0 |
+| -35..-30N, 95..100E | 26 | 0 |
+| -35..-30N, 100..105E | 5 | 0 |
+| 40..45N, 150..155E | 8 | 80 |
+| -20..-15N, 170..175E | 4 | 6 |
+| 10..15N, -50..-45E | 1 | 0 |
+| -20..-15N, -130..-125E | 2 | 0 |
+
+Primary (day-lens, moving gaps, recurring radar cells dropped, K = 50 shifts of 7 to 21 days):
+
+| Real | Shifted mean (95% range) | Ratio (gap-bootstrap 95% interval) | p |
+| --- | --- | --- | --- |
+| 4 | 5.7 (3.0 to 9.8) | 0.70 (0.15 to 1.37) | 0.863 |
+
+Primary verdict: inconclusive (fewer than 20 real hits).
+
+Secondary, bridge score (Experiment 2 procedure, 118 gaps of 48 h or less, 1 with a scorable cell):
+
+- Scorable gaps: 1 real vs 3.1 shifted.
+- Mean best log-density: -19.22 real vs -22.87 shifted, p 0.255.
+- Gaps above the null 95th percentile (-10.58): 0 real vs 0.1 expected; ratio 0.00 (0.00 to 0.00), p 1.000.
+
+Secondary verdict: no signal.
+
+Reading: the held-out test is underpowered, not negative evidence of anything. The 13 cells were picked from the Aug to Nov gap counts, and in May to August they held only 133 qualifying gaps (123 moving); 9 of the 13 cells had no radar in the window at all, and 4 real hits is below the 20 the pre-registration treats as enough to say anything. The point estimate (4 real vs 5.7 shifted, ratio 0.70, interval 0.15 to 1.37) does not support the Test 1 post-hoc excess, but cannot rule it out. The "fewer than 20 real hits" threshold for "inconclusive" was fixed in the runner before the run but not written in the pre-registration text above; it is stated here. A decisive version needs the cells chosen from the holdout period's own gap counts (a new pre-registration) or a longer window.
