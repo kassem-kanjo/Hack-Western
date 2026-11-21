@@ -1,15 +1,22 @@
-/* Watch screen (#86, V3): the world, every ship, and the few things to stop for.
-   Structure only; every colour, size and space comes from tokens.css. The split
-   is map + 320 px alert rail, or map + 300 px focus panel. Phone rules live at
-   the bottom of this file because watch.css is this screen's only stylesheet. */
+/* Watch screen (#86): a maritime analyst tool. Events left, map middle, field
+   table right. Flat panels, 1 px hairlines, system UI type, mono for every id
+   and time. Tokens only; no rounded cards, glows, pills or gradients. */
 
 .main.watch-main {
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: 330px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-2);
+}
+
+.main.watch-main.is-focus {
+  grid-template-columns: 330px minmax(0, 1fr) 380px;
 }
 
 /* The loading line and the one error banner span the whole split. */
@@ -21,7 +28,7 @@
 }
 
 .watch-stage {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
   position: relative;
   min-width: 0;
@@ -36,26 +43,60 @@
   inset: 0;
 }
 
-/* ---------- overlays: the live chip, attribution, area names ---------- */
+/* ---------- top bar, watch only ----------------------------------------- */
 
-/* Top-right, as one quiet badge: the screenshot's "Live · updated 3 min ago". */
+.topbar.is-watch {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.topbar.is-watch .brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.topbar.is-watch .tab {
+  font-size: 12px;
+}
+
+.topbar.is-watch .present-btn {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 0;
+  font-size: 11px;
+}
+
+.topbar.is-watch .kbd {
+  border-radius: 0;
+  font-size: 10px;
+}
+
+.topbar.is-watch .mode-badge {
+  padding: 2px 7px;
+  border-radius: 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+/* ---------- overlays: live chip, attribution, cursor, controls ----------- */
+
 .watch-live {
   position: absolute;
-  top: var(--sp-3);
-  right: var(--sp-3);
-  z-index: 3;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  max-width: calc(100% - 2 * var(--sp-3));
-  padding: 0 var(--sp-2);
-  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  height: 22px;
+  max-width: calc(100% - 220px);
+  padding: 0 7px;
+  background: var(--c-panel);
   border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
+  border-radius: 0;
   font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  color: var(--c-text-2);
+  font-size: 11px;
+  color: var(--c-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -63,44 +104,161 @@
 
 .watch-live-dot {
   flex: none;
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--c-live);
 }
 
 .watch-attrib {
   position: absolute;
-  left: var(--sp-4);
-  bottom: var(--sp-4);
+  right: 10px;
+  bottom: 8px;
   z-index: 3;
-  max-width: calc(100% - 2 * var(--sp-4));
-  padding: 2px 8px;
-  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  max-width: calc(100% - 220px);
+  padding: 1px 5px;
+  background: var(--c-panel);
   border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
-  font-size: var(--fs-caption);
+  border-radius: 0;
+  font-size: 11px;
   color: var(--c-text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Names are the only text drawn on the map (the offline style has no glyphs).
-   Listening areas are the quieter of the two; watched areas carry the fills. */
+/* The one external link uses the console's link token, not the UA blue. */
+.watch-attrib a {
+  color: var(--c-sar);
+  text-decoration: none;
+}
+
+.watch-attrib a:hover {
+  text-decoration: underline;
+}
+
+/* Cursor position: bottom-left, mono, above the scale bar. */
+.watch-cursor {
+  position: absolute;
+  left: 10px;
+  bottom: 34px;
+  z-index: 4;
+  padding: 1px 5px;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Standard controls, drawn flat: zoom, compass reset. */
+.watch-map-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+}
+
+.watch-map-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.watch-map-btn:last-child {
+  border-bottom: 0;
+}
+
+.watch-map-btn:hover {
+  background: var(--c-panel-raised);
+  color: var(--c-text-1);
+}
+
+.watch-map-btn.is-compass {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.watch-map-btn:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: -1px;
+}
+
+/* Layer toggles: a small checkbox panel under the controls, top-right. */
+.watch-layers {
+  position: absolute;
+  top: 98px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  background: var(--c-panel);
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+}
+
+.watch-layer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--c-text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.watch-layer-check {
+  width: 11px;
+  height: 11px;
+  margin: 0;
+  accent-color: var(--c-text-2);
+}
+
+/* MapLibre's scale bar, made to match the flat chrome. */
+.watch-stage .maplibregl-ctrl-scale {
+  background: var(--c-panel);
+  border-color: var(--c-line-strong);
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 12px;
+}
+
+/* ---------- map text ----------------------------------------------------- */
+
+/* Names are the only text drawn on the map (the offline style has no glyphs). */
 .watch-area-label {
   position: absolute;
   left: 0;
   top: 0;
-  font-family: var(--font-sans);
-  font-size: 10px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
   pointer-events: none;
-  text-shadow: 0 1px 3px var(--c-bg);
   will-change: transform;
 }
 
@@ -112,16 +270,15 @@
   color: var(--c-text-2);
 }
 
-/* Sanctioned contact names sit beside their red dot; the panel lists the rest. */
+/* Contact names sit beside their dot; the table on the right lists the rest. */
 .watch-contact-label {
   position: absolute;
   left: 0;
   top: 0;
-  padding: 2px 5px;
-  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  padding: 1px 4px;
+  background: var(--c-panel);
   border: 1px solid var(--c-line-strong);
-  border-radius: var(--r-1);
-  font-family: var(--font-sans);
+  border-radius: 0;
   font-size: 11px;
   font-weight: 500;
   line-height: 1.2;
@@ -131,7 +288,7 @@
   will-change: transform;
 }
 
-/* ---------- map shapes ---------- */
+/* ---------- map shapes --------------------------------------------------- */
 
 .watch-map-overlay,
 .watch-map-labels,
@@ -139,7 +296,7 @@
   pointer-events: none;
 }
 
-/* A transparent disc wide enough for a thumb; the dot itself is 4.2 px. */
+/* A transparent disc wide enough for a thumb; the dot itself is 6 px across. */
 .watch-alert-hit {
   fill: transparent;
   stroke: none;
@@ -147,72 +304,176 @@
   cursor: pointer;
 }
 
-.watch-alert-dot:hover circle:nth-child(2) {
+.watch-alert-dot:hover circle:first-child {
   stroke: var(--c-text-1);
 }
 
-/* Selection is the same white as everywhere else in the console. */
-.watch-alert-dot.is-selected circle:nth-child(2) {
+.watch-alert-dot.is-selected circle:first-child {
   stroke: var(--c-focus);
-  stroke-width: 2;
+  stroke-width: 1.5;
 }
 
-/* ---------- world rail ---------- */
+/* ---------- events rail -------------------------------------------------- */
 
-.watch-rail {
-  grid-column: 2;
+.watch-events {
+  grid-column: 1;
   grid-row: 1;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--c-panel);
+  border-right: 1px solid var(--c-line);
 }
 
-.watch-rail[hidden] {
-  display: none;
-}
-
-.watch-list-head {
+.watch-events-head {
   display: flex;
-  align-items: baseline;
+  flex: none;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--c-line);
 }
 
-.watch-list-head h2 {
+.watch-events-head h2 {
   margin: 0;
-  font-size: var(--fs-h2);
-  font-weight: var(--fw-medium);
-  line-height: var(--lh-tight);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+
+.watch-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-filters {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.watch-filter-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.watch-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  padding: 0 5px;
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-3);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.watch-kind:hover {
+  border-color: var(--c-line-strong);
+  color: var(--c-text-2);
+}
+
+.watch-kind[aria-pressed="true"] {
+  border-color: var(--c-line-strong);
+  background: var(--c-panel-raised);
   color: var(--c-text-1);
 }
 
-.watch-list-head .meta {
-  font-size: var(--fs-caption);
+.watch-kind-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--c-text-3);
-  white-space: nowrap;
+}
+
+.watch-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.watch-select {
+  flex: 1;
+  min-width: 0;
+  height: 23px;
+  padding: 0 4px;
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  background: var(--c-panel);
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.watch-window {
+  display: flex;
+  flex: none;
+}
+
+.watch-window-btn {
+  height: 23px;
+  padding: 0 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.watch-window-btn + .watch-window-btn {
+  border-left: 0;
+}
+
+.watch-window-btn[aria-pressed="true"] {
+  background: var(--c-panel-raised);
+  color: var(--c-text-1);
 }
 
 .watch-rows {
+  flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 
-/* A row is a button: two lines, an icon, and a 2 px selection bar that is
-   always reserved so selecting cannot shift the text. */
+.watch-rows > li {
+  border-bottom: 1px solid var(--c-line);
+}
+
+/* A dense table row as a button: square, name, live dot, UTC + relative time,
+   then tag and area underneath. */
 .watch-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: var(--sp-2);
-  align-items: start;
+  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  row-gap: 1px;
+  align-items: center;
   width: 100%;
-  min-height: 44px;
-  padding: var(--sp-3) var(--sp-4);
-  padding-left: calc(var(--sp-4) - 2px);
+  min-height: 36px;
+  padding: 5px 10px 5px 8px;
   border: 0;
   border-left: 2px solid transparent;
-  border-bottom: 1px solid var(--c-line);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -229,322 +490,408 @@
   background: var(--c-panel-raised);
 }
 
-.watch-row-icon {
-  display: flex;
-  padding-top: 2px;
-  color: var(--c-text-2);
+.watch-square {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--c-text-3);
 }
 
-/* Colour means the kind, and it is the same on the map, the row and the panel. */
-.watch-glyph.is-dark {
-  color: var(--c-risk-high);
-}
-
-.watch-glyph.is-spoof {
-  color: var(--c-prism-stroke);
-}
-
-.watch-glyph.is-jump {
-  color: var(--c-risk-high);
-}
-
-.watch-glyph.is-meeting,
-.watch-glyph.is-sanctioned_stop {
-  color: var(--c-gap);
-}
-
-.watch-row-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.watch-row-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px var(--sp-2);
-  min-width: 0;
+.watch-row .watch-square {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  align-self: start;
+  margin-top: 5px;
 }
 
 .watch-row-name {
-  font-size: var(--fs-h3);
-  font-weight: var(--fw-medium);
-  line-height: var(--lh-tight);
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
   color: var(--c-text-1);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.watch-row-label {
-  font-size: var(--fs-label);
-  line-height: 1.3;
-  color: var(--c-text-2);
+.watch-row-live {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--c-live);
 }
 
-.watch-row-meta {
-  font-size: var(--fs-caption);
-  line-height: 1.3;
-  color: var(--c-text-3);
-}
-
-/* One word, one state, no new colour: ongoing is a fact, not an alert. */
-.watch-pill {
-  flex: none;
-  padding: 0 5px;
-  border: 1px solid var(--c-line-strong);
-  border-radius: var(--r-pill);
+.watch-row-time {
+  grid-column: 4;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
   font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 15px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 11px;
+  line-height: 1.15;
   color: var(--c-text-2);
   white-space: nowrap;
 }
 
-/* Pinned to the bottom of the rail: what the list deliberately left out. */
-.watch-foot {
-  margin-top: auto;
-  padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--c-line);
-  font-size: var(--fs-caption);
+.watch-row-utc {
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-row-rel {
+  font-size: 10px;
   color: var(--c-text-3);
 }
 
-/* ---------- focus panel ---------- */
-
-.main.watch-main.is-focus {
-  grid-template-columns: minmax(0, 1fr) 300px;
-}
-
-/* The list yields the rail to the panel; the map keeps the width. */
-.main.watch-main.is-focus > .watch-rail {
-  display: none;
-}
-
-.watch-panel {
+.watch-row-tag {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--c-text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-row-area {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  max-width: 120px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--c-text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Colour means the kind, and it is the same on the map, the square and the tag. */
+.watch-row.is-dark .watch-square,
+.watch-kind.is-dark .watch-square {
+  background: var(--c-risk-high);
+}
+
+.watch-row.is-spoof .watch-square,
+.watch-kind.is-spoof .watch-square {
+  background: var(--c-prism-stroke);
+}
+
+.watch-row.is-jump .watch-square,
+.watch-kind.is-jump .watch-square {
+  background: var(--c-risk-high);
+}
+
+.watch-row.is-meeting .watch-square,
+.watch-kind.is-meeting .watch-square,
+.watch-row.is-sanctioned_stop .watch-square,
+.watch-kind.is-sanctioned_stop .watch-square {
+  background: var(--c-gap);
+}
+
+.watch-empty {
+  padding: 16px 10px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+/* Pinned to the bottom of the rail: what the list deliberately left out. */
+.watch-foot {
   display: flex;
-  flex-direction: column;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--c-line);
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-foot-sep {
+  color: var(--c-line-strong);
+}
+
+.watch-export {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-sar);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.watch-export:hover {
+  text-decoration: underline;
+}
+
+/* ---------- event details ------------------------------------------------ */
+
+.watch-details {
+  grid-column: 3;
+  grid-row: 1;
   min-width: 0;
   overflow-y: auto;
+  background: var(--c-panel);
+  border-left: 1px solid var(--c-line);
 }
 
-/* `hidden` must beat the flex display above. */
-.watch-panel[hidden] {
+.watch-details[hidden] {
   display: none;
 }
 
-.watch-panel-head {
+.watch-details-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4) var(--sp-3);
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--c-panel);
   border-bottom: 1px solid var(--c-line);
 }
 
-.watch-panel-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
 .watch-back {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
   padding: 0;
-  border: 1px solid var(--c-line-strong);
-  border-radius: var(--r-2);
+  border: 0;
   background: transparent;
-  color: var(--c-text-1);
-  font-size: var(--fs-label);
-  line-height: 1;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: 11px;
   cursor: pointer;
 }
 
 .watch-back:hover {
-  background: var(--c-panel-raised);
+  color: var(--c-text-1);
 }
 
-.watch-panel-kind {
-  display: inline-flex;
-  flex: none;
+.watch-details-title {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
 }
 
-.watch-panel-label {
+/* Label / value, two columns, one hairline between rows. */
+.watch-fields {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  margin: 0;
+  padding: 2px 10px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.watch-fields dt,
+.watch-fields dd {
   min-width: 0;
+  margin: 0;
+  padding: 5px 0;
+  border-top: 1px solid var(--c-line);
+}
+
+.watch-fields dt:nth-of-type(1),
+.watch-fields dd:nth-of-type(1) {
+  border-top: 0;
+}
+
+.watch-fields dt {
+  padding-right: 8px;
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-fields dd {
+  font-size: 12px;
+  color: var(--c-text-1);
+  overflow-wrap: anywhere;
+}
+
+.watch-vessel {
+  font-weight: 500;
+}
+
+.watch-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-time-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.watch-rel {
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-ongoing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+/* ---------- nearby vessels ----------------------------------------------- */
+
+.watch-nearby {
+  padding: 8px 10px 4px;
+}
+
+.watch-nearby h3 {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.watch-nearby-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.watch-nearby-table th,
+.watch-nearby-table td {
+  width: 20%;
+}
+
+.watch-nearby-table th:nth-child(1) {
+  width: 28%;
+}
+
+.watch-nearby-table th:nth-child(2) {
+  width: 22%;
+}
+
+.watch-nearby-table th:nth-child(3) {
+  width: 14%;
+}
+
+.watch-nearby-table th:nth-child(4) {
+  width: 15%;
+}
+
+.watch-nearby-table th:nth-child(5) {
+  width: 21%;
+}
+
+.watch-nearby-table th {
+  padding: 3px;
+  border-bottom: 1px solid var(--c-line-strong);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--c-text-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.watch-nearby-table td {
+  padding: 3px;
   overflow: hidden;
-  font-size: var(--fs-caption);
-  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--c-line);
   color: var(--c-text-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.watch-panel-name {
-  margin: 0;
-  font-size: var(--fs-h2);
-  font-weight: var(--fw-medium);
-  line-height: var(--lh-tight);
-  color: var(--c-text-1);
-  overflow-wrap: anywhere;
-}
-
-.watch-panel-meta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  color: var(--c-text-3);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-/* Two facts, each one line: "Dark 2 h 10 min" and "Could be within 140 km". */
-.watch-facts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--c-line);
-}
-
-.watch-fact {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  min-width: 0;
-  font-size: var(--fs-label);
-}
-
-.watch-fact-k {
-  color: var(--c-text-3);
-}
-
-.watch-fact-v {
-  font-family: var(--font-mono);
-  font-size: var(--fs-h3);
-  font-variant-numeric: tabular-nums;
-  color: var(--c-text-1);
-  white-space: nowrap;
-}
-
-.watch-met {
-  padding: var(--sp-3) var(--sp-4) var(--sp-2);
-  border-bottom: 1px solid var(--c-line);
-}
-
-.watch-met h3 {
-  margin: 0 0 var(--sp-2);
-  font-size: var(--fs-caption);
-  font-weight: var(--fw-medium);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--c-text-2);
-}
-
-.watch-met-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* One contact, one line; the row is the button that rings it on the map. */
-.watch-met-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  min-height: 40px;
-  padding: var(--sp-2) 0;
-  border: 0;
-  border-top: 1px solid var(--c-line);
-  background: transparent;
-  color: var(--c-text-1);
-  font: inherit;
-  font-size: var(--fs-label);
-  text-align: left;
+.watch-nearby-table tbody tr {
   cursor: pointer;
 }
 
-.watch-met-list li:first-child .watch-met-row {
-  border-top: 0;
-}
-
-.watch-met-row:hover {
+.watch-nearby-table tbody tr:hover {
   background: var(--c-panel-raised);
 }
 
-.watch-met-row[aria-current="true"] {
+.watch-nearby-table tbody tr[aria-current="true"] {
   outline: 1px solid var(--c-focus);
   outline-offset: -1px;
 }
 
+.watch-nearby-name {
+  color: var(--c-text-1);
+}
+
+.watch-nearby-table .watch-num,
+.watch-nearby-table th:last-child {
+  text-align: right;
+}
+
 /* Red is reserved for the sanctions hit, the one thing on this panel that is. */
-.watch-met-row.is-sanctioned {
-  color: var(--c-risk-high);
-}
-
-.watch-met-name {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.watch-met-tag {
-  flex: none;
-  padding: 0 5px;
-  border: 1px solid var(--c-risk-high);
-  border-radius: var(--r-1);
-  font-size: 10px;
-  line-height: 15px;
-  white-space: nowrap;
-}
-
-.watch-met-dist {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  font-variant-numeric: tabular-nums;
-  color: var(--c-text-3);
-  white-space: nowrap;
-}
-
-.watch-met-row.is-sanctioned .watch-met-dist {
+.watch-nearby-table tbody tr.is-sanctioned td {
   color: var(--c-risk-high);
 }
 
 .watch-none {
-  padding: var(--sp-2) 0;
-  font-size: var(--fs-label);
+  padding: 4px 0;
+  font-size: 12px;
   color: var(--c-text-3);
 }
 
 .watch-other {
-  padding: var(--sp-3) var(--sp-4) var(--sp-4);
-  font-size: var(--fs-label);
-  color: var(--c-text-2);
+  padding: 8px 10px 16px;
+  font-size: 11px;
+  color: var(--c-text-3);
 }
 
-/* ---------- focus ---------- */
+/* ---------- focus -------------------------------------------------------- */
 
 .watch-row:focus-visible,
-.watch-met-row:focus-visible,
-.watch-back:focus-visible {
-  outline: 2px solid var(--c-focus);
-  outline-offset: 2px;
-}
-
-.watch-met-row:focus-visible {
+.watch-back:focus-visible,
+.watch-kind:focus-visible,
+.watch-window-btn:focus-visible,
+.watch-export:focus-visible,
+.watch-select:focus-visible,
+.watch-nearby-table tbody tr:focus-visible {
+  outline: 1px solid var(--c-focus);
   outline-offset: -1px;
 }
 
-/* ---------- phone: map on top, list below, panel as a bottom sheet ---------- */
+.watch-nearby-table tbody tr:focus-visible {
+  outline-offset: -1px;
+}
+
+/* ---------- narrower desktops: the event list yields to the detail panel -- */
+
+@media (max-width: 1180px) {
+  .main.watch-main.is-focus {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+
+  .main.watch-main.is-focus > .watch-events {
+    display: none;
+  }
+
+  .main.watch-main.is-focus > .watch-stage {
+    grid-column: 1;
+  }
+
+  .main.watch-main.is-focus > .watch-details {
+    grid-column: 2;
+  }
+}
+
+/* ---------- phone: map on top, events below, details as a sheet ---------- */
 
 @media (max-width: 760px) {
   .main.watch-main,
@@ -570,68 +917,75 @@
     height: 72vh;
   }
 
-  /* The list leaves the nested scroll and becomes part of the page. */
-  .main > .watch-rail {
+  .main.watch-main > .watch-events {
     grid-column: 1;
     grid-row: 2;
     width: 100%;
     min-width: 0;
     max-height: none;
     overflow: visible;
-    border-left: 0;
+    border-right: 0;
     border-top: 1px solid var(--c-line);
   }
 
-  .watch-list-head {
-    padding: var(--sp-4) var(--sp-4) var(--sp-2);
+  .main.watch-main.is-focus > .watch-events {
+    display: none;
   }
 
   .watch-row {
-    min-height: 52px;
+    min-height: 44px;
   }
 
-  .watch-rail .watch-foot {
+  .watch-rows {
+    overflow: visible;
+  }
+
+  .watch-foot {
     margin-top: 0;
   }
 
+  .watch-back {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .watch-nearby-table tbody tr {
+    min-height: 36px;
+  }
+
   /* Focus is a sheet over the bottom of the map, not a second column. */
-  .watch-panel {
+  .watch-details {
     position: fixed;
     left: 0;
     right: 0;
     bottom: 0;
     z-index: 30;
-    max-height: 46vh;
+    max-height: 60vh;
     border-left: 0;
     border-top: 1px solid var(--c-line-strong);
-    border-radius: var(--r-3) var(--r-3) 0 0;
+    border-radius: 0;
     background: var(--c-panel);
-    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
   }
 
-  .watch-panel[hidden] {
+  .watch-details[hidden] {
     display: none;
   }
 
-  .watch-back {
-    width: 40px;
-    height: 40px;
-  }
-
-  .watch-met-row {
-    min-height: 44px;
-  }
-
   .watch-live {
-    top: var(--sp-2);
-    right: var(--sp-2);
-    font-size: 11px;
+    top: 8px;
+    left: 8px;
+    max-width: calc(100% - 56px);
   }
 
   .watch-attrib {
-    left: var(--sp-2);
-    bottom: var(--sp-2);
-    max-width: calc(100% - 2 * var(--sp-2));
-    font-size: 11px;
+    left: 8px;
+    right: auto;
+    bottom: 8px;
+    max-width: calc(100% - 56px);
+  }
+
+  .watch-layers {
+    top: 96px;
+    right: 8px;
   }
 }

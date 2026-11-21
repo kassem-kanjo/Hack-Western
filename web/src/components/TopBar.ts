@@ -59,7 +59,7 @@ export function topBar(opts: {
 
   return h(
     "header",
-    { class: "topbar" },
+    { class: opts.active === "watch" ? "topbar is-watch" : "topbar" },
     h("span", { class: "brand" }, "Dark Fleet"),
     h("nav", { class: "tabs" }, ...tabs),
     h("span", { class: "topbar-spacer" }),

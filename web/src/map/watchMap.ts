@@ -406,7 +406,79 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   svg.append(focusLineLayer, contactLayer, alertLayer, fixLayer);
 
   overlay.append(labelLayer, svg);
-  opts.container.append(overlay);
+
+  // ---- standard controls ----------------------------------------------------
+  //
+  // Zoom and the compass are our own buttons so the control chrome stays flat
+  // and hairline-thin instead of inheriting the default rounded white group.
+  // The scale bar is MapLibre's ScaleControl, styled by watch.css.
+  const controls = h("div", { class: "watch-map-controls" });
+  const zoomIn = h(
+    "button",
+    { class: "watch-map-btn", type: "button", title: "Zoom in", "aria-label": "Zoom in" },
+    "+",
+  );
+  const zoomOut = h(
+    "button",
+    { class: "watch-map-btn", type: "button", title: "Zoom out", "aria-label": "Zoom out" },
+    "\u2212",
+  );
+  const compass = h(
+    "button",
+    { class: "watch-map-btn is-compass", type: "button", title: "Reset north", "aria-label": "Reset north" },
+    "N",
+  );
+  zoomIn.addEventListener("click", () => map.zoomIn());
+  zoomOut.addEventListener("click", () => map.zoomOut());
+  compass.addEventListener("click", () => {
+    map.easeTo({
+      bearing: 0,
+      pitch: 0,
+      duration: prefersReducedMotion() ? 0 : 250,
+    });
+  });
+  controls.append(zoomIn, zoomOut, compass);
+
+  const layerState = { vessels: true, events: true, areas: true, reach: true };
+  type LayerKey = keyof typeof layerState;
+
+  const layerPanel = h("div", {
+    class: "watch-layers",
+    role: "group",
+    "aria-label": "Map layers",
+  });
+  for (const [key, label] of [
+    ["vessels", "Vessels"],
+    ["events", "Events"],
+    ["areas", "Areas"],
+    ["reach", "Reach"],
+  ] as [LayerKey, string][]) {
+    const input = h("input", {
+      class: "watch-layer-check",
+      type: "checkbox",
+      checked: layerState[key],
+    });
+    input.addEventListener("change", () => {
+      layerState[key] = input.checked;
+      applyLayerVisibility();
+    });
+    layerPanel.append(h("label", { class: "watch-layer" }, input, h("span", null, label)));
+  }
+
+  const cursorEl = h(
+    "div",
+    { class: "watch-cursor", "aria-hidden": "true" },
+    "\u2014, \u2014",
+  );
+
+  opts.container.append(overlay, controls, layerPanel, cursorEl);
+
+  map.on("mousemove", (event) => {
+    cursorEl.textContent = `${event.lngLat.lat.toFixed(4)}, ${event.lngLat.lng.toFixed(4)}`;
+  });
+  map.on("mouseout", () => {
+    cursorEl.textContent = "\u2014, \u2014";
+  });
 
   let ready = false;
   let destroyed = false;
@@ -445,6 +517,28 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   function source(id: string): maplibregl.GeoJSONSource | undefined {
     return map.getSource(id) as maplibregl.GeoJSONSource | undefined;
+  }
+
+  /** Layer groups behind the four checkboxes in the top-right panel. */
+  const AREA_LAYERS = ["watch-area-fill", "watch-area-watched-edge", "watch-area-listening"];
+  const SHIP_LAYERS = ["watch-ship", "watch-ship-watch"];
+  const REACH_LAYERS = ["watch-reach-fill", "watch-reach-edge"];
+
+  function applyLayerVisibility(): void {
+    if (destroyed) return;
+    if (ready) {
+      const set = (ids: string[], visible: boolean): void => {
+        for (const id of ids) {
+          map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+        }
+      };
+      set(SHIP_LAYERS, layerState.vessels);
+      set(AREA_LAYERS, layerState.areas);
+      set(REACH_LAYERS, layerState.reach);
+    }
+    // Alert dots are SVG, not MapLibre layers.
+    alertLayer.style.display = layerState.events ? "" : "none";
+    positionOverlays();
   }
 
   function sizeSvg(): void {
@@ -593,19 +687,19 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     lastRing = svgEl("circle", {
       cx: 0,
       cy: 0,
-      r: 11,
+      r: 8,
       fill: "none",
       stroke: color,
-      "stroke-opacity": 0.55,
+      "stroke-opacity": 0.5,
       "stroke-width": 1,
     });
     lastDot = svgEl("circle", {
       cx: 0,
       cy: 0,
-      r: 5,
+      r: 4,
       fill: colors.alert,
       stroke: colors.sea,
-      "stroke-width": 2,
+      "stroke-width": 1,
     });
     headingTick = svgEl("line", {
       x1: 0,
@@ -613,7 +707,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       x2: 0,
       y2: 0,
       stroke: colors.alert,
-      "stroke-width": 2,
+      "stroke-width": 1.5,
       "stroke-linecap": "round",
     });
     fixLayer.append(lastRing, headingTick, lastDot);
@@ -631,10 +725,10 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       nextDot = svgEl("circle", {
         cx: 0,
         cy: 0,
-        r: 5,
+        r: 4,
         fill: "none",
         stroke: colors.text1,
-        "stroke-width": 1.5,
+        "stroke-width": 1,
       });
       focusLineLayer.append(nextLine);
       fixLayer.append(nextDot);
@@ -643,7 +737,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     for (const contact of alert.contacts) {
       const sanctioned = contact.watchlist === "sanctioned";
       const couldMeet = contact.could_meet === true;
-      const radius = sanctioned || couldMeet ? 4.5 : 2.8;
+      const radius = sanctioned || couldMeet ? 3.5 : 2.2;
       const fill = sanctioned ? colors.alert : couldMeet ? colors.gap : colors.text2;
       const circle = svgEl("circle", {
         cx: 0,
@@ -731,11 +825,17 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
     // Area names: watched first (they carry the alerts). A name that would sit
     // on another is nudged above or below its area before it is dropped: at
-    // world zoom the Gulf and the Strait are only pixels apart.
+    // world zoom the Gulf and the Strait are only pixels apart. Names only
+    // appear from zoom 4 in, so the world view stays a field, not a legend.
+    const showAreaLabels = layerState.areas && map.getZoom() >= 4;
     const placed: { left: number; top: number; right: number; bottom: number }[] = [];
     for (const area of areaOrder) {
       const label = areaLabels.get(area.id);
       if (label === undefined) continue;
+      if (!showAreaLabels) {
+        label.style.visibility = "hidden";
+        continue;
+      }
       const [w, s, e, n] = area.bbox;
       const cx = (w + e) / 2;
       // Watched names sit inside their southern edge, away from the fixes the
@@ -799,10 +899,10 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     }
     if (headingTick !== null) {
       const rad = (focus.last.cog * Math.PI) / 180;
-      const length = 13;
+      const length = 11;
       headingTick.style.display = visibleLast ? "" : "none";
-      headingTick.setAttribute("x1", String(last.x + Math.sin(rad) * 5));
-      headingTick.setAttribute("y1", String(last.y - Math.cos(rad) * 5));
+      headingTick.setAttribute("x1", String(last.x + Math.sin(rad) * 4));
+      headingTick.setAttribute("y1", String(last.y - Math.cos(rad) * 4));
       headingTick.setAttribute("x2", String(last.x + Math.sin(rad) * length));
       headingTick.setAttribute("y2", String(last.y - Math.cos(rad) * length));
     }
@@ -873,24 +973,17 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         `${alert.label}: ${displayName(alert.name, alert.mmsi)}`,
       );
       const color = alertColor(alert.kind);
+      // 6 px across, flat fill, no halo: an event marker, not a glow.
       group.append(
         svgEl("circle", {
           cx: 0,
           cy: 0,
-          r: 7,
-          fill: color,
-          "fill-opacity": 0.22,
-          stroke: "none",
-        }),
-        svgEl("circle", {
-          cx: 0,
-          cy: 0,
-          r: 4.2,
+          r: 3,
           fill: color,
           stroke: colors.sea,
-          "stroke-width": 1.5,
+          "stroke-width": 1,
         }),
-        svgEl("circle", { cx: 0, cy: 0, r: 13, class: "watch-alert-hit" }),
+        svgEl("circle", { cx: 0, cy: 0, r: 10, class: "watch-alert-hit" }),
       );
       group.addEventListener("click", (clicked) => {
         clicked.stopPropagation();
@@ -1042,7 +1135,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       data: shipFeatures(data?.ships ?? []),
     });
 
-    // Watched areas are a faint wash...
+    // Watched areas: a thin solid outline, no fill at world zoom (a very faint
+    // wash only once the camera is close enough for a bbox to mean an area).
     map.addLayer({
       id: "watch-area-fill",
       type: "fill",
@@ -1050,10 +1144,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       filter: ["==", ["get", "kind"], "watched"],
       paint: {
         "fill-color": colors.lineStrong,
-        "fill-opacity": 0.14,
+        "fill-opacity": ["step", ["zoom"], 0, 4, 0.06],
       },
     });
-    // ... with a hairline edge; listening areas are the dashed line only.
     map.addLayer({
       id: "watch-area-watched-edge",
       type: "line",
@@ -1061,10 +1154,11 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       filter: ["==", ["get", "kind"], "watched"],
       paint: {
         "line-color": colors.text3,
-        "line-opacity": 0.55,
+        "line-opacity": 0.65,
         "line-width": 1,
       },
     });
+    // Listening areas are the thin dashed line only.
     map.addLayer({
       id: "watch-area-listening",
       type: "line",
@@ -1072,21 +1166,21 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       filter: ["==", ["get", "kind"], "listening"],
       paint: {
         "line-color": colors.text3,
-        "line-opacity": 0.6,
+        "line-opacity": 0.5,
         "line-width": 1,
-        "line-dasharray": [4, 4],
+        "line-dasharray": [3, 3],
       },
     });
 
     // The reach area: the prism colour, because it is a possibility rather
-    // than a finding, and dashed for the same reason.
+    // than a finding, and dashed for the same reason. Flat, 1 px edge.
     map.addLayer({
       id: "watch-reach-fill",
       type: "fill",
       source: "watch-reach",
       paint: {
         "fill-color": colors.prism,
-        "fill-opacity": 0.1,
+        "fill-opacity": 0.08,
       },
     });
     map.addLayer({
@@ -1095,41 +1189,43 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-reach",
       paint: {
         "line-color": colors.prism,
-        "line-opacity": 0.9,
-        "line-width": 1.2,
+        "line-opacity": 0.85,
+        "line-width": 1,
         "line-dasharray": [3, 3],
       },
     });
 
-    // Every ship: 2 px across, one step above the sea.
+    // Every ship: 1.5 px across, muted; watchlisted hulls only a little brighter.
     map.addLayer({
       id: "watch-ship",
       type: "circle",
       source: "watch-ships",
       filter: ["==", ["get", "watch"], 0],
       paint: {
-        "circle-radius": 1,
+        "circle-radius": 0.75,
         "circle-color": colors.text2,
-        "circle-opacity": 0.38,
+        "circle-opacity": 0.45,
       },
     });
-    // Watchlisted hulls: the same dot, a little brighter and larger.
     map.addLayer({
       id: "watch-ship-watch",
       type: "circle",
       source: "watch-ships",
       filter: ["==", ["get", "watch"], 1],
       paint: {
-        "circle-radius": 1.8,
+        "circle-radius": 1.1,
         "circle-color": colors.text1,
-        "circle-opacity": 0.7,
+        "circle-opacity": 0.65,
       },
     });
+
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: "metric" }), "bottom-left");
 
     ready = true;
     sizeSvg();
     rebuildAlertDots();
     rebuildAreaLabels();
+    applyLayerVisibility();
     positionOverlays();
 
     // A focus applied before the first frame (deep link) owns the camera now;
@@ -1187,6 +1283,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       destroyed = true;
       stopReachTimers();
       overlay.remove();
+      controls.remove();
+      layerPanel.remove();
+      cursorEl.remove();
       map.remove();
     },
   };
