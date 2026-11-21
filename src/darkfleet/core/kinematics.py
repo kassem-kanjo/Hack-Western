@@ -9,9 +9,11 @@ not a finding.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import math
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
-from itertools import combinations, pairwise
+from itertools import pairwise
+from typing import Any
 
 from .geo import KNOT_KM_H, distance_km
 from .tracks import CoverageMinute, Event, Ping
@@ -20,6 +22,24 @@ from .tracks import CoverageMinute, Event, Ping
 # normal. This floor applies even when a validation sweep sets min_sog lower, so a stationary
 # ship can never be reported as "gone dark".
 BERTH_SOG_KN = 0.5
+
+# Local-activity index: coarse cells are enough because the question is whether *any* other
+# traffic was being heard nearby, not exactly where each ship was. 0.5 degrees is about 55 km
+# north-south, so a 60 km search never has to look at many cells.
+ACTIVITY_CELL_DEG = 0.5
+_KM_PER_DEG_LAT = 111.32
+_DEFAULT_LOCAL_RADIUS_KM = 60.0
+_DEFAULT_ACTIVITY_BUCKET_MIN = 15.0
+_DEFAULT_MIN_LOCAL_VESSELS = 2
+
+# A clone hop must beat 55 kn, roughly three times a default ship's service cap. The 6 h span
+# is the longest a real two-transmitter alternation can plausibly stay one episode; the old
+# 10-minute window missed the recorded 630001188 case, whose hops are 5-60 minutes apart.
+CLONE_IMPLIED_KN = 55.0
+CLONE_WINDOW_MIN = 360.0
+
+# (bucket, lat cell, lon cell) -> every MMSI heard in that place and time slice.
+ActivityIndex = dict[tuple[int, int, int], set[int]]
 
 
 def split_tracks(pings: Iterable[Ping]) -> dict[int, list[Ping]]:
@@ -101,19 +121,152 @@ def _fmt_duration(minutes: float) -> str:
     return f"{mins} min"
 
 
+def _activity_bucket(t: datetime, bucket_min: float) -> int:
+    """Floor a time to a fixed-width bucket counted from the Unix epoch.
+
+    Counting from the epoch rather than from the first ping keeps every caller's buckets
+    aligned, so one index built once can answer gap queries for every vessel in the recording.
+    """
+    return int(t.timestamp() // (bucket_min * 60.0))
+
+
+def _lat_cell(lat: float) -> int:
+    return math.floor(lat / ACTIVITY_CELL_DEG)
+
+
+def _lon_cell(lon: float) -> int:
+    """Longitude cell, normalised to [-180, 180) so antimeridian fixes share one key."""
+    wrapped = (lon + 180.0) % 360.0 - 180.0
+    return math.floor(wrapped / ACTIVITY_CELL_DEG)
+
+
+def _cell_distance_km(lat: float, lon: float, lat_cell: int, lon_cell: int) -> float:
+    """Shortest distance from a point to a cell's bounding box (zero when inside it)."""
+    lat0 = lat_cell * ACTIVITY_CELL_DEG
+    lon0 = lon_cell * ACTIVITY_CELL_DEG
+    near_lat = min(max(lat, lat0), lat0 + ACTIVITY_CELL_DEG)
+    near_lon = min(max(lon, lon0), lon0 + ACTIVITY_CELL_DEG)
+    return distance_km(lat, lon, near_lat, near_lon)
+
+
+def build_activity_index(
+    tracks: Mapping[int, Sequence[Ping]], *, bucket_min: float = _DEFAULT_ACTIVITY_BUCKET_MIN
+) -> ActivityIndex:
+    """Build one (bucket, cell) -> MMSI index for every silence query in a run.
+
+    A busy recording has thousands of tracks; rebuilding a spatial index for each gap would be
+    quadratic. The index stores identities rather than exact positions because local activity
+    only asks how many *other* ships were being heard nearby, and the cell is deliberately
+    coarse so a whole recording fits in memory.
+    """
+    index: ActivityIndex = {}
+    for mmsi, track in tracks.items():
+        for ping in track:
+            key = (
+                _activity_bucket(ping.t, bucket_min),
+                _lat_cell(ping.lat),
+                _lon_cell(ping.lon),
+            )
+            index.setdefault(key, set()).add(mmsi)
+    return index
+
+
+def _nearby_vessel_counts(
+    pings_by_time_index: ActivityIndex,
+    lat: float,
+    lon: float,
+    t0: datetime,
+    t1: datetime,
+    *,
+    radius_km: float,
+    bucket_min: float,
+    exclude_mmsi: int | None,
+) -> list[int]:
+    """Distinct other MMSI heard near a point in each bucket of [t0, t1].
+
+    Cells whose bounding box lies beyond `radius_km` are skipped before any lookup. A cell is
+    treated as a whole, which can only over-count near a cell edge; that is the safe direction
+    for suppressing a silence, because the alternative is blaming a ship for a gap the
+    receiver network could already explain.
+    """
+    if t1 < t0:
+        return []
+    lat_span = math.ceil((radius_km / _KM_PER_DEG_LAT) / ACTIVITY_CELL_DEG)
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    lon_span = math.ceil((radius_km / (_KM_PER_DEG_LAT * cos_lat)) / ACTIVITY_CELL_DEG)
+    base_lat = _lat_cell(lat)
+    base_lon = _lon_cell(lon)
+    lon_cells = int(360.0 / ACTIVITY_CELL_DEG)
+    half_lon_cells = lon_cells // 2
+    candidate_cells: list[tuple[int, int]] = []
+    for dlat in range(-lat_span, lat_span + 1):
+        for dlon in range(-lon_span, lon_span + 1):
+            cell_lat = base_lat + dlat
+            cell_lon = ((base_lon + dlon + half_lon_cells) % lon_cells) - half_lon_cells
+            if _cell_distance_km(lat, lon, cell_lat, cell_lon) <= radius_km:
+                candidate_cells.append((cell_lat, cell_lon))
+    counts: list[int] = []
+    first_bucket = _activity_bucket(t0, bucket_min)
+    last_bucket = _activity_bucket(t1, bucket_min)
+    for bucket in range(first_bucket, last_bucket + 1):
+        heard: set[int] = set()
+        for cell_lat, cell_lon in candidate_cells:
+            heard.update(pings_by_time_index.get((bucket, cell_lat, cell_lon), ()))
+        if exclude_mmsi is not None:
+            heard.discard(exclude_mmsi)
+        counts.append(len(heard))
+    return counts
+
+
+def local_activity(
+    pings_by_time_index: ActivityIndex,
+    lat: float,
+    lon: float,
+    t0: datetime,
+    t1: datetime,
+    *,
+    radius_km: float = _DEFAULT_LOCAL_RADIUS_KM,
+    bucket_min: float = _DEFAULT_ACTIVITY_BUCKET_MIN,
+    min_vessels: int = _DEFAULT_MIN_LOCAL_VESSELS,
+    exclude_mmsi: int | None = None,
+) -> bool:
+    """True when receivers near the last fix kept hearing enough *other* ships.
+
+    Global coverage says the receiver network was alive somewhere in the box; it does not say
+    this ship was inside anyone's range. Asking locally fixes that: a ship that leaves one
+    receiver's footprint while receivers elsewhere stay busy is no longer called dark merely
+    because the whole feed stayed busy.
+    """
+    counts = _nearby_vessel_counts(
+        pings_by_time_index,
+        lat,
+        lon,
+        t0,
+        t1,
+        radius_km=radius_km,
+        bucket_min=bucket_min,
+        exclude_mmsi=exclude_mmsi,
+    )
+    return bool(counts) and all(n >= min_vessels for n in counts)
+
+
 def silences(
     track: Sequence[Ping],
     coverage: Iterable[CoverageMinute],
     *,
     min_gap_min: float = 60.0,
     min_sog: float = 2.0,
+    activity: ActivityIndex | None = None,
 ) -> list[Event]:
     """AIS gaps that belong to the ship, not to our receiver network.
 
     A gap only counts while the ship was last seen underway (SOG at or above `min_sog`, and never
     below the berth floor) and only if `covered` proves the recorder was hearing the rest of the
-    traffic for the whole gap. Severity rises with duration and with the distance covered while
-    dark, because both make the gap harder to explain as a missed message.
+    traffic for the whole gap. When `activity` is supplied, `local_activity` must also hold:
+    receivers within 60 km of the last fix must have been hearing other ships throughout. Global
+    coverage alone cannot tell a ship leaving one receiver's range from a ship that switched off
+    while receivers elsewhere stayed busy. Severity rises with duration and with the distance
+    covered while dark, because both make the gap harder to explain as a missed message.
     """
     events: list[Event] = []
     sog_floor = max(min_sog, BERTH_SOG_KN)
@@ -125,11 +278,50 @@ def silences(
             continue
         if not covered(last.t, nxt.t, coverage):
             continue
+        local_heard: int | None = None
+        if activity is not None:
+            if not local_activity(activity, last.lat, last.lon, last.t, nxt.t, exclude_mmsi=last.mmsi):
+                continue
+            local_heard = min(
+                _nearby_vessel_counts(
+                    activity,
+                    last.lat,
+                    last.lon,
+                    last.t,
+                    nxt.t,
+                    radius_km=_DEFAULT_LOCAL_RADIUS_KM,
+                    bucket_min=_DEFAULT_ACTIVITY_BUCKET_MIN,
+                    exclude_mmsi=last.mmsi,
+                )
+            )
         km = distance_km(last.lat, last.lon, nxt.lat, nxt.lon)
         implied_kn = km / (minutes / 60.0) / KNOT_KM_H
         duration_score = min(1.0, minutes / (4.0 * max(min_gap_min, 1.0)))
         distance_score = min(1.0, km / 200.0)
         severity = round(min(1.0, 0.5 * duration_score + 0.5 * distance_score), 3)
+        if local_heard is None:
+            explanation = (
+                f"Silent for {_fmt_duration(minutes)} while underway at {last.sog:.0f} kn; "
+                "the receiver network was hearing other ships the whole time."
+            )
+        else:
+            explanation = (
+                f"Silent for {_fmt_duration(minutes)} while underway at {last.sog:.0f} kn; "
+                f"receivers within {_DEFAULT_LOCAL_RADIUS_KM:.0f} km kept hearing "
+                f"{local_heard} other ships the whole time."
+            )
+        evidence: dict[str, Any] = {
+            "minutes": round(minutes, 1),
+            "last_lat": last.lat,
+            "last_lon": last.lon,
+            "next_lat": nxt.lat,
+            "next_lon": nxt.lon,
+            "distance_km": round(km, 1),
+            "implied_kn": round(implied_kn, 1),
+            "coverage_min_msgs": _coverage_floor(last.t, nxt.t, coverage),
+        }
+        if local_heard is not None:
+            evidence["local_other_vessels"] = local_heard
         events.append(
             Event(
                 kind="silence",
@@ -140,20 +332,8 @@ def silences(
                 lat=last.lat,
                 lon=last.lon,
                 severity=severity,
-                explanation=(
-                    f"Silent for {_fmt_duration(minutes)} while underway at {last.sog:.0f} kn; "
-                    "the receiver network was hearing other ships the whole time."
-                ),
-                evidence={
-                    "minutes": round(minutes, 1),
-                    "last_lat": last.lat,
-                    "last_lon": last.lon,
-                    "next_lat": nxt.lat,
-                    "next_lon": nxt.lon,
-                    "distance_km": round(km, 1),
-                    "implied_kn": round(implied_kn, 1),
-                    "coverage_min_msgs": _coverage_floor(last.t, nxt.t, coverage),
-                },
+                explanation=explanation,
+                evidence=evidence,
             )
         )
     return events
@@ -208,78 +388,127 @@ def jumps(track: Sequence[Ping], cap_kn: float, *, min_km: float = 5.0, factor: 
     return events
 
 
-def _centroid(points: Sequence[Ping]) -> tuple[float, float]:
-    return (
-        sum(p.lat for p in points) / len(points),
-        sum(p.lon for p in points) / len(points),
-    )
+def _cluster_labels(points: Sequence[Ping], min_km: float) -> list[int] | None:
+    """Label every fix A (0) or B (1), or None when no fix is far enough to open B.
 
-
-def _clone_groups(chain: Sequence[Ping], window_min: float, min_flips: int) -> list[tuple[int, int]]:
-    """Disjoint index ranges, each containing at least one qualifying alternation window.
-
-    A qualifying window can start at any ping and holds as many consecutive far-apart pings as
-    fit in `window_min`. Windows that share pings are one continuous clone episode; windows that
-    do not are separate episodes, even if they belong to the same far-ping chain.
+    The first fix defines A. A fix more than `min_km` from it opens B at that fix, and every
+    later fix joins whichever cluster centre is nearer. This is deliberately the simplest
+    two-mean split: real clone pairs sit tens of kilometres apart, so a heavier clustering
+    method would add cost without changing the answer.
     """
+    if not points:
+        return None
+    first = points[0]
+    a_sum = [first.lat, first.lon, 1.0]
+    b_sum: list[float] | None = None
+    labels = [0]
+    for ping in points[1:]:
+        if b_sum is None:
+            if distance_km(ping.lat, ping.lon, first.lat, first.lon) > min_km:
+                b_sum = [ping.lat, ping.lon, 1.0]
+                labels.append(1)
+            else:
+                a_sum[0] += ping.lat
+                a_sum[1] += ping.lon
+                a_sum[2] += 1.0
+                labels.append(0)
+            continue
+        a_lat = a_sum[0] / a_sum[2]
+        a_lon = a_sum[1] / a_sum[2]
+        b_lat = b_sum[0] / b_sum[2]
+        b_lon = b_sum[1] / b_sum[2]
+        if distance_km(ping.lat, ping.lon, a_lat, a_lon) <= distance_km(ping.lat, ping.lon, b_lat, b_lon):
+            labels.append(0)
+            a_sum[0] += ping.lat
+            a_sum[1] += ping.lon
+            a_sum[2] += 1.0
+        else:
+            labels.append(1)
+            b_sum[0] += ping.lat
+            b_sum[1] += ping.lon
+            b_sum[2] += 1.0
+    return labels if b_sum is not None else None
+
+
+def _clone_flips(points: Sequence[Ping], labels: Sequence[int]) -> list[tuple[int, float]]:
+    """A<->B transitions whose implied speed is faster than any ship can travel.
+
+    A slow ferry crossing between the two places is not a clone; only a hop that beats the
+    threefold speed margin counts. Same-time fixes carry no implied speed and are left alone.
+    """
+    flips: list[tuple[int, float]] = []
+    for i in range(len(points) - 1):
+        if labels[i] == labels[i + 1]:
+            continue
+        seconds = (points[i + 1].t - points[i].t).total_seconds()
+        if seconds <= 0:
+            continue
+        km = distance_km(points[i].lat, points[i].lon, points[i + 1].lat, points[i + 1].lon)
+        implied_kn = km / (seconds / 3600.0) / KNOT_KM_H
+        if implied_kn > CLONE_IMPLIED_KN:
+            flips.append((i, implied_kn))
+    return flips
+
+
+def _flip_groups(
+    flips: Sequence[tuple[int, float]], points: Sequence[Ping], *, window_min: float, min_flips: int
+) -> list[tuple[int, int]]:
+    """Index ranges over `flips` holding at least `min_flips` inside one `window_min` span.
+
+    Windows that share a fix are one continuous episode; a quiet gap longer than the window
+    starts a new one. Grouping by point range rather than flip index keeps two episodes hours
+    apart from being glued together just because no non-flip transition sat between them.
+    """
+    if len(flips) < min_flips:
+        return []
     span_s = window_min * 60.0
-    end = 0
     candidates: list[tuple[int, int]] = []
-    for start in range(len(chain)):
+    end = 0
+    for start in range(len(flips)):
         if end < start:
             end = start
-        while end + 1 < len(chain) and (chain[end + 1].t - chain[start].t).total_seconds() <= span_s:
+        start_t = points[flips[start][0] + 1].t
+        while end + 1 < len(flips):
+            next_t = points[flips[end + 1][0] + 1].t
+            if (next_t - start_t).total_seconds() > span_s:
+                break
             end += 1
-        if end - start >= min_flips:
+        if end - start + 1 >= min_flips:
             candidates.append((start, end))
     groups: list[tuple[int, int]] = []
     for start, finish in candidates:
-        if groups and start <= groups[-1][1]:
-            groups[-1] = (groups[-1][0], max(groups[-1][1], finish))
-        else:
-            groups.append((start, finish))
+        first_point = flips[start][0]
+        if groups:
+            previous_first, previous_finish = groups[-1]
+            if first_point <= flips[previous_finish][0] + 1:
+                groups[-1] = (previous_first, max(previous_finish, finish))
+                continue
+        groups.append((start, finish))
     return groups
 
 
-def _best_window(
-    chain: Sequence[Ping], start: int, finish: int, window_min: float, min_flips: int
-) -> tuple[int, int] | None:
-    """The window with the most flips inside one episode, so evidence is the strongest run."""
-    span_s = window_min * 60.0
-    best: tuple[int, int] | None = None
-    best_flips = 0
-    end = start
-    for left in range(start, finish + 1):
-        if end < left:
-            end = left
-        while end + 1 <= finish and (chain[end + 1].t - chain[left].t).total_seconds() <= span_s:
-            end += 1
-        flips = end - left
-        if flips >= min_flips and flips > best_flips:
-            best, best_flips = (left, end), flips
-    return best
-
-
-def _clone_event(window: Sequence[Ping], min_km: float, min_flips: int) -> Event | None:
-    """Turn one alternating run into an Event, or None if it is not two tight clusters."""
-    cluster_a = window[0::2]
-    cluster_b = window[1::2]
-    if len(cluster_a) < 2 or len(cluster_b) < 2:
-        return None
-    a_lat, a_lon = _centroid(cluster_a)
-    b_lat, b_lon = _centroid(cluster_b)
-    if distance_km(a_lat, a_lon, b_lat, b_lon) <= min_km:
-        return None
-    spread = max(
-        distance_km(p.lat, p.lon, q.lat, q.lon)
-        for group in (cluster_a, cluster_b)
-        for p, q in combinations(group, 2)
-    )
-    # Each cluster must stay tight; three unrelated positions are not two transmitters.
-    if spread > min_km:
-        return None
-    separation = max(distance_km(p.lat, p.lon, q.lat, q.lon) for p in cluster_a for q in cluster_b)
-    flips = len(window) - 1
+def _clone_event(
+    points: Sequence[Ping],
+    labels: Sequence[int],
+    flips: Sequence[tuple[int, float]],
+    start: int,
+    finish: int,
+    min_flips: int,
+) -> Event:
+    """Turn one qualifying flip range into the single Event the UI shows for that episode."""
+    first_point = flips[start][0]
+    last_point = flips[finish][0] + 1
+    window = points[first_point : last_point + 1]
+    window_labels = labels[first_point : last_point + 1]
+    cluster_a = [ping for i, ping in enumerate(window) if window_labels[i] == 0]
+    cluster_b = [ping for i, ping in enumerate(window) if window_labels[i] == 1]
+    a_lat = sum(p.lat for p in cluster_a) / len(cluster_a)
+    a_lon = sum(p.lon for p in cluster_a) / len(cluster_a)
+    b_lat = sum(p.lat for p in cluster_b) / len(cluster_b)
+    b_lon = sum(p.lon for p in cluster_b) / len(cluster_b)
+    separation = distance_km(a_lat, a_lon, b_lat, b_lon)
+    flip_count = finish - start + 1
+    max_implied = max(flips[i][1] for i in range(start, finish + 1))
     minutes = (window[-1].t - window[0].t).total_seconds() / 60.0
     return Event(
         kind="clone",
@@ -288,22 +517,20 @@ def _clone_event(window: Sequence[Ping], min_km: float, min_flips: int) -> Event
         end=window[-1].t,
         lat=window[0].lat,
         lon=window[0].lon,
-        severity=round(min(1.0, flips / (2.0 * max(min_flips, 1))), 3),
+        severity=round(min(1.0, flip_count / (2.0 * max(min_flips, 1))), 3),
         explanation=(
-            f"MMSI {window[0].mmsi} alternated {flips} times between two positions "
-            f"{separation:.0f} km apart within {_fmt_duration(minutes)}; "
-            "two transmitters are sharing the identity."
+            f"One identity reported from two places {separation:.0f} km apart, "
+            f"switching {flip_count} times in {_fmt_duration(minutes)}; one ship cannot do that, "
+            "so two transmitters share this ID (or a device is misconfigured)."
         ),
         evidence={
-            "flips": flips,
-            "minutes": round(minutes, 1),
-            "max_separation_km": round(separation, 1),
-            "cluster_a_lat": round(a_lat, 5),
-            "cluster_a_lon": round(a_lon, 5),
-            "cluster_b_lat": round(b_lat, 5),
-            "cluster_b_lon": round(b_lon, 5),
-            "cluster_a_pings": len(cluster_a),
-            "cluster_b_pings": len(cluster_b),
+            "cluster_a": [round(a_lat, 5), round(a_lon, 5)],
+            "cluster_b": [round(b_lat, 5), round(b_lon, 5)],
+            "separation_km": round(separation, 1),
+            "flips": flip_count,
+            "max_implied_kn": round(max_implied, 1),
+            "first": window[0].t.isoformat(),
+            "last": window[-1].t.isoformat(),
         },
     )
 
@@ -315,32 +542,20 @@ def clones(
     min_km: float = 30.0,
     min_flips: int = 3,
 ) -> list[Event]:
-    """Episodes where one MMSI alternates between two far-apart positions.
+    """Episodes where one MMSI alternates between two places faster than a ship can travel.
 
-    Two transmitters sharing an identity produce a ping-pong: every consecutive pair is farther
-    apart than `min_km`, and a short window holds at least `min_flips` such hops. Chains of far
-    pings are split into episodes by overlapping qualifying windows, so one physical episode
-    yields one Event even when it lasts longer than the window.
+    Two transmitters sharing an identity show up as two position clusters visited in turn. We
+    label each fix A or B once, keep only A<->B transitions whose implied speed beats 55 kn,
+    and report every 6 h span holding at least `min_flips` of them. `window_min` is accepted
+    and ignored for compatibility: the old 10-minute window missed the recorded 630001188
+    case, whose hops are 5-60 minutes apart.
     """
     points = sorted(track, key=lambda p: p.t)
+    labels = _cluster_labels(points, min_km)
+    if labels is None:
+        return []
+    flips = _clone_flips(points, labels)
     events: list[Event] = []
-    i = 0
-    while i + 1 < len(points):
-        if distance_km(points[i].lat, points[i].lon, points[i + 1].lat, points[i + 1].lon) <= min_km:
-            i += 1
-            continue
-        j = i
-        while j + 1 < len(points) and (
-            distance_km(points[j].lat, points[j].lon, points[j + 1].lat, points[j + 1].lon) > min_km
-        ):
-            j += 1
-        chain = points[i : j + 1]
-        for start, finish in _clone_groups(chain, window_min, min_flips):
-            best = _best_window(chain, start, finish, window_min, min_flips)
-            if best is None:
-                continue
-            event = _clone_event(chain[best[0] : best[1] + 1], min_km, min_flips)
-            if event is not None:
-                events.append(event)
-        i = j + 1
+    for start, finish in _flip_groups(flips, points, window_min=CLONE_WINDOW_MIN, min_flips=min_flips):
+        events.append(_clone_event(points, labels, flips, start, finish, min_flips))
     return events

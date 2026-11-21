@@ -20,6 +20,7 @@ __all__ = [
     "DarkHoursDay",
     "PositionRow",
     "Repository",
+    "SarDailyRow",
 ]
 
 
@@ -51,6 +52,22 @@ class DarkHoursBucket(TypedDict):
     gaps: int
 
 
+@dataclass(frozen=True, slots=True)
+class SarDailyRow:
+    """One region/day of the unseen-fleet radar series.
+
+    ``seen`` is every radar detection, ``broadcasting`` those also seen on AIS and
+    ``dark`` the remainder, so ``seen == broadcasting + dark`` is an invariant of the
+    writer. Aggregates only: no vessel identity ever reaches this row.
+    """
+
+    day: date
+    region: str
+    seen: int
+    broadcasting: int
+    dark: int
+
+
 class Repository(Protocol):
     """Persistence boundary for ingested GFW data."""
 
@@ -64,6 +81,15 @@ class Repository(Protocol):
 
     def upsert_sar_cells(self, region: str, cells: Sequence[SarCellRow]) -> int:
         """Upsert SAR cells by (region, day, lat, lon). Returns the number of rows submitted."""
+        ...
+
+    def upsert_sar_daily(self, rows: Sequence[SarDailyRow]) -> int:
+        """Upsert the unseen-fleet daily series by (region, day). Returns rows submitted.
+
+        Writes are idempotent so rebuilding the same snapshot can be replayed into the
+        store without duplicating days. Backends that materialise aggregates refresh
+        them after the batch.
+        """
         ...
 
     def upsert_positions(self, positions: Sequence[PositionRow]) -> int:

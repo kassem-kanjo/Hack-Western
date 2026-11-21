@@ -15,7 +15,7 @@ from pathlib import Path
 
 from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
+from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow, SarDailyRow
 
 __all__ = ["SqliteRepo"]
 
@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS sar_cells (
     detections INTEGER NOT NULL,
     vessel_ids INTEGER NOT NULL,
     PRIMARY KEY (region, day, lat, lon)
+);
+
+CREATE TABLE IF NOT EXISTS sar_daily (
+    region TEXT NOT NULL,
+    day TEXT NOT NULL,
+    seen INTEGER NOT NULL,
+    broadcasting INTEGER NOT NULL,
+    dark INTEGER NOT NULL,
+    PRIMARY KEY (region, day)
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -184,6 +193,15 @@ SELECT day, lat, lon, detections, vessel_ids
 FROM sar_cells
 WHERE region = ? AND day >= ? AND day <= ?
 ORDER BY day, lat, lon
+"""
+
+_SAR_DAILY_UPSERT = """
+INSERT INTO sar_daily (region, day, seen, broadcasting, dark)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(region, day) DO UPDATE SET
+    seen = excluded.seen,
+    broadcasting = excluded.broadcasting,
+    dark = excluded.dark
 """
 
 _POSITION_UPSERT = """
@@ -379,6 +397,12 @@ class SqliteRepo:
         ]
         with self._conn:
             self._conn.executemany(_SAR_UPSERT, params)
+        return len(params)
+
+    def upsert_sar_daily(self, rows: Sequence[SarDailyRow]) -> int:
+        params = [(row.region, row.day.isoformat(), row.seen, row.broadcasting, row.dark) for row in rows]
+        with self._conn:
+            self._conn.executemany(_SAR_DAILY_UPSERT, params)
         return len(params)
 
     def upsert_positions(self, positions: Sequence[PositionRow]) -> int:

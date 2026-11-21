@@ -15,7 +15,7 @@ import psycopg
 
 from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
+from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow, SarDailyRow
 
 __all__ = ["TimescaleRepo"]
 
@@ -106,6 +106,15 @@ WHERE region = %s AND day >= %s AND day <= %s
 ORDER BY day, lat, lon
 """
 
+_SAR_DAILY_UPSERT = """
+INSERT INTO sar_daily (day, region, seen, broadcasting, dark)
+VALUES (%s, %s, %s, %s, %s)
+ON CONFLICT (day, region) DO UPDATE SET
+    seen = EXCLUDED.seen,
+    broadcasting = EXCLUDED.broadcasting,
+    dark = EXCLUDED.dark
+"""
+
 _POSITION_UPSERT = """
 INSERT INTO positions (ts, mmsi, lat, lon, sog)
 VALUES (%s, %s, %s, %s, %s)
@@ -189,6 +198,8 @@ ORDER BY day
 _REFRESH_RANGE = "CALL refresh_continuous_aggregate('dark_hours_daily', %s, %s)"
 
 _REFRESH = "CALL refresh_continuous_aggregate('dark_hours_daily', NULL, NULL)"
+
+_SAR_WEEKLY_REFRESH = "CALL refresh_continuous_aggregate('sar_weekly', NULL, NULL)"
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -278,6 +289,14 @@ class TimescaleRepo:
         params = [(region, cell.day, cell.lat, cell.lon, cell.detections, cell.vessel_ids) for cell in cells]
         with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(_SAR_UPSERT, params)
+        return len(params)
+
+    def upsert_sar_daily(self, rows: Sequence[SarDailyRow]) -> int:
+        """Write the daily series and refresh the weekly continuous aggregate."""
+        params = [(row.day, row.region, row.seen, row.broadcasting, row.dark) for row in rows]
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.executemany(_SAR_DAILY_UPSERT, params)
+        self._conn.execute(_SAR_WEEKLY_REFRESH)
         return len(params)
 
     def upsert_positions(self, positions: Sequence[PositionRow]) -> int:

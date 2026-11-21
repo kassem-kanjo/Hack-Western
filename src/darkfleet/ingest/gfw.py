@@ -71,6 +71,7 @@ class EncounterEvent:
     median_speed_knots: float | None
     encounter_type: str | None
     potential_risk: bool
+    encountered_vessel_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +106,7 @@ class LoiteringEvent:
     duration_hours: float | None
     average_speed_knots: float | None
     total_distance_km: float | None
+    distance_from_shore_km: float | None = None
 
 
 def _entry_id(entry: dict) -> str:
@@ -127,6 +129,30 @@ def _optional_float(value: object) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _first_present(mapping: dict, *keys: str) -> object | None:
+    """The first non-null value among ``keys``; GFW has renamed fields across dataset versions."""
+    for key in keys:
+        if mapping.get(key) is not None:
+            return mapping[key]
+    return None
+
+
+def _shore_distance(distances: object) -> float | None:
+    """Mean shore distance from the event's start/end distances.
+
+    GFW reports the distance at both ends of a loitering event; the dwell barely moves, so the
+    mean is less arbitrary than picking one end, and a single reported end still gives a value.
+    """
+    if not isinstance(distances, dict):
+        return None
+    ends = [
+        _optional_float(distances.get("startDistanceFromShoreKm")),
+        _optional_float(distances.get("endDistanceFromShoreKm")),
+    ]
+    present = [value for value in ends if value is not None]
+    return sum(present) / len(present) if present else None
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -199,6 +225,7 @@ def parse_encounter_entries(entries: list[dict]) -> list[EncounterEvent]:
                 median_speed_knots=_optional_float(encounter.get("medianSpeedKnots")),
                 encounter_type=_optional_str(encounter.get("type")),
                 potential_risk=bool(encounter.get("potentialRisk", False)),
+                encountered_vessel_type=_optional_str(other.get("type")),
             )
         )
     return parsed
@@ -224,9 +251,10 @@ def parse_loitering_entries(entries: list[dict]) -> list[LoiteringEvent]:
                 vessel_type=_optional_str(vessel.get("type")),
                 lat=float(_required(position, "lat", entry_id, "loitering")),
                 lon=float(_required(position, "lon", entry_id, "loitering")),
-                duration_hours=_optional_float(loitering.get("timeInHours")),
+                duration_hours=_optional_float(_first_present(loitering, "timeInHours", "totalTimeHours")),
                 average_speed_knots=_optional_float(loitering.get("averageSpeedKnots")),
                 total_distance_km=_optional_float(loitering.get("totalDistanceKm")),
+                distance_from_shore_km=_shore_distance(entry.get("distances")),
             )
         )
     return parsed
@@ -354,8 +382,19 @@ class GfwClient:
         region: dict,
         start: date,
         end: date,
-        unmatched_only: bool = True,
+        unmatched_only: bool | None = None,
+        *,
+        matched: bool | None = None,
     ) -> list[SarCellRow]:
+        """Radar detections in one region/day window, optionally split by AIS match.
+
+        ``matched=True`` asks for detections that matched an AIS broadcast (the
+        ``broadcasting`` series), ``matched=False`` for unmatched ones (the ``dark``
+        series) and ``None`` for both. ``unmatched_only`` is the legacy flag kept so
+        existing callers keep working: ``True`` means ``matched=False``, while its old
+        ``False`` (and omitting both arguments) means no filter, i.e. both classes.
+        ``matched`` wins when both are supplied.
+        """
         params = {
             "spatial-resolution": "HIGH",
             "temporal-resolution": "DAILY",
@@ -363,7 +402,10 @@ class GfwClient:
             "date-range": f"{start.isoformat()},{end.isoformat()}",
             "format": "JSON",
         }
-        if unmatched_only:
-            params["filters[0]"] = "matched='false'"
+        match_class = matched
+        if match_class is None and unmatched_only:
+            match_class = False
+        if match_class is not None:
+            params["filters[0]"] = f"matched='{'true' if match_class else 'false'}'"
         payload = self._request("POST", "/4wings/report", params, {"geojson": region})
         return parse_sar_report(payload)
