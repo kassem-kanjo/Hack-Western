@@ -31,6 +31,12 @@ import type { HormuzHistoryFile, HormuzUnseenFile, WatchArea, WatchRecording } f
 import { mountReplay, type ReplayView } from "../components/AlertReplay";
 import { h } from "../components/dom";
 import { onVesselFocus } from "../components/SearchBox";
+import {
+  SIGHTINGS_POLL_MS,
+  fetchSightings,
+  sightingRow,
+  unitNames,
+} from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
 import { fmtUtc } from "../format";
@@ -727,11 +733,14 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     h("span", { class: "watch-foot-sep", "aria-hidden": "true" }, "·"),
     exportBtn,
   );
+  const sightingsEl = h("ul", { class: "watch-sightings", hidden: true });
+  let sightingsTimer: number | null = null;
   const events = h(
     "aside",
     { class: "watch-events" },
     h("div", { class: "watch-events-head" }, h("h2", null, "Events"), eventsCount),
     filtersEl,
+    sightingsEl,
     rowsEl,
     areasEl,
     footEl,
@@ -1872,6 +1881,32 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
   void load();
 
+  // Patrol sightings (#220): a 10 s poll; the group stays hidden while the unit has none.
+  async function refreshSightings(): Promise<void> {
+    const payload = await fetchSightings(abort.signal);
+    if (destroyed) return;
+    const items = payload?.feed.filter((item) => item.lat !== null && item.lon !== null) ?? [];
+    sightingsEl.replaceChildren();
+    sightingsEl.hidden = items.length === 0 || payload === null;
+    if (payload === null || items.length === 0) return;
+    const names = unitNames(payload);
+    sightingsEl.append(h("li", { class: "watch-group-head", role: "presentation" }, `Patrol sightings · ${items.length}`));
+    for (const item of items) {
+      const unit = names.get(item.seq ?? -1) ?? "patrol";
+      sightingsEl.append(
+        h(
+          "li",
+          null,
+          sightingRow(item, unit, (picked) => {
+            if (picked.lat !== null && picked.lon !== null) map?.flyToVessel(picked.lat, picked.lon);
+          }),
+        ),
+      );
+    }
+  }
+  void refreshSightings();
+  sightingsTimer = window.setInterval(() => void refreshSightings(), SIGHTINGS_POLL_MS);
+
   return {
     select,
     destroy(): void {
@@ -1883,6 +1918,10 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       if (clockTicker !== null) {
         window.clearInterval(clockTicker);
         clockTicker = null;
+      }
+      if (sightingsTimer !== null) {
+        window.clearInterval(sightingsTimer);
+        sightingsTimer = null;
       }
       stream?.close();
       stream = null;
