@@ -1,4 +1,4 @@
-# Plan v2.1 (evidence-based + Auditor review, Sat 21 Nov, ~1 AM)
+# Plan v2.1 (evidence-based + Auditor review, Fri 20 Nov, ~23:30 ET)
 
 Replaces v1. Built on tonight's data probes (docs/feasibility-dark-fleet.md, docs/region-scan.md).
 GitHub issues are the source of truth; this is the map.

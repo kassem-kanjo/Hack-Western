@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, ~1:15 AM ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Fri 20 Nov, 23:40 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
 ## In flight
 - #28 scene times + false-positive filters + re-rank (Haiku lead, DeepSeek coders, branch feat/scene-times).
