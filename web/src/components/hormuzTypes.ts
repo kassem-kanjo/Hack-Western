@@ -30,8 +30,14 @@ export interface HormuzSummary {
   busiest_day?: string | null;
   /** Newer snapshots may carry a robust headline and spread; all optional. */
   headline_share?: number | null;
+  /** The field name the snapshot builder writes for the median share. */
+  median_dark_share?: number | null;
   median?: number | null;
   iqr?: [number, number] | null;
+  /** Days the headline averaged over, and the low-coverage days it left out. */
+  n_days_used?: number;
+  n_days_excluded?: number;
+  excluded_days?: string[];
 }
 
 export interface HormuzUnseen {
@@ -63,11 +69,29 @@ export interface HormuzHistory {
 
 /**
  * The "typical day" share, preferring the robust headline when the snapshot
- * has one and falling back to the mean daily dark share.
+ * has one and falling back to the median, then to the mean daily dark share.
  */
 export function headlineShare(summary: HormuzSummary | undefined): number | null {
   if (!summary) return null;
-  const value = summary.headline_share ?? summary.median ?? summary.dark_share_mean;
+  const value =
+    summary.headline_share ??
+    summary.median ??
+    summary.median_dark_share ??
+    summary.dark_share_mean;
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(1, Math.max(0, value));
+}
+
+/** The hero number as a whole percent, or null when the snapshot has no share. */
+export function headlinePercent(summary: HormuzSummary | undefined): number | null {
+  const share = headlineShare(summary);
+  return share === null ? null : Math.round(100 * share);
+}
+
+/**
+ * Days the headline left out because the radar barely saw anything that day.
+ * Older snapshots predate the field, so the list may be empty.
+ */
+export function excludedDays(summary: HormuzSummary | undefined): string[] {
+  return summary?.excluded_days ?? [];
 }
