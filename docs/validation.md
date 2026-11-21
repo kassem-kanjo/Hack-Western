@@ -162,3 +162,18 @@ Recall-side check: the true position's bridge density beats a position displaced
 Verdict: no signal. (Rule from the pre-registration: signal needs the count ratio interval above 1 or p < 0.05 on the mean score or the count, and the AUC interval above 0.5.)
 
 Reading: the hypothesis is half right. The bridge is specific about where a ship is (AUC 0.87 against displaced positions, where the binary prism scored 98.4% for displaced points), but the radar cells it finds in dark-gap prisms score the same as cells found in time-shifted prisms (5 gaps above the null 95th percentile against 4.3 expected). A specific model does not create a signal the data lacks. Deviations from the pre-registration: 151 recall cases were used for the fit (the 146 of Test 1 excluded 5 whose polygon union failed; the bridge scoring uses exact point-in-lens tests and does not hit that error); the GEOS error in `core/prism.py` (issue #45) was left unfixed.
+
+## Experiment 3: held-out test outside Brazil (pre-registered 2026-11-21, before any data was fetched)
+
+Why. Test 1 showed the excess over shifted prisms, if any, sits outside the two Brazilian oil-field cells (14 vs 9.8, 18 vs 13.5, 8 vs 5.4 shifted). That was seen after the fact, so it needs new data.
+
+Hypothesis. Outside the Brazilian offshore oil-field cells, dark gaps have more unmatched radar inside their prism than time-shifted gaps.
+
+Fixed in advance:
+- Data: GFW AIS-gap events from 2026-05-01 to 2026-08-14 (never used in Tests 1 or 2 or Experiment 2). Unmatched radar fetched per cell for 2026-04-10 to 2026-09-04 (the gap window plus the largest shift of 21 days each side). The radar days 15 Aug to 4 Sep were fetched earlier for other gaps in Test 1; no hypothesis was tested on them.
+- Cells (5 x 5 degree, written as south-west corner lat, lon; the 15 cells of the region scan minus the two Brazilian ones): (40,170), (0,165), (-20,-80), (5,-50), (10,-170), (40,155), (40,175), (-35,95), (-35,100), (40,150), (-20,170), (10,-50), (-20,-130). Removed: (-30,-45) and (-25,-45). All gaps whose midpoint falls in these cells are used, with no re-ranking by count.
+- Filters: non-gear vessels, gap 6 to 96 hours, moving gaps only (off and on at least 5 km apart), radar cells at the same coordinates on 3 or more days in the fetched range dropped.
+- Test: the day-lens test and the K = 50 shifts of 7 to 21 whole days exactly as in Test 1 (same code, `scripts/validate_holdout.py` reusing `scripts/validate.py`).
+- Primary metric: real count of gaps with at least one candidate cell divided by the mean shifted count, with a gap-bootstrap 95% interval. Signal if and only if the interval's lower bound is above 1.
+- Secondary (reported, not decisive): the Experiment 2 procedure unchanged (sigma = 21.62 from `data/validation/bridge_results.json`, gaps of 48 hours or less, scoring rule and count above the null 95th percentile, no moving or recurring-cell filter), signal under the Experiment 2 rule on the count ratio interval or the mean-score p-value.
+- No other analysis counts. Budget: at most 1,500 live GFW requests. Whatever the result, it is reported as it comes out; if there are too few gaps with any radar to say anything, the verdict is "inconclusive", not "signal".
