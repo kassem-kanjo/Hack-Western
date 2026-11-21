@@ -127,3 +127,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 17:** ~90% DeepSeek; Chief: recovery-readout fix, smoke harness.
 - **Rule breaks:** nearly logged a CEO approval from an ambiguous message (blocked).
 - **Change for next 30 min:** approvals are recorded only from explicit words, quoted; for hardware, read every artefact the user already shared before giving setup steps. Merge #161's fix to return main to green.
+
+## Sat 21 Nov, 13:49 ET (audit 19, covers 13:20-13:49)
+- **Went well:** main back to green within 30 min of the Hypothesis find: antimeridian fix (#163) with the failing case pinned and 4 extra random-seed runs. Found why the loaner Pi never joined wifi: the card's wpa_supplicant.conf was malformed by a previous borrower; backed it up and wrote a clean one.
+- **Went wrong:** Kassem pasted his university password into chat while editing a shell prompt string; I refused to use it and asked him to change it. Pi setup is still not finished after many turns: my instructions relied on him editing a shell one-liner. Replaced with ~/Desktop/fill-pi-wifi.sh (native pop-ups, he runs it, nothing echoed).
+- **Code share since audit 18:** ~95% DeepSeek; Chief: wifi template + helper script, integration.
+- **Rule breaks:** none by me; a credential reached the transcript (user-side).
+- **Change for next 30 min:** for any secret the user must enter, give a script with native prompts, never a one-liner they might edit. w21 (first-pass security review) running; Opus CP3 review at 15:00 confirms its findings.
