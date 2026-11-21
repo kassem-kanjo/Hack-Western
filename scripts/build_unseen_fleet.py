@@ -76,19 +76,43 @@ def fetch_series(
     return matched, unmatched
 
 
+def _caveats(headline: dict[str, Any]) -> list[str]:
+    """Static caveats plus one line naming any low-coverage days left out of the share.
+
+    The exclusion is a calibration decision, so the file has to say it happened: a reader
+    comparing the headline to ``daily`` must be able to see which days did not count and
+    why. The line appears only when something was excluded; a clean window keeps the short
+    static list so the existing UI copy does not grow for no reason.
+    """
+    caveats = list(CAVEATS)
+    excluded = [str(day) for day in headline.get("excluded_days") or []]
+    if excluded:
+        caveats.append(
+            f"{len(excluded)} low-coverage day(s) excluded from the headline "
+            f"(under 20% of the median day): {', '.join(excluded)}"
+        )
+    return caveats
+
+
 def build_snapshot(client: Any, region: str, start: date, end: date) -> dict[str, Any]:
-    """Compute the snapshot payload from a GFW client (real or injected fake)."""
+    """Compute the snapshot payload from a GFW client (real or injected fake).
+
+    ``summary`` carries the robust share fields (median, IQR, used/excluded day counts)
+    and the caveat list names any days that were dropped, so the JSON is auditable on its
+    own without re-running the aggregation.
+    """
     geometry = region_geometry(region)
     matched, unmatched = fetch_series(client, geometry, start, end)
     daily = daily_counts(matched, unmatched)
+    headline = summary(daily)
     return {
         "region": region,
         "period": {"start": start.isoformat(), "end": end.isoformat()},
         "daily": daily,
         "grid": density_grid(unmatched),
-        "summary": summary(daily),
+        "summary": headline,
         "source": SOURCE,
-        "caveats": list(CAVEATS),
+        "caveats": _caveats(headline),
     }
 
 
@@ -146,7 +170,9 @@ def main(argv: Sequence[str] | None = None, *, client: Any = None, repo: Any = N
     print(
         f"region={args.region} start={args.start} end={args.end} "
         f"days={headline['days']} seen={headline['seen_total']} dark={headline['dark_total']} "
-        f"dark_share_mean={headline['dark_share_mean']:.3f}"
+        f"dark_share_mean={headline['dark_share_mean']:.3f} "
+        f"headline_share={headline['headline_share']:.3f} "
+        f"days_used={headline['n_days_used']} days_excluded={headline['n_days_excluded']}"
     )
     print(f"wrote {args.out}")
 

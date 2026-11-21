@@ -22,6 +22,16 @@ __all__ = ["DailyCount", "GridCell", "Summary", "daily_counts", "density_grid", 
 # and would otherwise land in the cell below the one the coordinate belongs to.
 _INDEX_EPS = 1e-9
 
+LOW_COVERAGE_FRACTION = 0.2
+"""A day with fewer than this share of the median day's detections is a reception gap.
+
+Real GFW windows contain partial first/last days and satellite-pass outages. Those days
+have a tiny denominator, so their ``dark_share`` is mostly noise; leaving them in the mean
+or median lets one broken day move the fleet headline. Twenty percent is deliberately
+generous: the busiest days in a region set the scale, and a genuine quiet day still clears
+it unless it is an order of magnitude below the rest.
+"""
+
 
 class DailyCount(TypedDict):
     """One UTC day of the fleet-wide radar series.
@@ -46,13 +56,26 @@ class GridCell(TypedDict):
 
 
 class Summary(TypedDict):
-    """The headline numbers for a window and their uncertainty across days."""
+    """The headline numbers for a window and their uncertainty across usable days.
+
+    ``days`` is the raw number of days in the window; ``n_days_used`` and
+    ``n_days_excluded`` partition it (low-coverage days are named in ``excluded_days``).
+    The spread fields describe the usable days only, because a partial satellite day is a
+    measurement gap rather than a quiet sea. ``headline_share`` repeats the median for the
+    caller that renders the one number a viewer sees first.
+    """
 
     days: int
     seen_total: int
     dark_total: int
     dark_share_mean: float
     dark_share_ci: list[float]
+    median_dark_share: float
+    iqr: list[float]
+    headline_share: float
+    n_days_used: int
+    n_days_excluded: int
+    excluded_days: list[str]
     busiest_day: str | None
 
 
@@ -161,23 +184,57 @@ def _bootstrap_ci(
     return [_percentile(means, 0.025), _percentile(means, 0.975)]
 
 
+def _usable_days(daily: Sequence[DailyCount]) -> tuple[list[DailyCount], list[str]]:
+    """Split the window into days worth averaging and low-coverage days to report.
+
+    The threshold is relative to the median day, not to an absolute detection count, so it
+    travels between regions with very different radar traffic. A day exactly at the
+    threshold is kept: the rule is "below a fifth", and rounding should not decide a
+    boundary case. The excluded labels are sorted so the snapshot does not depend on input
+    order.
+    """
+    if not daily:
+        return [], []
+    median_seen = _percentile(sorted(float(row["seen"]) for row in daily), 0.5)
+    threshold = median_seen * LOW_COVERAGE_FRACTION
+    used: list[DailyCount] = []
+    excluded: list[str] = []
+    for row in daily:
+        if float(row["seen"]) < threshold:
+            excluded.append(row["day"])
+        else:
+            used.append(row)
+    return used, sorted(excluded)
+
+
 def summary(
     daily: Sequence[DailyCount],
     *,
     resamples: int = 2000,
     seed: int = 7,
 ) -> Summary:
-    """Headline totals plus a bootstrap interval for the mean daily dark share.
+    """Headline totals plus robust daily-share statistics over the usable days.
 
-    A tie on ``seen`` goes to the earliest day so the answer does not depend on the
-    input order. An empty window returns zeros and a null busiest day instead of
-    raising: a snapshot for a region with no radar passes should still be a valid file.
+    Low-coverage days (below :data:`LOW_COVERAGE_FRACTION` of the median day) are excluded
+    from the share statistics but still counted in ``days``, ``seen_total`` and
+    ``dark_total``: the totals describe what the radar returned, while the share and its
+    spread describe the days that actually carried enough detections to mean something.
+    The median and interquartile range are preferred to the mean because real windows have
+    one or two broken days that would otherwise dominate; ``headline_share`` is the median
+    so the UI has one explicit field to print.
+
+    A tie on ``seen`` goes to the earliest usable day so the answer does not depend on the
+    input order. An empty window returns zeros and a null busiest day instead of raising: a
+    snapshot for a region with no radar passes should still be a valid file.
     """
-    shares = [float(row["dark_share"]) for row in daily]
+    used, excluded = _usable_days(daily)
+    shares = sorted(float(row["dark_share"]) for row in used)
+    median_share = _percentile(shares, 0.5)
+
     busiest_day: str | None = None
-    if daily:
-        busiest_seen = max(row["seen"] for row in daily)
-        busiest_day = min(row["day"] for row in daily if row["seen"] == busiest_seen)
+    if used:
+        busiest_seen = max(row["seen"] for row in used)
+        busiest_day = min(row["day"] for row in used if row["seen"] == busiest_seen)
 
     return Summary(
         days=len(daily),
@@ -185,5 +242,11 @@ def summary(
         dark_total=sum(row["dark"] for row in daily),
         dark_share_mean=(sum(shares) / len(shares)) if shares else 0.0,
         dark_share_ci=_bootstrap_ci(shares, resamples=resamples, seed=seed),
+        median_dark_share=median_share,
+        iqr=[_percentile(shares, 0.25), _percentile(shares, 0.75)],
+        headline_share=median_share,
+        n_days_used=len(used),
+        n_days_excluded=len(excluded),
+        excluded_days=excluded,
         busiest_day=busiest_day,
     )

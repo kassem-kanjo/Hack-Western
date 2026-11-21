@@ -145,5 +145,59 @@ def test_summary_empty_window_is_zeroed_and_valid():
         "dark_total": 0,
         "dark_share_mean": 0.0,
         "dark_share_ci": [0.0, 0.0],
+        "median_dark_share": 0.0,
+        "iqr": [0.0, 0.0],
+        "headline_share": 0.0,
+        "n_days_used": 0,
+        "n_days_excluded": 0,
+        "excluded_days": [],
         "busiest_day": None,
     }
+
+
+def _day(day: date, seen: int, dark: int) -> list[SarCellRow]:
+    """Two rows that give one day an exact ``seen``/``dark`` split."""
+    return [row(day, 25.0, 56.0, seen - dark), row(day, 25.0, 56.0, dark)]
+
+
+def test_summary_uses_median_and_iqr_and_names_excluded_low_coverage_days():
+    # Four normal days plus one partial satellite day (2 detections vs median 100).
+    rows = [
+        *_day(D1, 100, 5),
+        *_day(D2, 100, 10),
+        *_day(D3, 100, 20),
+        *_day(date(2026, 10, 4), 2, 2),
+        *_day(date(2026, 10, 5), 100, 40),
+    ]
+    daily = daily_counts(rows[0::2], rows[1::2])
+
+    result = summary(daily)
+
+    assert result["days"] == 5
+    assert result["n_days_used"] == 4
+    assert result["n_days_excluded"] == 1
+    assert result["excluded_days"] == ["2026-10-04"]
+    shares = sorted([0.05, 0.10, 0.20, 0.40])
+    median = (shares[1] + shares[2]) / 2  # statistics.median, same as linear p50
+    assert result["median_dark_share"] == pytest.approx(median)
+    assert result["headline_share"] == pytest.approx(median)
+    assert result["iqr"] == pytest.approx([0.0875, 0.25])
+    assert result["dark_share_mean"] == pytest.approx(sum(shares) / len(shares))
+    low, high = result["dark_share_ci"]
+    assert low <= result["dark_share_mean"] <= high
+
+
+def test_summary_excludes_nothing_when_the_day_is_exactly_at_the_threshold():
+    # Median seen is 100, so the 20-detection day is exactly 20% and stays in.
+    rows = [
+        *_day(D1, 100, 10),
+        *_day(D2, 100, 20),
+        *_day(D3, 20, 5),
+    ]
+    daily = daily_counts(rows[0::2], rows[1::2])
+
+    result = summary(daily)
+
+    assert result["n_days_used"] == 3
+    assert result["n_days_excluded"] == 0
+    assert result["excluded_days"] == []
