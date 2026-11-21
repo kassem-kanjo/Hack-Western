@@ -1,0 +1,46 @@
+/* Patrol unit tab: a plain panel, no map. Layout only; colours and type from tokens.css. */
+
+.stage.patrol {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-5);
+  overflow: auto;
+  color: var(--c-text-2);
+}
+
+.patrol-title {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-bold);
+  color: var(--c-text-1);
+}
+
+.patrol-lede {
+  margin: 0 0 var(--sp-5);
+  font-size: var(--fs-h3);
+  line-height: var(--lh-body);
+  color: var(--c-text-1);
+}
+
+.patrol-table {
+  border-top: 1px solid var(--c-line);
+}
+
+.patrol-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.patrol-label {
+  font-size: var(--fs-label);
+  color: var(--c-text-3);
+}
+
+.patrol-value {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--c-text-2);
+}

@@ -1,0 +1,490 @@
+/* Live screen (design/v2/02-baltic.png). Structure only: every colour, size
+   and space comes from tokens.css. The stage is the map plus three overlays;
+   the rail is either the ranked list or one event's proof. */
+
+/* The live split is 400 px, not the case rail's 440: the rows are numbers and
+   one sentence, and the map keeps the extra width. The selector is doubled so
+   it wins over .main regardless of stylesheet order. */
+.main.live-main {
+  grid-template-columns: minmax(0, 1fr) 400px;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Loading and error lines belong to the whole split, not to the map column. */
+.main.live-main > .empty,
+.live-error {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.live-stage {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* MapLibre needs a sized, absolutely positioned container to pan inside. The stage prefix
+   outranks MapLibre's own ".maplibregl-map { position: relative }", which otherwise wins and
+   collapses the map to zero height. */
+.live-stage .live-map {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---------- overlays: switcher, hero, attribution ---------- */
+
+/* One column at the top-left keeps the switcher's height out of the hero's
+   offset, so changing the labels cannot push the card under the bar. */
+.live-topleft {
+  position: absolute;
+  top: var(--sp-4);
+  left: var(--sp-4);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  max-width: calc(100% - 2 * var(--sp-4));
+}
+
+.live-switch {
+  display: inline-flex;
+}
+
+/* Segmented control: one 1 px border between neighbours, radius only on the
+   outer ends, 28 px so it reads as an instrument switch, not a pill. */
+.live-switch-btn {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  margin-left: -1px;
+  border: 1px solid var(--c-line);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.live-switch-btn:first-child {
+  margin-left: 0;
+  border-radius: var(--r-2) 0 0 var(--r-2);
+}
+
+.live-switch-btn:last-child {
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+
+.live-switch-btn[aria-pressed="true"] {
+  position: relative;
+  z-index: 1;
+  border-color: var(--c-line-strong);
+  background: var(--c-panel-raised);
+  color: var(--c-text-1);
+}
+
+.live-switch-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.live-hero {
+  width: 300px;
+  padding: var(--sp-3) var(--sp-4);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-3);
+}
+
+.live-hero-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.live-hero-num {
+  font-family: var(--font-mono);
+  font-size: var(--fs-num-l);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  color: var(--c-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-hero-label {
+  max-width: 190px;
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  color: var(--c-text-2);
+}
+
+/* The 1 px rule says "the headline stops here; the next line is about whether
+   we were listening". */
+.live-hero-cov {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--c-line);
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.live-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-ais);
+}
+
+/* Sits just above the 76 px strip so the attribution is never covered. */
+.live-attrib {
+  position: absolute;
+  left: var(--sp-4);
+  bottom: calc(76px + var(--sp-3));
+  z-index: 3;
+  max-width: calc(100% - 2 * var(--sp-4));
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-attrib a {
+  color: var(--c-text-2);
+  text-decoration: none;
+}
+
+.live-attrib a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- timeline strip ---------- */
+
+.live-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 76px;
+  padding: var(--sp-2) var(--sp-4);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  border-top: 1px solid var(--c-line);
+}
+
+.live-replay:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.live-axis {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+/* The border bottom IS the 1 px baseline; ticks stand on it. */
+.live-axis-track {
+  position: relative;
+  height: 34px;
+  border-bottom: 1px solid var(--c-line-strong);
+}
+
+.live-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A recorder hole is hatched, never a colour: it is an absence, not a kind. */
+.live-hole {
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--from, 0) * 100%);
+  width: calc(var(--w, 0) * 100%);
+  height: 8px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--c-line-strong) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+/* One tick per event; the kind decides the family colour, the shape is the
+   same because at 2 px only colour is legible. */
+.live-tick {
+  position: absolute;
+  bottom: 0;
+  left: calc(var(--at, 0) * 100%);
+  width: 2px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: var(--c-candidate);
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.live-tick.is-silence {
+  background: var(--c-gap);
+}
+
+.live-tick.is-meeting {
+  background: var(--c-rdv);
+}
+
+/* Selection is white, the same 2 px as a focus ring: one emphasis, everywhere. */
+.live-tick[aria-current="true"] {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- rail ---------- */
+
+.live-rail {
+  grid-column: 2;
+  grid-row: 1;
+  overflow-y: auto;
+}
+
+/* The list and the detail take turns; the attribute must beat any display
+   rule the components inside bring. */
+.live-rail [hidden] {
+  display: none;
+}
+
+.live-list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+}
+
+.live-list-head h2 {
+  margin: 0;
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  color: var(--c-text-1);
+}
+
+.live-list-head .meta {
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  white-space: nowrap;
+}
+
+/* ---------- kind chips (legend and filter in one) ---------- */
+
+.live-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-3);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 var(--sp-2) 0 6px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--c-text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* An off chip is information, not a disabled control: it keeps its glyph so
+   the reader can still learn the shape, just quieter. */
+.live-chip[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
+.live-chip-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glyph colours follow the map: gap/rdv are their own families, jump, clone
+   and spoof share the position family's white. */
+.kind-glyph {
+  display: block;
+  flex: none;
+}
+
+/* Opaque fill (CSS, not an SVG attribute) so the front square hides the back
+   square's lines where they overlap, like the map icon. */
+.kind-glyph .clone-front {
+  fill: var(--c-panel);
+}
+
+.kind-glyph.is-silence {
+  color: var(--c-gap);
+}
+
+.kind-glyph.is-meeting {
+  color: var(--c-rdv);
+}
+
+.kind-glyph.is-jump,
+.kind-glyph.is-clone,
+.kind-glyph.is-spoof {
+  color: var(--c-candidate);
+}
+
+/* ---------- ranked rows ---------- */
+
+.live-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A row is a button, so reset the UA button chrome but keep the grid. The
+   left border is always reserved (transparent) so the 2 px selection bar
+   cannot shift the text. */
+.live-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: var(--sp-1) var(--sp-3);
+  align-items: start;
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  padding-left: calc(var(--sp-4) - 2px);
+  border: 0;
+  border-left: 2px solid transparent;
+  border-bottom: 1px solid var(--c-line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.live-row:hover {
+  background: var(--c-panel-raised);
+}
+
+.live-row[aria-current="true"] {
+  border-left-color: var(--c-focus);
+  background: var(--c-panel-raised);
+}
+
+.live-row-rank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--c-text-3);
+}
+
+.live-row-index {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.live-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.live-row-vessel {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  color: var(--c-text-1);
+}
+
+.live-row-mmsi {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-row-why {
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  color: var(--c-text-2);
+}
+
+/* Red is reserved for this one tag: a sanctions hit is the only thing on the
+   screen that earns a warning colour. */
+.live-row-tag {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0 6px;
+  border: 1px solid var(--c-risk-high);
+  border-radius: var(--r-1);
+  color: var(--c-risk-high);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.live-row-time {
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.live-detail {
+  min-width: 0;
+}
+
+/* ---------- focus ---------- */
+
+.live-row:focus-visible,
+.live-chip:focus-visible,
+.live-tick:focus-visible,
+.live-switch-btn:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}

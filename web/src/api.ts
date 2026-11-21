@@ -6,6 +6,8 @@
  * /api to the FastAPI app on 127.0.0.1:8000 (vite.config.ts).
  */
 
+import type { LiveEvent, LiveRegion, LiveSummary, LiveVessel } from "./model/live";
+
 export type LonLat = [number, number];
 
 export interface GeoPolygon {
@@ -171,4 +173,33 @@ export function fetchCase(id: string, signal?: AbortSignal): Promise<CaseDetail>
 
 export function fetchStats(signal?: AbortSignal): Promise<StatsResponse> {
   return getJson<StatsResponse>("/api/stats", signal);
+}
+
+// ---- Live regions (src/darkfleet/api/live.py) ----
+
+/** Every region with a live snapshot file. */
+export function fetchLiveRegions(signal?: AbortSignal): Promise<LiveRegion[]> {
+  return getJson<LiveRegion[]>("/api/live/regions", signal);
+}
+
+/** Header numbers, window, coverage and watchlist for one region. */
+export function fetchLiveSummary(region: string, signal?: AbortSignal): Promise<LiveSummary> {
+  return getJson<LiveSummary>(`/api/live/${encodeURIComponent(region)}/summary`, signal);
+}
+
+/** Severity-ordered events for one region (the API sorts; limit caps the count). */
+export function fetchLiveEvents(
+  region: string,
+  limit = 500,
+  signal?: AbortSignal,
+): Promise<LiveEvent[]> {
+  return getJson<LiveEvent[]>(
+    `/api/live/${encodeURIComponent(region)}/events?limit=${limit}`,
+    signal,
+  );
+}
+
+/** Latest fix per vessel for one region. */
+export function fetchLiveVessels(region: string, signal?: AbortSignal): Promise<LiveVessel[]> {
+  return getJson<LiveVessel[]>(`/api/live/${encodeURIComponent(region)}/vessels`, signal);
 }
