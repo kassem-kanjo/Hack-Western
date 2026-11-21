@@ -27,7 +27,7 @@ import * as maplibregl from "maplibre-gl";
 import { offlineStyle } from "../basemap";
 import { h } from "../components/dom";
 import type { EventKind, LiveEvent, LiveVessel } from "../model/live";
-import { KIND_LABEL, vesselName } from "../model/liveFacts";
+import { KIND_LABEL, UNNAMED_VESSEL, vesselName } from "../model/liveFacts";
 import { rgba, themeColor } from "./theme";
 
 type Bounds = [[number, number], [number, number]];
@@ -57,6 +57,13 @@ export interface LiveMapOptions {
   onSelect: (event: LiveEvent) => void; // called when a marker is clicked
 }
 
+/** One routed vessel: where it was last heard, and whether it is a watchlist alert. */
+export interface VesselFocus {
+  vessel: LiveVessel;
+  /** Sanctions or shadow-fleet hit: the ring is red, not white. */
+  alert: boolean;
+}
+
 export interface LiveMapHandle {
   setVessels(vessels: LiveVessel[]): void;
   /**
@@ -67,6 +74,11 @@ export interface LiveMapHandle {
   setEvents(events: LiveEvent[], selected: LiveEvent | null, numbered?: number): void;
   /** Zoom to the event (zoom 8 to 9 around its position). Use jumpTo under reduced motion. */
   focusEvent(event: LiveEvent): void;
+  /**
+   * Fly to a vessel's last fix and ring it with its name; `null` clears both the
+   * ring and the label. The ring is red for a watchlist alert, white otherwise.
+   */
+  focusVessel(focus: VesselFocus | null): void;
   /** Back to the region's REGION_VIEWS extent. */
   resetView(): void;
   resize(): void;
@@ -117,6 +129,17 @@ const CLUSTER_MAX_ZOOM = 9;
 
 /** The white ring around the selected event. */
 const SELECT_RADIUS = 15;
+
+/** The routed vessel's ring: bigger than an event marker so it reads as a place, not a finding. */
+const VESSEL_RING_RADIUS = 22;
+
+/** The route's camera: close enough that the vessel and its neighbours are distinct. */
+const VESSEL_FOCUS_ZOOM = 9;
+const VESSEL_FLY_MS = 800;
+
+/** One gentle pulse, then the ring stays static. */
+const VESSEL_PULSE_MS = 900;
+const VESSEL_PULSE_SCALE = 1.8;
 
 /**
  * How far left of the shape's centre the rank number sits, per kind: just
@@ -249,6 +272,8 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     text2: themeColor("--c-text-2", "#B2BFCD"),
     lineStrong: themeColor("--c-line-strong", "#34485F"),
     panel: themeColor("--c-panel", "#101923"),
+    /** Watchlist alerts only; the vessel ring otherwise uses text-1 white. */
+    alert: themeColor("--c-risk-high", "#FF6B5E"),
     /** Marker interiors hide the AIS dots behind a shape, as in the design. */
     sea: themeColor("--c-bg", "#0A1017"),
   };
@@ -298,7 +323,23 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     "stroke-width": 1.5,
   });
   selectedRing.style.display = "none";
-  svg.append(dotLayer, lineLayer, shapeLayer, selectedRing);
+  // The routed vessel sits above the event ring: it is the reason the camera moved.
+  // A group carries both the static ring and its one-shot echo, because a circle
+  // is not a container and would not render children.
+  const vesselGroup = svgEl("g", { class: "live-vessel-focus" });
+  const vesselRing = svgEl("circle", {
+    class: "live-vessel-ring",
+    cx: 0,
+    cy: 0,
+    r: VESSEL_RING_RADIUS,
+    fill: "none",
+    stroke: colors.text1,
+    "stroke-width": 1.5,
+  });
+  const vesselPulseLayer = svgEl("g", { class: "live-vessel-pulse" });
+  vesselGroup.append(vesselRing, vesselPulseLayer);
+  vesselGroup.style.display = "none";
+  svg.append(dotLayer, lineLayer, shapeLayer, selectedRing, vesselGroup);
 
   overlay.append(labelLayer, markerLayer, selectionLayer);
   opts.container.append(overlay);
@@ -317,6 +358,12 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
   let selectedLabel: HTMLElement | null = null;
   let selectedLngLat: [number, number] | null = null;
+
+  /** The routed vessel's ring position and label; independent of `selected`. */
+  let vesselFocusLngLat: [number, number] | null = null;
+  let vesselFocusStroke: string | null = null;
+  let vesselLabel: HTMLElement | null = null;
+  let vesselPulseTimer: number | null = null;
 
   /** null until the first zoom check: true below CLUSTER_ZOOM, false above it. */
   let flatField: boolean | null = null;
@@ -352,6 +399,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     element: HTMLElement,
     lngLat: [number, number],
     anchor: "centre" | "above",
+    gap = 14,
   ): void {
     const point = map.project(lngLat);
     const width = opts.container.clientWidth;
@@ -368,7 +416,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     }
 
     element.style.visibility = "visible";
-    const y = anchor === "above" ? point.y - 14 : point.y;
+    const y = anchor === "above" ? point.y - gap : point.y;
     const shift =
       anchor === "above" ? " translate(-50%, -100%)" : " translate(-50%, -50%)";
     element.style.transform = `translate(${point.x}px, ${y}px)${shift}`;
@@ -493,6 +541,20 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
     if (selectedLabel !== null && selectedLngLat !== null) {
       place(selectedLabel, selectedLngLat, "above");
+    }
+
+    if (vesselFocusLngLat !== null) {
+      const point = map.project(vesselFocusLngLat);
+      const visible = onScreen(point.x, point.y);
+      vesselGroup.style.display = visible ? "" : "none";
+      vesselGroup.setAttribute("transform", `translate(${point.x} ${point.y})`);
+      if (vesselLabel !== null) {
+        // Clear the ring, not its centre, so the name never sits on the circle.
+        place(vesselLabel, vesselFocusLngLat, "above", VESSEL_RING_RADIUS + 6);
+      }
+    } else {
+      vesselGroup.style.display = "none";
+      if (vesselLabel !== null) vesselLabel.style.visibility = "hidden";
     }
   }
 
@@ -653,6 +715,147 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     ].join(";");
     selectionLayer.append(label);
     selectedLabel = label;
+  }
+
+  /* ---- routed vessel ----------------------------------------------------- */
+
+  /** Stop the one-shot echo and remove it; the static ring is untouched. */
+  function clearVesselPulse(): void {
+    if (vesselPulseTimer !== null) {
+      window.clearTimeout(vesselPulseTimer);
+      vesselPulseTimer = null;
+    }
+    vesselPulseLayer.replaceChildren();
+  }
+
+  /** Drop the ring, the echo and the name; used whenever the route leaves the vessel. */
+  function clearVesselFocus(): void {
+    vesselFocusLngLat = null;
+    vesselGroup.style.display = "none";
+    clearVesselPulse();
+    if (vesselLabel !== null) {
+      vesselLabel.remove();
+      vesselLabel = null;
+    }
+  }
+
+  /**
+   * One gentle echo, then the ring stays static: the expansion says "here", and
+   * its removal leaves a still marking rather than an idle animation. Under
+   * reduced motion nothing moves and the ring simply appears.
+   */
+  function pulseVesselRing(stroke: string): void {
+    clearVesselPulse();
+    if (prefersReducedMotion()) return;
+
+    // Drawn at the ring's centre, so the camera fly carries it along without
+    // reprojecting every frame.
+    const echo = svgEl("circle", {
+      class: "live-vessel-ring-pulse",
+      cx: 0,
+      cy: 0,
+      r: VESSEL_RING_RADIUS,
+      fill: "none",
+      stroke,
+      "stroke-width": 1.5,
+      "stroke-opacity": 0.85,
+    });
+    const grow = svgEl("animate", {
+      attributeName: "r",
+      from: String(VESSEL_RING_RADIUS),
+      to: String(Math.round(VESSEL_RING_RADIUS * VESSEL_PULSE_SCALE)),
+      dur: `${VESSEL_PULSE_MS}ms`,
+      begin: "indefinite",
+      fill: "freeze",
+      calcMode: "spline",
+      keyTimes: "0;1",
+      keySplines: "0.2 0 0.4 1",
+    });
+    const fade = svgEl("animate", {
+      attributeName: "stroke-opacity",
+      from: "0.85",
+      to: "0",
+      dur: `${VESSEL_PULSE_MS}ms`,
+      begin: "indefinite",
+      fill: "freeze",
+    });
+    echo.append(grow, fade);
+    vesselPulseLayer.append(echo);
+    grow.beginElement();
+    fade.beginElement();
+    vesselPulseTimer = window.setTimeout(() => {
+      echo.remove();
+      vesselPulseTimer = null;
+    }, VESSEL_PULSE_MS + 50);
+  }
+
+  /**
+   * The routed vessel: fly to its last fix, ring it and name it. Red is reserved
+   * for a watchlist alert; every other hull gets the same white as the selected
+   * event, so the colour always says something.
+   */
+  function applyVesselFocus(focus: VesselFocus | null): void {
+    if (destroyed) return;
+
+    const last = focus === null ? null : focus.vessel.last;
+    if (focus === null || last === null) {
+      clearVesselFocus();
+      positionOverlays();
+      return;
+    }
+
+    const lngLat: [number, number] = [last.lon, last.lat];
+    const stroke = focus.alert ? colors.alert : colors.text1;
+    vesselFocusLngLat = lngLat;
+    vesselFocusStroke = stroke;
+    vesselRing.setAttribute("stroke", stroke);
+
+    if (vesselLabel === null) {
+      vesselLabel = h("div", { class: "live-vessel-label" });
+      vesselLabel.style.cssText = [
+        "position:absolute",
+        "left:0",
+        "top:0",
+        `color:${colors.text1}`,
+        `background:${rgba(colors.panel, 0.92)}`,
+        `border:1px solid ${stroke}`,
+        "border-radius:2px",
+        "padding:3px 6px",
+        "font-family:var(--font-sans)",
+        "font-size:11px",
+        "font-weight:500",
+        "line-height:1.2",
+        "white-space:nowrap",
+        "pointer-events:none",
+        "visibility:hidden",
+        "z-index:2",
+        "will-change:transform",
+      ].join(";");
+      selectionLayer.append(vesselLabel);
+    }
+    const name = focus.vessel.name?.trim() || UNNAMED_VESSEL;
+    vesselLabel.textContent = name;
+    // The border carries the same meaning as the ring when the name changes
+    // without the ring being rebuilt.
+    vesselLabel.style.borderColor = stroke;
+
+    positionOverlays();
+
+    // Before load the whole view is still the constructor's region fit, and the
+    // load handler flies to the ring once the map is ready; flying (or pulsing)
+    // now would be overwritten by that first fit.
+    if (!ready) return;
+    pulseVesselRing(stroke);
+    if (prefersReducedMotion()) {
+      map.jumpTo({ center: lngLat, zoom: VESSEL_FOCUS_ZOOM });
+    } else {
+      map.flyTo({
+        center: lngLat,
+        zoom: VESSEL_FOCUS_ZOOM,
+        duration: VESSEL_FLY_MS,
+        essential: true,
+      });
+    }
   }
 
   /* ---- markers ---------------------------------------------------------- */
@@ -1049,6 +1252,22 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     // First fit never animates; the constructor already set the same view.
     map.fitBounds(view, { padding: 40, duration: 0 });
 
+    // A vessel route applied before the first frame owns the camera once the map
+    // exists; otherwise the load fit would leave the ring off screen.
+    if (vesselFocusLngLat !== null) {
+      pulseVesselRing(vesselFocusStroke ?? colors.text1);
+      if (prefersReducedMotion()) {
+        map.jumpTo({ center: vesselFocusLngLat, zoom: VESSEL_FOCUS_ZOOM });
+      } else {
+        map.flyTo({
+          center: vesselFocusLngLat,
+          zoom: VESSEL_FOCUS_ZOOM,
+          duration: VESSEL_FLY_MS,
+          essential: true,
+        });
+      }
+    }
+
     sizeSvg();
     applyVesselDensity();
     rebuildMarkers();
@@ -1095,6 +1314,10 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       }
     },
 
+    focusVessel(focus: VesselFocus | null): void {
+      applyVesselFocus(focus);
+    },
+
     resetView(): void {
       if (destroyed) return;
       map.fitBounds(view, {
@@ -1115,6 +1338,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       if (destroyed) return;
       destroyed = true;
       clearClusterLabels();
+      clearVesselFocus();
       markers = [];
       hovered = null;
       selectedLabel = null;

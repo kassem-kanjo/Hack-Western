@@ -603,28 +603,20 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     }
 
     /**
-     * Zoom to a vessel's last fix. The map handle only knows how to focus an
-     * event, so a throwaway one-point event carries the camera there; it is
-     * never added to the marker list or the rail.
+     * Fly to a vessel's last fix and ring it. The ring is red only when the
+     * summary lists the hull as a sanctions or shadow-fleet alert; a detention
+     * (or no hit at all) is white, matching the selected-event ring.
      */
     function focusVessel(vessel: LiveVessel): void {
-      const last = vessel.last;
-      if (last === null) {
+      if (vessel.last === null) {
+        map.focusVessel(null);
         map.resetView();
         return;
       }
-      map.focusEvent({
-        kind: "jump",
-        mmsi: vessel.mmsi,
-        start: last.t,
-        end: last.t,
-        lat: last.lat,
-        lon: last.lon,
-        severity: 0,
-        explanation: "",
-        other_mmsi: null,
-        evidence: {},
-      });
+      const watch = watchlistForVessel(vessel, summary.watchlist);
+      const alert =
+        watch !== null && (watch.category === "sanctioned" || watch.category === "shadow_fleet");
+      map.focusVessel({ vessel, alert });
     }
 
     function applyFilter(): void {
@@ -661,6 +653,9 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       if (resolved === selectedIndex && selectedVessel === null) return;
       selectedVessel = null;
       selectedIndex = resolved;
+      // The ring and name belong to the vessel route alone; going to an event
+      // (or back to the list) must not leave them glowing over the map.
+      map.focusVessel(null);
 
       const event = selectedEvent();
       renderRail();
