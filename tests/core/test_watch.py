@@ -14,11 +14,21 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
+from shapely.geometry import box
 
 from darkfleet.core.geo import GEOD, Fix
 from darkfleet.core.kinematics import build_activity_index
 from darkfleet.core.tracks import CoverageMinute, Ping
-from darkfleet.core.watch import Contact, in_reach, open_silences, possible_contacts, reach_km
+from darkfleet.core.watch import (
+    Contact,
+    contact_could_meet,
+    dark_type_allowed,
+    in_reach,
+    offshore_km,
+    open_silences,
+    possible_contacts,
+    reach_km,
+)
 
 T0 = datetime(2026, 11, 21, 0, 0, tzinfo=UTC)
 SETTINGS = settings(
@@ -54,6 +64,21 @@ def _point(bearing_deg: float, km: float) -> tuple[float, float]:
     """Point `km` from the equator at 0E along `bearing_deg`: a hand-checkable synthetic fix."""
     lon, lat, _ = GEOD.fwd(0.0, 0.0, bearing_deg, km * 1000.0)
     return lat, lon
+
+
+# --- dark_type_allowed --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("ship_type", [70, 75, 79, 80, 85, 89, None, 0])
+def test_dark_alerts_allow_cargo_tanker_and_unknown_types(ship_type: int | None) -> None:
+    assert dark_type_allowed(ship_type)
+
+
+@pytest.mark.parametrize("ship_type", [30, 37, 40, 49, 50, 52, 60, 63, 69, 90, 99])
+def test_dark_alerts_reject_every_other_type(ship_type: int) -> None:
+    # Passenger ferries, high-speed craft, tugs/pilots, fishing, service and pleasure craft:
+    # the real 12 h recording's alert list was dominated by these.
+    assert not dark_type_allowed(ship_type)
 
 
 # --- reach_km -----------------------------------------------------------------------------
@@ -327,7 +352,67 @@ def test_max_contacts_truncates_after_sorting() -> None:
     assert possible_contacts(1, last, None, 30.0, T0, T0 + timedelta(hours=3), tracks, max_contacts=0) == []
 
 
-def test_contact_stopped_anywhere_in_reach_could_meet() -> None:
+def test_offshore_km_measures_the_gap_to_land_and_is_none_without_land() -> None:
+    land = box(0.0, 0.0, 0.2, 0.2)
+
+    assert offshore_km(0.4, 0.1, None) is None
+    assert offshore_km(0.4, 0.1, land) == pytest.approx(0.2 * 111.0, rel=0.01)
+
+
+def test_a_moving_ping_can_never_meet() -> None:
+    assert not contact_could_meet(Ping(mmsi=2, t=T0, lat=0.0, lon=0.0, sog=9.0), None)
+
+
+def test_contact_inside_a_port_anchorage_is_listed_but_cannot_meet() -> None:
+    # Singapore Eastern anchorage: the hull is in reach and stopped, but waiting there is
+    # ordinary bunkering, not a rendezvous.
+    last = Fix(lat=1.30, lon=104.00, t=T0)
+    tracks = {2: [Ping(mmsi=2, t=T0 + timedelta(hours=1), lat=1.30, lon=104.00, sog=0.0)]}
+
+    contacts = possible_contacts(1, last, None, 30.0, T0, T0 + timedelta(hours=3), tracks)
+
+    assert len(contacts) == 1
+    assert contacts[0].stopped
+    assert not contacts[0].could_meet
+
+
+def test_contact_inshore_is_listed_but_cannot_meet() -> None:
+    land = box(0.0, 0.0, 0.1, 0.1)
+    last = Fix(lat=0.0, lon=0.0, t=T0)
+    tracks = {
+        # Inside the land box: zero kilometres offshore.
+        2: [Ping(mmsi=2, t=T0 + timedelta(hours=1), lat=0.05, lon=0.05, sog=0.0)],
+        # Thirty kilometres from land, well inside a 30 kn reach over one hour.
+        3: [Ping(mmsi=3, t=T0 + timedelta(hours=1), lat=0.0, lon=0.30, sog=0.0)],
+    }
+
+    contacts = possible_contacts(1, last, None, 30.0, T0, T0 + timedelta(hours=3), tracks, land=land)
+    by_mmsi = {contact.mmsi: contact for contact in contacts}
+
+    assert by_mmsi[2].stopped and not by_mmsi[2].could_meet
+    assert by_mmsi[3].stopped and by_mmsi[3].could_meet
+
+
+def test_could_meet_uses_the_representative_ping_not_any_stopped_ping() -> None:
+    last = Fix(lat=0.0, lon=0.0, t=T0)
+    moving_lat, moving_lon = _point(90.0, 10.0)
+    stopped_lat, stopped_lon = _point(90.0, 40.0)
+    tracks = {
+        2: [
+            Ping(mmsi=2, t=T0 + timedelta(hours=1), lat=moving_lat, lon=moving_lon, sog=9.0),
+            Ping(mmsi=2, t=T0 + timedelta(hours=2), lat=stopped_lat, lon=stopped_lon, sog=0.0),
+        ]
+    }
+
+    contacts = possible_contacts(1, last, None, 30.0, T0, T0 + timedelta(hours=3), tracks)
+
+    # The map shows the closest (moving) fix; a stop elsewhere in the disk is not a meeting.
+    assert contacts[0].min_dist_km == pytest.approx(10.0, abs=0.1)
+    assert not contacts[0].stopped
+    assert not contacts[0].could_meet
+
+
+def test_contact_stopped_at_its_representative_ping_could_meet() -> None:
     last = Fix(lat=0.0, lon=0.0, t=T0)
     stopped_lat, stopped_lon = _point(90.0, 5.0)
     moving_lat, moving_lon = _point(90.0, 15.0)

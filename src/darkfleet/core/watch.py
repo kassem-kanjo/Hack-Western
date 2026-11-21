@@ -9,7 +9,10 @@ Two questions, both answered from the same recording:
 * A **possible contact** is any other vessel that was inside the dark ship's reach area at a
   time when the dark ship could have been there. Reach is a disk growing from the last fix
   while the ship is still missing, or the intersection of that disk and the disk that can
-  still reach the next fix (the space-time lens) once the ship reports again.
+  still reach the next fix (the space-time lens) once the ship reports again. Being in reach
+  is not a meeting: the contact's representative ping must also be stopped, offshore and
+  outside a routine anchorage for ``could_meet``, which is the gate the real recording's
+  alert list needed (see :func:`contact_could_meet`).
 
 Both reuse the kinematics helpers rather than restating their rules: one definition of
 "covered", one definition of "this receiver is still hearing other ships", so a silence counted
@@ -25,6 +28,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
+from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
+
+from .anchorages import context_for
 from .geo import KNOT_KM_H, Fix, distance_km
 from .kinematics import (
     _DEFAULT_ACTIVITY_BUCKET_MIN,
@@ -40,7 +47,78 @@ from .kinematics import (
 from .prism import EPS_KM, in_lens, unwrap_lon
 from .tracks import CoverageMinute, Event, Ping
 
-__all__ = ["Contact", "in_reach", "open_silences", "possible_contacts", "reach_km"]
+__all__ = [
+    "MIN_OFFSHORE_KM",
+    "Contact",
+    "contact_could_meet",
+    "dark_type_allowed",
+    "in_reach",
+    "offshore_km",
+    "open_silences",
+    "possible_contacts",
+    "reach_km",
+]
+
+MIN_OFFSHORE_KM = 5.0
+"""A stopped hull closer than this to the coast is port traffic, not a rendezvous.
+
+The same gate ``core.encounters`` applies to visible meetings, reused here so a contact and a
+meeting in the same water cannot disagree about what counts as offshore.
+"""
+
+KM_PER_DEG = 111.0
+"""Planar degrees-to-kilometres factor, matching the approximation ``core.encounters`` uses."""
+
+
+def dark_type_allowed(ship_type: int | None) -> bool:
+    """Whether a hull's AIS type may carry a dark alert at all.
+
+    On the 12 h recording the alert list was dominated by passenger ferries: a long gap's reach
+    disk almost always contains some watchlisted hull, so ordinary ferry traffic inherited the
+    "went dark near shadow fleet ship" label. Only cargo (70-79) and tanker (80-89) hulls, plus
+    hulls whose type is genuinely missing (``None`` or AIS 0 "not available"), are dark
+    candidates. Fishing, service, pilot/tug, high-speed craft, pleasure and passenger hulls are
+    never dark candidates, whatever their reach disk happens to contain.
+    """
+    if ship_type is None or ship_type == 0:
+        return True
+    return 70 <= ship_type <= 89
+
+
+def offshore_km(lat: float, lon: float, land: BaseGeometry | None) -> float | None:
+    """Distance in km from ``(lat, lon)`` to the nearest land, or None without a land geometry.
+
+    ``None`` means "cannot tell", not "ashore": callers apply the offshore gate only when a
+    distance exists, so a build without the land file still works. A planar degree distance
+    times 111 km is the same approximation the meeting detector already accepts at this
+    resolution.
+    """
+    if land is None or land.is_empty:
+        return None
+    return land.distance(Point(lon, lat)) * KM_PER_DEG
+
+
+def contact_could_meet(
+    ping: Ping,
+    land: BaseGeometry | None = None,
+    *,
+    stopped_kn: float = 3.0,
+    min_offshore_km: float = MIN_OFFSHORE_KM,
+) -> bool:
+    """Whether one contact's in-reach ping is a plausible meeting with a dark ship.
+
+    Being stopped is not enough. A hull waiting at the quay, or inside a published anchorage
+    box, is ordinary port business and was flooding the recording's alert list. The ping must
+    also be at least ``min_offshore_km`` from land (unknown land cannot exclude it) and outside
+    every routine anchorage in :mod:`core.anchorages`. Ship-to-ship hot spots are deliberately
+    not excluded: a stop there is the behaviour the screen exists to surface.
+    """
+    if ping.sog is None or ping.sog > stopped_kn:
+        return False
+    if context_for(ping.lat, ping.lon) is not None:
+        return False
+    away = offshore_km(ping.lat, ping.lon, land)
+    return away is None or away >= min_offshore_km
 
 
 @dataclass(frozen=True)
@@ -198,6 +276,8 @@ def possible_contacts(
     *,
     stopped_kn: float = 3.0,
     max_contacts: int = 20,
+    land: BaseGeometry | None = None,
+    min_offshore_km: float = MIN_OFFSHORE_KM,
 ) -> list[Contact]:
     """Other vessels that were inside the dark ship's reach area during `[t_start, t_end]`.
 
@@ -205,8 +285,10 @@ def possible_contacts(
     time, so a ship that was 100 km away while the dark ship had only been missing an hour is
     not a contact even if it is inside the final, larger disk. For each other vessel only the
     ping closest to the dark ship's last fix is kept - that is the position the UI drops on
-    the map - while `stopped` records whether *any* of its in-reach pings was at or below
-    `stopped_kn`. `could_meet` is that stopped-and-in-reach condition, the contract's meaning.
+    the map. `stopped` records whether that representative ping was at or below `stopped_kn`;
+    `could_meet` additionally requires it to be offshore and outside a routine anchorage, via
+    :func:`contact_could_meet`. A hull that fails those gates is still listed as in reach, with
+    `could_meet` false, because the map should show it without claiming a meeting.
 
     Sorted with potential meetings first, then by distance, then MMSI so repeated runs and
     equal distances are deterministic. `max_contacts` is applied after sorting; zero returns
@@ -216,7 +298,6 @@ def possible_contacts(
         return []
     max_radius = reach_km(cap_kn, last.t, t_end)
     best: dict[int, tuple[float, datetime, Ping]] = {}
-    stopped: set[int] = set()
     for mmsi, track in tracks.items():
         if mmsi == dark_mmsi:
             continue
@@ -230,8 +311,6 @@ def possible_contacts(
                 continue
             if not in_reach(last, next, cap_kn, ping.lat, ping.lon, ping.t):
                 continue
-            if ping.sog is not None and ping.sog <= stopped_kn:
-                stopped.add(mmsi)
             current = best.get(mmsi)
             if current is None or (dist, ping.t) < (current[0], current[1]):
                 best[mmsi] = (dist, ping.t, ping)
@@ -242,8 +321,8 @@ def possible_contacts(
             lon=ping.lon,
             t=ping.t,
             min_dist_km=round(dist, 3),
-            stopped=mmsi in stopped,
-            could_meet=mmsi in stopped,
+            stopped=ping.sog is not None and ping.sog <= stopped_kn,
+            could_meet=contact_could_meet(ping, land, stopped_kn=stopped_kn, min_offshore_km=min_offshore_km),
         )
         for mmsi, (dist, _, ping) in best.items()
     ]

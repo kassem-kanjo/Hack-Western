@@ -1,11 +1,14 @@
 """Prove scripts/build_watch.py turns recordings into the watch contract's one file.
 
 The fixture is synthetic but laid out exactly like the recorder writes it: two region folders of
-gzipped aisstream lines. The scenario pins the three behaviours the screen depends on:
+gzipped aisstream lines. The scenario pins the behaviours the screen depends on:
 
 * a tanker that goes dark underway inside the Strait of Hormuz, with a stopped sanctioned hull
   nearby: one ongoing dark alert whose contacts include that hull with ``could_meet`` true;
 * a moored hull that simply stops reporting: no alert, but counted in ``hidden_routine``;
+* the precision gates from the real 12 h run (issue #86): dark alerts only for cargo, tanker
+  and unknown-type hulls, contacts that must be stopped *and* offshore *and* outside a port
+  anchorage to count as meetings, and sanctioned stops that must last 30 minutes;
 * detection running on the recording's clock, so repeated builds produce the same ids.
 """
 
@@ -18,6 +21,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 T0 = datetime(2026, 11, 21, 0, 0, tzinfo=UTC)
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build_watch.py"
@@ -113,12 +118,18 @@ def _write_region(root: Path, name: str, lines: list[dict[str, Any]]) -> Path:
     return directory
 
 
-def _write_ais(root: Path) -> Path:
+def _write_ais(
+    root: Path,
+    *,
+    dark_type: int = 80,
+    contact_position: tuple[float, float] = (26.32, 56.28),
+) -> Path:
     """Two regions: Hormuz (the dark scenario) and the Baltic (the routine one)."""
     ais = root / "ais"
+    contact_lat, contact_lon = contact_position
 
     hormuz: list[dict[str, Any]] = [
-        _static(DARK, _minute(0), "AFRA STAR", 80),
+        _static(DARK, _minute(0), "AFRA STAR", dark_type),
         _static(SANCTIONED, _minute(0), "GESTIA", 80, imo=SANCTIONED_IMO),
     ]
     for minute in range(66):
@@ -126,9 +137,9 @@ def _write_ais(root: Path) -> Path:
         lat = 26.10 + 0.20 * minute / 65
         lon = 56.10 + 0.18 * minute / 65
         hormuz.append(_position(DARK, _minute(minute), lat, lon, 12.0))
-    # The sanctioned hull lies stopped ~3 km from the dark ship's last fix.
+    # The sanctioned tanker lies stopped for three hours at `contact_position`.
     for minute in range(0, 180, 5):
-        hormuz.append(_position(SANCTIONED, _minute(minute), 26.32, 56.28, 0.4, cog=0.0))
+        hormuz.append(_position(SANCTIONED, _minute(minute), contact_lat, contact_lon, 0.4, cog=0.0))
     hormuz.extend(_filler_lines(HORMUZ_FILLER, 26.70, 56.70, 65, 179))
     _write_region(ais, HORMUZ, hormuz)
 
@@ -150,14 +161,39 @@ def _write_sanctions(root: Path) -> Path:
     return path
 
 
-def _build(root: Path) -> dict[str, Any]:
+def _build(root: Path, *, land: Path | None = None) -> dict[str, Any]:
     return build_watch.build(
         hours=12,
         ais_dir=root / "ais",
         out=root / "out",
         sanctions=root / "maritime.csv",
-        land=None,
+        land=land,
     )
+
+
+def _write_land(root: Path, bbox: tuple[float, float, float, float]) -> Path:
+    """A one-box land file, so the offshore gate is exercised without the real basemap."""
+    min_lon, min_lat, max_lon, max_lat = bbox
+    ring = [
+        [min_lon, min_lat],
+        [max_lon, min_lat],
+        [max_lon, max_lat],
+        [min_lon, max_lat],
+        [min_lon, min_lat],
+    ]
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }
+        ],
+    }
+    path = root / "land.geojson"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def test_dark_ship_has_one_ongoing_alert_inside_hormuz(tmp_path: Path) -> None:
@@ -240,3 +276,86 @@ def test_ids_are_stable_across_runs(tmp_path: Path) -> None:
     second = _build(tmp_path)
 
     assert [alert["id"] for alert in first["alerts"]] == [alert["id"] for alert in second["alerts"]]
+
+
+def test_passenger_ferry_going_dark_near_a_sanctioned_ship_is_hidden(tmp_path: Path) -> None:
+    # Issue #86's real-run failure: a ferry with a long gap inherited "near shadow fleet ship"
+    # because the reach disk contained the sanctioned hull. Passenger hulls are not dark news.
+    _write_ais(tmp_path, dark_type=60)
+    _write_sanctions(tmp_path)
+
+    payload = _build(tmp_path)
+
+    assert all(alert["mmsi"] != DARK for alert in payload["alerts"])
+    assert all(alert["kind"] != "dark" for alert in payload["alerts"])
+
+
+def test_cargo_dark_near_a_sanctioned_tanker_stopped_offshore(tmp_path: Path) -> None:
+    # Cargo hull, sanctioned tanker stopped in open water: the meeting survives the gates.
+    _write_ais(tmp_path, dark_type=70)
+    _write_sanctions(tmp_path)
+    land = _write_land(tmp_path, (54.0, 24.0, 54.5, 24.4))
+
+    payload = _build(tmp_path, land=land)
+    dark_alerts = [alert for alert in payload["alerts"] if alert["kind"] == "dark"]
+
+    assert len(dark_alerts) == 1
+    alert = dark_alerts[0]
+    assert alert["mmsi"] == DARK
+    assert alert["label"] == "Went dark near sanctioned ship"
+    contact = next(contact for contact in alert["contacts"] if contact["mmsi"] == SANCTIONED)
+    assert contact["stopped"] is True
+    assert contact["could_meet"] is True
+
+
+def test_sanctioned_tanker_stopped_in_a_port_anchorage_is_hidden(tmp_path: Path) -> None:
+    # Fujairah's anchorage: a sanctioned tanker waiting there is ordinary port business.
+    _write_ais(tmp_path, contact_position=(25.20, 56.45))
+    _write_sanctions(tmp_path)
+
+    payload = _build(tmp_path)
+
+    assert all(alert["kind"] != "sanctioned_stop" for alert in payload["alerts"])
+    assert all(alert["mmsi"] != SANCTIONED for alert in payload["alerts"])
+
+
+def test_contacts_inshore_are_listed_but_cannot_meet(tmp_path: Path) -> None:
+    # A contact inside the reach disk is still shown, but a hull at the quay is not a meeting.
+    _write_ais(tmp_path, contact_position=(26.35, 56.30))
+    _write_sanctions(tmp_path)
+    # Land covers the sanctioned hull's position exactly, so `offshore_km` is zero.
+    land = _write_land(tmp_path, (56.25, 26.30, 56.35, 26.40))
+
+    payload = _build(tmp_path, land=land)
+    alert = next(alert for alert in payload["alerts"] if alert["kind"] == "dark")
+    contact = next(contact for contact in alert["contacts"] if contact["mmsi"] == SANCTIONED)
+
+    assert contact["stopped"] is True
+    assert contact["could_meet"] is False
+    assert alert["label"] == "Went dark"
+
+
+def test_explain_flag_prints_removed_candidate_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_ais(tmp_path, dark_type=60)
+    _write_sanctions(tmp_path)
+
+    code = build_watch.main(
+        [
+            "--ais",
+            str(tmp_path / "ais"),
+            "--out",
+            str(tmp_path / "out"),
+            "--sanctions",
+            str(tmp_path / "maritime.csv"),
+            "--land",
+            str(tmp_path / "missing.geojson"),
+            "--explain",
+        ]
+    )
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    assert "explain dark:" in printed
+    assert "removed type 1" in printed

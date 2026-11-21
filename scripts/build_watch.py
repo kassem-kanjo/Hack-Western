@@ -15,7 +15,14 @@ This script imports those helpers and adds only what the watch contract needs:
   possible contacts - the geometry the click-through already uses;
 * the contract's suspicious-only filter, short labels, stable ``kind-mmsi-epoch`` ids and the
   routine count that keeps ordinary traffic out of the alert list;
+* the precision gates tuned on the 12 h recording: dark alerts only for cargo, tanker and
+  unknown-type hulls; a contact only counts as ``could_meet`` when its representative ping was
+  stopped, offshore and outside a routine anchorage; ``sanctioned_stop`` only for stops that
+  lasted 30 minutes and happened offshore or inside a watched area;
 * the ``sanctioned_stop`` rule, which needs the sanctions join and the anchorage table.
+
+``--explain`` prints, per alert kind, how many candidates each of those rules removed without
+changing the snapshot.
 
 A run parses each hourly file at most once: parsed hours are cached by ``(path, mtime)`` for the
 lifetime of the process, so ``--loop 300`` pays the parse cost only for the hour that just grew.
@@ -32,7 +39,7 @@ import importlib.util
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -49,11 +56,19 @@ from darkfleet.core import kinematics
 from darkfleet.core.anchorages import context_for
 from darkfleet.core.areas import LISTENING, WATCHED, area_of
 from darkfleet.core.encounters import meetings
-from darkfleet.core.geo import Fix
+from darkfleet.core.geo import Fix, distance_km
 from darkfleet.core.speeds import max_speed_knots
 from darkfleet.core.spoofing import filter_explained_jumps, ghost_points
 from darkfleet.core.tracks import CoverageMinute, Event, Ping, VesselInfo, ship_class
-from darkfleet.core.watch import in_reach, open_silences, possible_contacts
+from darkfleet.core.watch import (
+    MIN_OFFSHORE_KM,
+    contact_could_meet,
+    dark_type_allowed,
+    in_reach,
+    offshore_km,
+    open_silences,
+    possible_contacts,
+)
 from darkfleet.core.water import load_land
 from darkfleet.ingest.ais_tracks import coverage, iter_files
 from darkfleet.ingest.watchlist import imo_watchlist
@@ -112,12 +127,58 @@ MOORED_SOG_KN = 1.0
 SANCTIONED_STOP_SEVERITY = 0.6
 """Base severity before the watched-area and watchlist bumps raise it."""
 
+STOP_MIN_MINUTES = 30.0
+"""A ``sanctioned_stop`` must last at least this long; a brief stop is manoeuvring or boarding."""
+
+STOP_WINDOW_GAP_MIN = 30.0
+"""Stopped pings closer together than this belong to the same stop window.
+
+Anchored hulls report every few minutes, and one missed report must not split a long stop into
+two short ones. Wider gaps (a hull that got underway and anchored again) start a new window.
+"""
+
 MAX_CONTACTS = 20
 """The contract's contact cap; requested higher from ``possible_contacts`` so a watchlisted
 contact further out is not dropped by the distance cut before the watchlist-first sort."""
 
-MEETING_OFFSHORE_KM = 5.0
-"""Matches ``build_live``: harbour-adjacent pairs are not rendezvous."""
+OFFSHORE_KM = MIN_OFFSHORE_KM
+"""Ports, quays and inshore anchorages are not rendezvous: meetings, contacts and stops all
+use the same five-kilometre gate as ``build_live``'s meeting detector."""
+
+
+@dataclass
+class _Tally:
+    """Candidate and removal counts for one alert kind, for ``--explain`` only."""
+
+    candidates: int = 0
+    kept: int = 0
+    removed: dict[str, int] = field(default_factory=dict)
+
+    def drop(self, rule: str, n: int = 1) -> None:
+        """Record that `n` candidates were removed by `rule`."""
+        self.removed[rule] = self.removed.get(rule, 0) + n
+
+
+@dataclass
+class Explanation:
+    """Per-kind rule counts for the ``--explain`` log; never written to the snapshot."""
+
+    tallies: dict[str, _Tally] = field(default_factory=dict)
+
+    def tally(self, kind: str) -> _Tally:
+        """The tally for `kind`, created on first use."""
+        return self.tallies.setdefault(kind, _Tally())
+
+    def report(self) -> list[str]:
+        """One line per kind: candidates, kept, and how many each rule removed."""
+        lines: list[str] = []
+        for kind in sorted(self.tallies):
+            tally = self.tallies[kind]
+            removed = ", ".join(f"{rule} {n}" for rule, n in tally.removed.items()) or "nothing"
+            lines.append(
+                f"explain {kind}: {tally.candidates} candidates, kept {tally.kept}, removed {removed}"
+            )
+        return lines
 
 
 @dataclass(frozen=True)
@@ -230,7 +291,7 @@ def _scan(region: _Region, now: datetime, land: Any, watch_rows: list[dict[str, 
     meeting_events = meetings(
         tracks,
         land=land,
-        min_offshore_km=MEETING_OFFSHORE_KM,
+        min_offshore_km=OFFSHORE_KM,
         ship_types=CARGO_TANKER_TYPES,
         vessel_types={mmsi: info.ship_type for mmsi, info in region.vessels.items()},
     )
@@ -253,19 +314,25 @@ def _last_ping(track: Sequence[Ping], when: datetime) -> Ping | None:
     return best
 
 
-def _watchlisted_in_reach(
+def _watchlisted_could_meet(
     event: Event,
     *,
     tracks: dict[int, list[Ping]],
     categories: dict[int, str],
     classes: dict[int, str],
+    land: Any,
     now: datetime,
 ) -> bool:
-    """Cheap form of the contract's "involving a watchlisted ship" test for a dark alert.
+    """Whether some watchlisted hull could actually meet this dark ship.
 
-    Scanning only watchlisted hulls (usually a few dozen) answers whether a full
-    ``possible_contacts`` pass could discover one, so a dark gap in open water that is not
-    otherwise suspicious never pays for the full pass over every ping.
+    This must agree with the contract's meaning of "involving a watchlisted ship": a
+    watchlisted *contact with* ``could_meet`` true. The 12 h recording showed why the old
+    geometry-only test was wrong - a long gap's reach disk almost always contains a
+    watchlisted hull, so ordinary traffic inherited a shadow-fleet label. Each watchlisted
+    hull is represented by the same ping ``possible_contacts`` would show (closest to the dark
+    ship's last fix), and that ping must pass :func:`contact_could_meet`: stopped, offshore
+    and outside a routine anchorage. Scanning only watchlisted hulls (usually a few dozen)
+    keeps the cheap pre-check for dark gaps in open water.
     """
     if not categories:
         return False
@@ -283,15 +350,20 @@ def _watchlisted_in_reach(
         if isinstance(next_lat, (int, float)) and isinstance(next_lon, (int, float)):
             next_fix = Fix(lat=float(next_lat), lon=float(next_lon), t=event.end)
     t_end = event.end or now
+    closest: dict[int, tuple[float, datetime, Ping]] = {}
     for mmsi in categories:
         if mmsi == event.mmsi:
             continue
         for other in tracks.get(mmsi, []):
             if other.t < event.start or other.t > t_end:
                 continue
-            if in_reach(last, next_fix, cap_kn, other.lat, other.lon, other.t):
-                return True
-    return False
+            if not in_reach(last, next_fix, cap_kn, other.lat, other.lon, other.t):
+                continue
+            dist = distance_km(last.lat, last.lon, other.lat, other.lon)
+            current = closest.get(mmsi)
+            if current is None or (dist, other.t) < (current[0], current[1]):
+                closest[mmsi] = (dist, other.t, other)
+    return any(contact_could_meet(item[2], land) for item in closest.values())
 
 
 def _contact_rows(
@@ -304,12 +376,13 @@ def _contact_rows(
     tracks: dict[int, list[Ping]],
     vessels: dict[int, VesselInfo],
     categories: dict[int, str],
+    land: Any,
 ) -> list[dict[str, Any]]:
     """Join ``possible_contacts`` with the static identity and watchlist, sanctioned-first.
 
     ``possible_contacts`` already caps its own list; asking for more than the contract's 20
     lets the watchlist reorder happen before the cut, so a sanctioned hull that sits a little
-    further out is still shown.
+    further out is still shown. ``land`` drives the offshore gate inside ``could_meet``.
     """
     contacts = possible_contacts(
         dark_mmsi,
@@ -320,6 +393,8 @@ def _contact_rows(
         t_end,
         tracks,
         max_contacts=MAX_CONTACTS * 5,
+        land=land,
+        min_offshore_km=OFFSHORE_KM,
     )
     rows = [
         {
@@ -370,7 +445,12 @@ def _label(
 ) -> str:
     """A label of at most six words, as approved: no paragraphs on the watch screen."""
     if kind == "dark":
-        near = next((contact["watchlist"] for contact in contacts if contact["watchlist"]), None)
+        # Only a contact that could actually meet earns the "near ..." wording: a watchlisted
+        # hull merely inside the reach disk is not evidence of a meeting.
+        near = next(
+            (contact["watchlist"] for contact in contacts if contact["watchlist"] and contact["could_meet"]),
+            None,
+        )
         if near is not None:
             return f"Went dark near {near.replace('_', ' ')} ship"
         if categories.get(event.mmsi) is not None:
@@ -396,6 +476,7 @@ def _alert_payload(
     categories: dict[int, str],
     classes: dict[int, str],
     tracks: dict[int, list[Ping]],
+    land: Any,
     now: datetime,
 ) -> tuple[dict[str, Any], bool]:
     """One contract-shaped alert plus whether a watchlisted hull is involved somewhere in it.
@@ -426,6 +507,7 @@ def _alert_payload(
             tracks,
             vessels,
             categories,
+            land,
         )
 
     if last_fix is not None and kind == "dark":
@@ -448,7 +530,9 @@ def _alert_payload(
     involved = categories.get(mmsi) is not None
     if event.other_mmsi is not None and categories.get(event.other_mmsi) is not None:
         involved = True
-    if any(contact["watchlist"] for contact in contacts):
+    # A watchlisted hull counts for a dark alert only when it could actually meet (the
+    # contract's involvement rule; see _label).
+    if any(contact["watchlist"] and contact["could_meet"] for contact in contacts):
         involved = True
     if kind == "spoof":
         for row in event.evidence.get("vessels", []):
@@ -477,28 +561,86 @@ def _alert_payload(
     return payload, involved
 
 
-def _sanctioned_stops(scan: _Scan, now: datetime, categories: dict[int, str]) -> list[dict[str, Any]]:
-    """Watchlisted hulls stopped outside a routine anchorage during the window.
+def _stop_location_ok(ping: Ping, land: Any) -> bool:
+    """Whether a stop happened somewhere a sanctioned hull has no ordinary reason to wait.
 
-    The anchorage test is the whole point: a sanctioned tanker waiting at Fujairah or Singapore
-    is ordinary port business, while the same hull stopped in open water is the behaviour the
-    watch screen exists to surface.
+    Either far enough from land (unknown land cannot exclude it) or inside a *watched* area.
+    A listening box is only a feed subscription, so it is deliberately not enough; routine
+    anchorage boxes are applied separately, before this test.
     """
+    if area_of(ping.lat, ping.lon) in WATCHED_IDS:
+        return True
+    away = offshore_km(ping.lat, ping.lon, land)
+    return away is None or away >= OFFSHORE_KM
+
+
+def _stop_windows(pings: Sequence[Ping]) -> list[list[Ping]]:
+    """Group stopped pings into stop windows, splitting where the hull got underway again.
+
+    Pings closer together than :data:`STOP_WINDOW_GAP_MIN` belong to one window; a longer gap
+    means a separate stop, so its duration is measured on its own rather than stretched across
+    a period the hull was moving.
+    """
+    windows: list[list[Ping]] = []
+    for ping in sorted(pings, key=lambda item: item.t):
+        if windows and ping.t - windows[-1][-1].t <= timedelta(minutes=STOP_WINDOW_GAP_MIN):
+            windows[-1].append(ping)
+        else:
+            windows.append([ping])
+    return windows
+
+
+def _sanctioned_stops(
+    scan: _Scan,
+    now: datetime,
+    categories: dict[int, str],
+    land: Any,
+    *,
+    explain: Explanation | None = None,
+) -> list[dict[str, Any]]:
+    """Watchlisted hulls stopped in open water or a watched area, long enough to matter.
+
+    A sanctioned tanker waiting at Fujairah or Singapore is ordinary port business; a short
+    stop is manoeuvring, pilot boarding or waiting for a berth. So an alert needs all three:
+    outside every routine anchorage, at least five km offshore or inside a watched area (never
+    a listening box alone), and a stop window of at least 30 minutes. Repeats merge into one
+    alert per hull per build window - the screen wants one story per ship, not one per ping.
+    """
+    tally = explain.tally("sanctioned_stop") if explain is not None else None
     payloads: list[dict[str, Any]] = []
     for mmsi, category in sorted(categories.items()):
         track = scan.tracks.get(mmsi)
         if not track:
             continue
-        stopped = [
-            ping
-            for ping in track
-            if ping.sog is not None and ping.sog <= STOP_SOG_KN and context_for(ping.lat, ping.lon) is None
-        ]
+        stopped = [ping for ping in track if ping.sog is not None and ping.sog <= STOP_SOG_KN]
         if not stopped:
             continue
-        ping = max(stopped, key=lambda item: item.t)
+        if tally is not None:
+            tally.candidates += 1
+        located = [
+            ping
+            for ping in stopped
+            if context_for(ping.lat, ping.lon) is None and _stop_location_ok(ping, land)
+        ]
+        if not located:
+            if tally is not None:
+                tally.drop("anchorage/inshore")
+            continue
+        windows = [
+            window
+            for window in _stop_windows(located)
+            if window[-1].t - window[0].t >= timedelta(minutes=STOP_MIN_MINUTES)
+        ]
+        if not windows:
+            if tally is not None:
+                tally.drop("under 30 min")
+            continue
+        if tally is not None and len(windows) > 1:
+            tally.drop("merged repeat stop", len(windows) - 1)
+        window = windows[-1]
+        first, ping = window[0], window[-1]
         latest = max(track, key=lambda item: item.t)
-        ongoing = latest.t == ping.t and (now - ping.t) <= timedelta(minutes=30)
+        ongoing = ping.t >= latest.t and (now - ping.t) <= timedelta(minutes=STOP_MIN_MINUTES)
         cls = scan.classes.get(mmsi) or "default"
         area_id = area_of(ping.lat, ping.lon)
         severity = _raise_severity(
@@ -507,9 +649,11 @@ def _sanctioned_stops(scan: _Scan, now: datetime, categories: dict[int, str]) ->
             involved=category in SUSPICIOUS_CATEGORIES,
         )
         label = f"Sanctioned {cls} stopped" if cls != "default" else "Sanctioned ship stopped"
+        if tally is not None:
+            tally.kept += 1
         payloads.append(
             {
-                "id": f"sanctioned_stop-{mmsi}-{int(ping.t.timestamp())}",
+                "id": f"sanctioned_stop-{mmsi}-{int(first.t.timestamp())}",
                 "kind": "sanctioned_stop",
                 "status": "ongoing" if ongoing else "ended",
                 "mmsi": mmsi,
@@ -517,7 +661,7 @@ def _sanctioned_stops(scan: _Scan, now: datetime, categories: dict[int, str]) ->
                 "area_id": area_id,
                 "severity": severity,
                 "label": label,
-                "t_start": _iso(ping.t),
+                "t_start": _iso(first.t),
                 "t_end": None if ongoing else _iso(ping.t),
                 "last": {
                     "lat": ping.lat,
@@ -529,7 +673,12 @@ def _sanctioned_stops(scan: _Scan, now: datetime, categories: dict[int, str]) ->
                 "next": None,
                 "speed_cap_kn": round(max_speed_knots(cls), 3),
                 "contacts": [],
-                "evidence": {"sog": ping.sog, "class": cls, "anchorage": None},
+                "evidence": {
+                    "sog": ping.sog,
+                    "class": cls,
+                    "anchorage": None,
+                    "minutes": round((ping.t - first.t).total_seconds() / 60.0, 1),
+                },
             }
         )
     return payloads
@@ -612,8 +761,13 @@ def build(
     out: Path = DEFAULT_OUT,
     sanctions: Path | None = DEFAULT_SANCTIONS,
     land: Path | None = DEFAULT_LAND,
+    explain: Explanation | None = None,
 ) -> dict[str, Any]:
-    """Read every region, write ``watch.json``, and return the payload."""
+    """Read every region, write ``watch.json``, and return the payload.
+
+    ``explain`` is an optional collector: when supplied it records, per alert kind, how many
+    candidates each rule removed for ``--explain``. It never changes what is written.
+    """
     regions = _load_regions(Path(ais_dir), hours)
     latest = max((max(ping.t for ping in region.pings) for region in regions), default=None)
     now = (latest or datetime.now(UTC)).replace(second=0, microsecond=0)
@@ -643,21 +797,34 @@ def build(
     alerts: list[dict[str, Any]] = []
     alerted: set[int] = set()
     seen: set[str] = set()
+    stopped_ships: set[int] = set()
     hidden = 0
 
     for scan in scans:
         for event, kind, status in scan.candidates:
+            tally = explain.tally(kind) if explain is not None else None
+            if tally is not None:
+                tally.candidates += 1
             if kind == "dark":
+                info = scan.region.vessels.get(event.mmsi)
+                if not dark_type_allowed(info.ship_type if info is not None else None):
+                    hidden += 1
+                    if tally is not None:
+                        tally.drop("type")
+                    continue
                 own = categories.get(event.mmsi) is not None
                 if not own and area_of(event.lat, event.lon) not in WATCHED_IDS:
-                    if not _watchlisted_in_reach(
+                    if not _watchlisted_could_meet(
                         event,
                         tracks=all_tracks,
                         categories=categories,
                         classes=scan.classes,
+                        land=land_geom,
                         now=now,
                     ):
                         hidden += 1
+                        if tally is not None:
+                            tally.drop("no watchlisted meeting")
                         continue
             payload, involved = _alert_payload(
                 event,
@@ -667,20 +834,30 @@ def build(
                 categories=categories,
                 classes=scan.classes,
                 tracks=all_tracks,
+                land=land_geom,
                 now=now,
             )
             if not _is_suspicious(payload, involved):
                 hidden += 1
+                if tally is not None:
+                    tally.drop("not suspicious")
                 continue
             if payload["id"] in seen:
+                if tally is not None:
+                    tally.drop("duplicate")
                 continue
             seen.add(payload["id"])
             alerts.append(payload)
+            if tally is not None:
+                tally.kept += 1
             alerted.add(payload["mmsi"])
             alerted.update(contact["mmsi"] for contact in payload["contacts"])
-        for payload in _sanctioned_stops(scan, now, categories):
-            if payload["id"] in seen:
+        for payload in _sanctioned_stops(scan, now, categories, land_geom, explain=explain):
+            if payload["mmsi"] in stopped_ships or payload["id"] in seen:
+                if explain is not None:
+                    explain.tally("sanctioned_stop").drop("repeat across regions")
                 continue
+            stopped_ships.add(payload["mmsi"])
             seen.add(payload["id"])
             alerts.append(payload)
             alerted.add(payload["mmsi"])
@@ -724,10 +901,19 @@ def run_once(
     out: Path,
     sanctions: Path | None,
     land: Path | None,
+    explain: bool = False,
 ) -> dict[str, Any]:
     """One build plus the single log line ``--loop`` prints per iteration."""
     started = time.perf_counter()
-    payload = build(hours=hours, ais_dir=ais_dir, out=out, sanctions=sanctions, land=land)
+    explanation = Explanation() if explain else None
+    payload = build(
+        hours=hours,
+        ais_dir=ais_dir,
+        out=out,
+        sanctions=sanctions,
+        land=land,
+        explain=explanation,
+    )
     elapsed = time.perf_counter() - started
     counts = payload["counts"]
     print(
@@ -735,6 +921,9 @@ def run_once(
         f"{counts['hidden_routine']} hidden routine, {counts['ships']} ships in {elapsed:.1f}s",
         flush=True,
     )
+    if explanation is not None:
+        for line in explanation.report():
+            print(line, flush=True)
     return payload
 
 
@@ -746,6 +935,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot output folder")
     parser.add_argument("--land", type=Path, default=DEFAULT_LAND, help="land GeoJSON")
     parser.add_argument("--sanctions", type=Path, default=DEFAULT_SANCTIONS, help="sanctions CSV")
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="print, per alert kind, how many candidates each rule removed",
+    )
     return parser
 
 
@@ -769,6 +963,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "out": args.out,
         "sanctions": args.sanctions,
         "land": args.land,
+        "explain": args.explain,
     }
     if args.loop == 0:
         run_once(**options)
