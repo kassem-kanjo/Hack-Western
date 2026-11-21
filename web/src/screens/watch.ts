@@ -1,16 +1,13 @@
 /**
- * Watch screen: the whole world, every ship we heard, and the few things worth
+ * Watch screen: the whole world, every ship we heard, and the few events worth
  * stopping for.
  *
- * World view: a dark map with every hull as a dim dot, the three listening
- * areas dashed, the four watched areas washed in, and a 320 px rail of alerts,
- * most severe first. One click (or one URL) opens focus: the map flies to the
- * last fix, the reach area grows, and a 300 px panel answers three questions in
- * that order - how long, how far, and who it could have met.
+ * Layout is the analyst convention: events on the left, map in the middle, and
+ * (once one event is open) a field table on the right. Nothing in the rail is
+ * a paragraph; every row is a name, a short tag, an area and a UTC time.
  *
- * No paragraphs anywhere: every line is a name, a time, a distance or a label
- * of at most six words. The URL is the selection (`#/watch/alert/<id>`), so a
- * reload reproduces the same view and the rail and the map cannot disagree.
+ * The URL is the selection (`#/watch/alert/<id>`), so a reload reproduces the
+ * same view and the list, the map and the detail table cannot disagree.
  */
 
 import "../styles/watch.css";
@@ -26,6 +23,7 @@ import type {
 import { fetchWatch, watchFixtureUrl, watchStream } from "../api";
 import { h } from "../components/dom";
 import { topBar } from "../components/TopBar";
+import { fmtUtc } from "../format";
 import { timeAgo } from "../model/liveFacts";
 import {
   insideReach,
@@ -74,8 +72,8 @@ export function watchHref(alertId: string | null): string {
 /* ---- wording (pure) ------------------------------------------------------- */
 
 /**
- * The panel's one duration line. Hours and minutes, never seconds: a demo reads
- * a duration at 1 m, and "2 h 10 min" is the whole sentence.
+ * The panel's duration line. Hours and minutes, never seconds: a demo reads a
+ * duration at 1 m, and "2 h 10 min" is the whole sentence.
  */
 export function fmtDuration(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / 60_000));
@@ -87,14 +85,23 @@ export function fmtDuration(ms: number): string {
   return `${hours} h ${rest} min`;
 }
 
-/** The noun in front of the duration, per kind: "Dark 2 h 10 min". */
-const DURATION_NOUN: Record<WatchAlertKind, string> = {
+/** "2026-11-21T14:32:00Z" -> "21 Nov 14:32Z": the one time format on the screen. */
+function fmtUtcZ(iso: string): string {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? `${fmtUtc(iso)}Z` : "\u2014";
+}
+
+/** The noun under each type toggle. */
+const KIND_NAME: Record<WatchAlertKind, string> = {
   dark: "Dark",
-  spoof: "Spoofed",
-  jump: "Jumped",
-  meeting: "Alongside",
-  sanctioned_stop: "Stopped",
+  sanctioned_stop: "Sanctioned stop",
+  spoof: "Spoof",
+  meeting: "Meeting",
+  jump: "Jump",
 };
+
+/** Toggle order: what Kassem asked for first, then the remaining contract kind. */
+const KIND_ORDER: WatchAlertKind[] = ["dark", "sanctioned_stop", "spoof", "meeting", "jump"];
 
 /** A vessel name, or the contract's honest placeholder. */
 function alertName(alert: WatchAlert): string {
@@ -118,12 +125,9 @@ function areaName(data: WatchResponse, areaId: string | null): string {
   return data.areas.find((area) => area.id === areaId)?.name ?? areaId;
 }
 
-/** Ongoing first, then severity, then the newest start. */
+/** Severity, then most recent: the list's one order. */
 function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
   return [...alerts].sort((a, b) => {
-    const aOngoing = a.status === "ongoing" ? 1 : 0;
-    const bOngoing = b.status === "ongoing" ? 1 : 0;
-    if (aOngoing !== bOngoing) return bOngoing - aOngoing;
     if (b.severity !== a.severity) return b.severity - a.severity;
     const aStart = Date.parse(a.t_start);
     const bStart = Date.parse(b.t_start);
@@ -134,7 +138,7 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
   });
 }
 
-/** How long an alert has been (or was) live, for the panel's first line. */
+/** How long an alert has been (or was) live, for the detail table. */
 function durationMs(alert: WatchAlert, nowMs: number): number {
   const start = Date.parse(alert.t_start);
   if (!Number.isFinite(start)) return 0;
@@ -142,23 +146,24 @@ function durationMs(alert: WatchAlert, nowMs: number): number {
   return Math.max(0, (Number.isFinite(end) ? end : nowMs) - start);
 }
 
-/** Sanctioned first, then the ones that could meet, then the closest. */
+/**
+ * Nearby hulls: the ones that could meet first, then sanctions hits, then the
+ * closest. Red is the sanctions hit, so it should not automatically outrank
+ * the rows that answer "who could it have met".
+ */
 function sortedContacts(contacts: WatchContact[]): WatchContact[] {
   return [...contacts].sort((a, b) => {
-    const aS = a.watchlist === "sanctioned" ? 1 : 0;
-    const bS = b.watchlist === "sanctioned" ? 1 : 0;
-    if (aS !== bS) return bS - aS;
     const aM = a.could_meet === true ? 1 : 0;
     const bM = b.could_meet === true ? 1 : 0;
     if (aM !== bM) return bM - aM;
+    const aS = a.watchlist === "sanctioned" ? 1 : 0;
+    const bS = b.watchlist === "sanctioned" ? 1 : 0;
+    if (aS !== bS) return bS - aS;
     return a.min_dist_km - b.min_dist_km;
   });
 }
 
-/**
- * Ships in the reach area that are neither the alert's own hull nor a listed
- * contact: the honest remainder behind "Other ships in reach".
- */
+/** Ships in the reach area that are neither the alert's hull nor a listed contact. */
 function otherShipsInReach(data: WatchResponse, alert: WatchAlert, atMs: number): number {
   const skip = new Set<number>([alert.mmsi]);
   for (const contact of alert.contacts) skip.add(contact.mmsi);
@@ -175,70 +180,265 @@ function contactShip(data: WatchResponse, contact: WatchContact): WatchShip | nu
   return data.ships.find((ship) => ship.mmsi === contact.mmsi) ?? null;
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-function svgEl<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attrs: Record<string, string | number>,
-): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG_NS, tag);
-  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, String(value));
-  return el;
-}
+/* ---- identity ------------------------------------------------------------- */
 
 /**
- * One kind glyph as a 16 px inline SVG, the same family language as the Live
- * screen: ring with a dashed tail (dark), crosshair (spoof), triangle (jump),
- * double ring (meeting), ring with a square (sanctioned stop).
+ * The 40-odd maritime identification digits a demo is actually likely to see.
+ * MID is the first three digits of an MMSI; unknown is an honest dash.
  */
-function kindGlyph(kind: WatchAlertKind): SVGSVGElement {
-  const glyph = svgEl("svg", {
-    class: `watch-glyph is-${kind}`,
-    viewBox: "0 0 20 20",
-    width: 16,
-    height: 16,
-    "aria-hidden": "true",
-    focusable: "false",
-  });
-  const stroke = {
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": 2,
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-  } as const;
+const MID_COUNTRY: Record<number, string> = {
+  205: "Belgium",
+  209: "Cyprus",
+  210: "Cyprus",
+  211: "Germany",
+  212: "Cyprus",
+  218: "Germany",
+  219: "Denmark",
+  220: "Denmark",
+  224: "Spain",
+  225: "Spain",
+  226: "France",
+  227: "France",
+  228: "France",
+  232: "United Kingdom",
+  233: "United Kingdom",
+  234: "United Kingdom",
+  235: "United Kingdom",
+  236: "Gibraltar",
+  237: "Greece",
+  238: "Croatia",
+  239: "Greece",
+  240: "Greece",
+  241: "Greece",
+  244: "Netherlands",
+  245: "Netherlands",
+  246: "Netherlands",
+  247: "Italy",
+  248: "Malta",
+  249: "Malta",
+  250: "Ireland",
+  255: "Portugal",
+  256: "Malta",
+  257: "Norway",
+  258: "Norway",
+  259: "Norway",
+  261: "Poland",
+  263: "Portugal",
+  265: "Sweden",
+  266: "Sweden",
+  271: "Turkey",
+  273: "Russia",
+  275: "Latvia",
+  276: "Estonia",
+  277: "Lithuania",
+  305: "Antigua and Barbuda",
+  308: "Bahamas",
+  309: "Bahamas",
+  310: "Bermuda",
+  311: "Bahamas",
+  316: "Canada",
+  319: "Cayman Islands",
+  338: "United States",
+  345: "Mexico",
+  351: "Panama",
+  352: "Panama",
+  353: "Panama",
+  354: "Panama",
+  355: "Panama",
+  356: "Panama",
+  357: "Panama",
+  366: "United States",
+  367: "United States",
+  368: "United States",
+  369: "United States",
+  370: "Panama",
+  371: "Panama",
+  372: "Panama",
+  373: "Panama",
+  374: "Panama",
+  375: "Saint Vincent and the Grenadines",
+  376: "Saint Vincent and the Grenadines",
+  377: "Saint Vincent and the Grenadines",
+  378: "British Virgin Islands",
+  379: "US Virgin Islands",
+  403: "Saudi Arabia",
+  412: "China",
+  413: "China",
+  414: "China",
+  416: "Taiwan",
+  419: "India",
+  422: "Iran",
+  425: "Iraq",
+  428: "Israel",
+  431: "Japan",
+  432: "Japan",
+  440: "South Korea",
+  441: "South Korea",
+  447: "Kuwait",
+  450: "Lebanon",
+  461: "Oman",
+  466: "Qatar",
+  468: "Syria",
+  470: "United Arab Emirates",
+  477: "Hong Kong",
+  503: "Australia",
+  512: "New Zealand",
+  525: "Indonesia",
+  533: "Malaysia",
+  538: "Marshall Islands",
+  548: "Philippines",
+  563: "Singapore",
+  564: "Singapore",
+  565: "Singapore",
+  566: "Singapore",
+  574: "Vietnam",
+  601: "South Africa",
+  603: "Angola",
+  605: "Algeria",
+  622: "Egypt",
+  636: "Liberia",
+  642: "Libya",
+  657: "Nigeria",
+  667: "Sierra Leone",
+  671: "Togo",
+  677: "Tanzania",
+  710: "Brazil",
+  725: "Chile",
+  735: "Ecuador",
+  760: "Peru",
+};
 
-  if (kind === "dark") {
-    glyph.append(
-      svgEl("circle", { cx: 7, cy: 10, r: 5, ...stroke }),
-      svgEl("path", { d: "M13 10h6", ...stroke, "stroke-dasharray": "2 2" }),
-    );
-  } else if (kind === "spoof") {
-    glyph.append(
-      svgEl("circle", { cx: 10, cy: 10, r: 4, ...stroke }),
-      svgEl("path", { d: "M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3", ...stroke }),
-    );
-  } else if (kind === "jump") {
-    glyph.append(svgEl("path", { d: "M10 3 L17.5 16.5 H2.5 Z", ...stroke }));
-  } else if (kind === "meeting") {
-    glyph.append(
-      svgEl("circle", { cx: 10, cy: 10, r: 4, ...stroke }),
-      svgEl("circle", { cx: 10, cy: 10, r: 8, ...stroke }),
-    );
-  } else {
-    glyph.append(
-      svgEl("circle", { cx: 10, cy: 10, r: 7.5, ...stroke }),
-      svgEl("rect", { x: 7.5, y: 7.5, width: 5, height: 5, fill: "currentColor", stroke: "none" }),
-    );
-  }
-  return glyph;
+/** MMSI -> flag state via its MID, or an em dash when the MID is not known. */
+function flagOf(mmsi: number): string {
+  if (!Number.isFinite(mmsi)) return "\u2014";
+  const mid = Math.floor(mmsi / 1_000_000);
+  return MID_COUNTRY[mid] ?? "\u2014";
+}
+
+/** The alert's IMO number when the evidence carries one; otherwise omit the field. */
+function imoOf(alert: WatchAlert): string | null {
+  const raw = alert.evidence["imo"];
+  if (typeof raw === "string" && raw.trim().length > 0) return raw.trim();
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
+  return null;
+}
+
+/** "tanker" -> "Tanker"; no record -> an honest dash. */
+function shipType(data: WatchResponse, alert: WatchAlert): string {
+  const cls = data.ships.find((ship) => ship.mmsi === alert.mmsi)?.class;
+  if (cls === undefined || cls.trim().length === 0) return "\u2014";
+  return cls.charAt(0).toUpperCase() + cls.slice(1);
+}
+
+function watchlistLabel(contact: WatchContact): string {
+  if (contact.watchlist === "sanctioned") return "Sanctioned";
+  if (contact.watchlist === "shadow_fleet") return "Shadow fleet";
+  return "\u2014";
+}
+
+/* ---- filters -------------------------------------------------------------- */
+
+/** 6 h or 12 h, measured back from the snapshot's generated_at. */
+type WindowHours = 6 | 12;
+
+interface FilterState {
+  kinds: Set<WatchAlertKind>;
+  areaId: string | null;
+  windowH: WindowHours;
+}
+
+/** The snapshot is the clock: relative labels and the window follow its stamp. */
+function snapshotNow(data: WatchResponse): number {
+  const ms = Date.parse(data.generated_at);
+  return Number.isFinite(ms) ? ms : Date.now();
+}
+
+function inWindow(alert: WatchAlert, nowMs: number, hours: WindowHours): boolean {
+  const start = Date.parse(alert.t_start);
+  if (!Number.isFinite(start)) return true;
+  return start >= nowMs - hours * 3_600_000;
+}
+
+/** Area and window only: the base set the type counts are drawn from. */
+function scopedAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
+  const now = snapshotNow(data);
+  return data.alerts.filter((alert) => {
+    if (state.areaId !== null && alert.area_id !== state.areaId) return false;
+    return inWindow(alert, now, state.windowH);
+  });
+}
+
+function visibleAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
+  return sortedAlerts(
+    scopedAlerts(data, state).filter((alert) => state.kinds.has(alert.kind)),
+  );
+}
+
+function kindCounts(alerts: WatchAlert[]): Map<WatchAlertKind, number> {
+  const counts = new Map<WatchAlertKind, number>();
+  for (const alert of alerts) counts.set(alert.kind, (counts.get(alert.kind) ?? 0) + 1);
+  return counts;
+}
+
+/* ---- CSV ------------------------------------------------------------------ */
+
+function csvCell(value: string): string {
+  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/** The visible rows, nothing else: what the analyst is looking at is the export. */
+function downloadCsv(rows: WatchAlert[], data: WatchResponse): void {
+  const header = [
+    "vessel",
+    "mmsi",
+    "type",
+    "area",
+    "started_utc",
+    "ended_utc",
+    "status",
+    "severity",
+  ];
+  const lines = rows.map((alert) =>
+    [
+      alertName(alert),
+      String(alert.mmsi),
+      shortLabel(alert.label),
+      areaName(data, alert.area_id),
+      alert.t_start,
+      alert.t_end ?? "",
+      alert.status,
+      alert.severity.toFixed(2),
+    ]
+      .map(csvCell)
+      .join(","),
+  );
+  const csv = [header.join(","), ...lines].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = h("a", { href: url, download: `watch-events-${data.generated_at.slice(0, 10)}.csv` });
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/* ---- field helpers -------------------------------------------------------- */
+
+function field(label: string, value: string | HTMLElement, extra?: HTMLElement | null): HTMLElement[] {
+  return [h("dt", null, label), h("dd", null, value, extra ?? null)];
+}
+
+/** A UTC time with its quiet relative follow-up. */
+function timeValue(iso: string, nowMs: number): HTMLElement[] {
+  return [
+    h("time", { class: "watch-mono", datetime: iso }, fmtUtcZ(iso)),
+    h("span", { class: "watch-rel" }, timeAgo(iso, nowMs)),
+  ];
 }
 
 /* ---- screen --------------------------------------------------------------- */
 
 /**
- * Paint the watch screen into `app`. The shell (bar, map box, rail) exists
- * before the data does, so the loading line never flashes an empty layout.
+ * Paint the watch screen into `app`. The shell (bar, map box, events rail)
+ * exists before the data does, so the loading line never flashes an empty split.
  */
 export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   const abort = new AbortController();
@@ -251,22 +451,50 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   const attrib = watchAttribution();
   const stage = h("section", { class: "stage watch-stage" }, mapDiv, liveChip, attrib);
 
+  const eventsCount = h("span", { class: "watch-count" }, "\u2014");
+  const filtersEl = h("div", { class: "watch-filters" });
   const rowsEl = h("ol", { class: "watch-rows" });
-  const footEl = h("div", { class: "watch-foot" });
-  const worldRail = h(
+  const hiddenRoutine = h("span", { class: "watch-foot-hidden" });
+  const exportBtn = h("button", { class: "watch-export", type: "button" }, "Export CSV");
+  const footEl = h(
+    "div",
+    { class: "watch-foot" },
+    hiddenRoutine,
+    h("span", { class: "watch-foot-sep", "aria-hidden": "true" }, "\u00b7"),
+    exportBtn,
+  );
+  const events = h(
     "aside",
-    { class: "rail watch-rail" },
+    { class: "watch-events" },
     h(
       "div",
-      { class: "watch-list-head" },
-      h("h2", null, "Alerts"),
-      h("span", { class: "meta" }, "most severe first"),
+      { class: "watch-events-head" },
+      h("h2", null, "Events"),
+      eventsCount,
     ),
+    filtersEl,
     rowsEl,
     footEl,
   );
 
-  const panel = h("aside", { class: "rail watch-panel", hidden: true });
+  const detailBody = h("div", { class: "watch-details-body" });
+  const back = h(
+    "button",
+    { class: "watch-back", type: "button", "aria-label": "Back to events" },
+    "\u2190 Events",
+  );
+  const details = h(
+    "aside",
+    { class: "watch-details", hidden: true },
+    h(
+      "div",
+      { class: "watch-details-head" },
+      back,
+      h("span", { class: "watch-details-title" }, "Event details"),
+    ),
+    detailBody,
+  );
+
   const main = h(
     "main",
     { class: "main watch-main" },
@@ -286,7 +514,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   let panelParts: {
     alertId: string;
     duration: HTMLElement;
-    radius: HTMLElement;
+    radius: HTMLElement | null;
     other: HTMLElement;
   } | null = null;
   let panelTicker: number | null = null;
@@ -295,6 +523,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   let pendingRefresh = false;
   /** The selection to apply once the first snapshot exists. */
   let pending: string | null = route.alertId;
+
+  const state: FilterState = { kinds: new Set(KIND_ORDER), areaId: null, windowH: 12 };
+  let kindButtons: { kind: WatchAlertKind; button: HTMLButtonElement; count: HTMLElement }[] = [];
+  let areaSelect: HTMLSelectElement | null = null;
+  let windowButtons: { hours: WindowHours; button: HTMLButtonElement }[] = [];
+  /** What the export button writes: exactly the rows on screen. */
+  let exportRows: WatchAlert[] = [];
 
   // ---- clock: the one age label and the live duration ----------------------
 
@@ -329,14 +564,16 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       if (current === undefined || current.status !== "ongoing") return;
       const now = Date.now();
       panelParts.duration.textContent = fmtDuration(durationMs(current, now));
-      const atMs = reachTimeMs(current, now);
-      panelParts.radius.textContent = `${Math.round(reachRadiusKm(current, atMs))} km`;
-      panelParts.other.textContent = `Other ships in reach: ${otherShipsInReach(data, current, atMs)}`;
+      if (panelParts.radius !== null) {
+        const atMs = reachTimeMs(current, now);
+        panelParts.radius.textContent = `${Math.round(reachRadiusKm(current, atMs))} km`;
+      }
+      panelParts.other.textContent = `Other ships in reach: ${otherShipsInReach(data, current, reachTimeMs(current, now))}`;
       paintChip(now);
     }, 1000);
   }
 
-  // ---- rail -----------------------------------------------------------------
+  // ---- events rail ----------------------------------------------------------
 
   function markRows(): void {
     for (const row of rowsEl.querySelectorAll<HTMLButtonElement>(".watch-row")) {
@@ -346,10 +583,35 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     }
   }
 
+  function setPressed(button: HTMLButtonElement, pressed: boolean): void {
+    button.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+
+  /** Counts and control states from the current area + window scope. */
+  function syncFilters(snapshot: WatchResponse): void {
+    const counts = kindCounts(scopedAlerts(snapshot, state));
+    for (const entry of kindButtons) {
+      entry.count.textContent = String(counts.get(entry.kind) ?? 0);
+      setPressed(entry.button, state.kinds.has(entry.kind));
+    }
+    if (areaSelect !== null) areaSelect.value = state.areaId ?? "";
+    for (const entry of windowButtons) setPressed(entry.button, entry.hours === state.windowH);
+    hiddenRoutine.textContent = `${snapshot.counts.hidden_routine} routine events hidden`;
+  }
+
   function renderRows(snapshot: WatchResponse): void {
     const now = Date.now();
+    const alerts = visibleAlerts(snapshot, state);
+    exportRows = alerts;
+    eventsCount.textContent = String(alerts.length);
     rowsEl.replaceChildren();
-    for (const alert of sortedAlerts(snapshot.alerts)) {
+
+    if (alerts.length === 0) {
+      rowsEl.append(h("li", { class: "watch-empty" }, "No events match the filters"));
+      return;
+    }
+
+    for (const alert of alerts) {
       const row = h(
         "button",
         {
@@ -358,61 +620,220 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "data-alert-id": alert.id,
           "aria-current": alert.id === selectedId ? "true" : null,
         },
-        h("span", { class: "watch-row-icon", "aria-hidden": "true" }, kindGlyph(alert.kind)),
+        h("span", { class: "watch-square", "aria-hidden": "true" }),
+        h("span", { class: "watch-row-name" }, alertName(alert)),
+        alert.status === "ongoing"
+          ? h("span", {
+              class: "watch-row-live",
+              title: "Ongoing",
+              "aria-label": "ongoing",
+            })
+          : null,
         h(
-          "span",
-          { class: "watch-row-main" },
-          h(
-            "span",
-            { class: "watch-row-head" },
-            h("span", { class: "watch-row-name" }, alertName(alert)),
-            h("span", { class: "watch-row-label" }, shortLabel(alert.label)),
-            alert.status === "ongoing" ? h("span", { class: "watch-pill" }, "ongoing") : null,
-          ),
-          h(
-            "span",
-            { class: "watch-row-meta" },
-            `${areaName(snapshot, alert.area_id)} \u00b7 ${timeAgo(alert.last.t, now)}`,
-          ),
+          "time",
+          { class: "watch-row-time", datetime: alert.t_start },
+          h("span", { class: "watch-row-utc" }, fmtUtcZ(alert.t_start)),
+          h("span", { class: "watch-row-rel" }, timeAgo(alert.t_start, now)),
         ),
+        h("span", { class: "watch-row-tag" }, KIND_NAME[alert.kind]),
+        h("span", { class: "watch-row-area" }, areaName(snapshot, alert.area_id)),
       );
       row.addEventListener("click", () => {
         location.hash = watchHref(alert.id);
       });
       rowsEl.append(h("li", null, row));
     }
-    footEl.textContent = `${snapshot.counts.hidden_routine} routine events hidden`;
   }
 
-  // ---- panel ----------------------------------------------------------------
-
-  function renderPanel(snapshot: WatchResponse, alert: WatchAlert): void {
-    const now = Date.now();
-    const atMs = reachTimeMs(alert, now);
-    const radius = `${Math.round(reachRadiusKm(alert, atMs))} km`;
-    const duration = h("span", { class: "watch-fact-v" }, fmtDuration(durationMs(alert, now)));
-    const radiusEl = h("span", { class: "watch-fact-v" }, radius);
-    const otherEl = h(
-      "div",
-      { class: "watch-other" },
-      `Other ships in reach: ${otherShipsInReach(snapshot, alert, atMs)}`,
-    );
-
-    const met = sortedContacts(alert.contacts).filter((contact) => contact.could_meet === true);
-    const metList = h("ul", { class: "watch-met-list" });
-    for (const contact of met) {
-      const sanctioned = contact.watchlist === "sanctioned";
+  /** Build the filter row once per snapshot; each control edits `state` in place. */
+  function buildFilters(snapshot: WatchResponse): void {
+    const present = new Set(snapshot.alerts.map((alert) => alert.kind));
+    kindButtons = [];
+    const kinds = h("div", { class: "watch-filter-kinds", role: "group", "aria-label": "Event type" });
+    for (const kind of KIND_ORDER) {
+      if (!present.has(kind)) continue;
+      const count = h("span", { class: "watch-kind-count" });
       const button = h(
         "button",
         {
-          class: `watch-met-row${sanctioned ? " is-sanctioned" : ""}`,
+          class: `watch-kind is-${kind}`,
           type: "button",
+          "aria-pressed": state.kinds.has(kind) ? "true" : "false",
         },
-        h("span", { class: "watch-met-name" }, contactName(contact)),
-        sanctioned ? h("span", { class: "watch-met-tag" }, "Sanctioned") : null,
-        h("span", { class: "watch-met-dist" }, `${contact.min_dist_km.toFixed(1)} km`),
+        h("span", { class: "watch-square", "aria-hidden": "true" }),
+        h("span", { class: "watch-kind-label" }, KIND_NAME[kind]),
+        count,
       );
       button.addEventListener("click", () => {
+        if (state.kinds.has(kind)) state.kinds.delete(kind);
+        else state.kinds.add(kind);
+        if (data !== null) {
+          syncFilters(data);
+          renderRows(data);
+        }
+      });
+      kinds.append(button);
+      kindButtons.push({ kind, button, count });
+    }
+
+    const select = h("select", { class: "watch-select", "aria-label": "Area" });
+    select.append(h("option", { value: "" }, "All areas"));
+    const watched = snapshot.areas.filter((area) => area.kind === "watched");
+    const listening = snapshot.areas.filter((area) => area.kind === "listening");
+    if (watched.length > 0) {
+      const group = h("optgroup", { label: "Watched" });
+      for (const area of watched) {
+        group.append(h("option", { value: area.id }, area.name));
+      }
+      select.append(group);
+    }
+    if (listening.length > 0) {
+      const group = h("optgroup", { label: "Listening" });
+      for (const area of listening) {
+        group.append(h("option", { value: area.id }, area.name));
+      }
+      select.append(group);
+    }
+    select.value = state.areaId ?? "";
+    select.addEventListener("change", () => {
+      state.areaId = select.value === "" ? null : select.value;
+      if (data !== null) {
+        syncFilters(data);
+        renderRows(data);
+      }
+    });
+    areaSelect = select;
+
+    windowButtons = [];
+    const windowGroup = h("div", { class: "watch-window", role: "group", "aria-label": "Window" });
+    for (const hours of [6, 12] as WindowHours[]) {
+      const button = h(
+        "button",
+        {
+          class: "watch-window-btn",
+          type: "button",
+          "aria-pressed": state.windowH === hours ? "true" : "false",
+        },
+        `${hours} h`,
+      );
+      button.addEventListener("click", () => {
+        state.windowH = hours;
+        if (data !== null) {
+          syncFilters(data);
+          renderRows(data);
+        }
+      });
+      windowGroup.append(button);
+      windowButtons.push({ hours, button });
+    }
+
+    filtersEl.replaceChildren(
+      kinds,
+      h("div", { class: "watch-filter-row" }, select, windowGroup),
+    );
+  }
+
+  function renderEvents(snapshot: WatchResponse): void {
+    buildFilters(snapshot);
+    syncFilters(snapshot);
+    renderRows(snapshot);
+  }
+
+  exportBtn.addEventListener("click", () => {
+    if (data !== null) downloadCsv(exportRows, data);
+  });
+
+  back.addEventListener("click", () => {
+    location.hash = "#/watch";
+  });
+
+  // ---- detail panel ---------------------------------------------------------
+
+  function renderDetails(snapshot: WatchResponse, alert: WatchAlert): void {
+    const now = Date.now();
+    const atMs = reachTimeMs(alert, now);
+    const duration = h("span", { class: "watch-mono" }, fmtDuration(durationMs(alert, now)));
+
+    const radiusLabel =
+      alert.kind === "dark" ? "Reach radius" : alert.kind === "sanctioned_stop" ? "Distance checked" : null;
+    let radiusEl: HTMLElement | null = null;
+    if (radiusLabel !== null) {
+      radiusEl = h("span", { class: "watch-mono" }, `${Math.round(reachRadiusKm(alert, atMs))} km`);
+    }
+
+    const imo = imoOf(alert);
+    const fields = h(
+      "dl",
+      { class: "watch-fields" },
+      ...field("Vessel", h("span", { class: "watch-vessel" }, alertName(alert))),
+      ...field("MMSI", h("span", { class: "watch-mono" }, String(alert.mmsi))),
+      ...(imo !== null ? field("IMO", h("span", { class: "watch-mono" }, imo)) : []),
+      ...field("Type", shipType(snapshot, alert)),
+      ...field("Flag", flagOf(alert.mmsi)),
+      ...field("Event", shortLabel(alert.label)),
+      ...field("Area", areaName(snapshot, alert.area_id)),
+      ...field("Started", h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_start, now))),
+      ...field(
+        "Ended",
+        alert.t_end === null
+          ? h(
+              "span",
+              { class: "watch-ongoing" },
+              h("span", { class: "watch-row-live", "aria-hidden": "true" }),
+              "ongoing",
+            )
+          : h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_end, now)),
+      ),
+      ...field("Duration", duration),
+      ...field(
+        "Last position",
+        h(
+          "span",
+          { class: "watch-mono" },
+          `${alert.last.lat.toFixed(4)}, ${alert.last.lon.toFixed(4)}`,
+        ),
+      ),
+      ...(radiusLabel !== null ? field(radiusLabel, radiusEl as HTMLElement) : []),
+    );
+
+    const contacts = sortedContacts(alert.contacts);
+    const body = h("tbody");
+    const table = h(
+      "table",
+      { class: "watch-nearby-table" },
+      h(
+        "thead",
+        null,
+        h(
+          "tr",
+          null,
+          h("th", { scope: "col" }, "Name"),
+          h("th", { scope: "col" }, "MMSI"),
+          h("th", { scope: "col" }, "Dist (km)"),
+          h("th", { scope: "col" }, "Status"),
+          h("th", { scope: "col" }, "List"),
+        ),
+      ),
+      body,
+    );
+
+    for (const contact of contacts) {
+      const sanctioned = contact.watchlist === "sanctioned";
+      const row = h(
+        "tr",
+        {
+          class: sanctioned ? "is-sanctioned" : null,
+          tabindex: "0",
+          role: "button",
+          "aria-label": `${contactName(contact)}, ${contact.min_dist_km.toFixed(1)} km`,
+        },
+        h("td", { class: "watch-nearby-name" }, contactName(contact)),
+        h("td", { class: "watch-mono" }, String(contact.mmsi)),
+        h("td", { class: "watch-mono watch-num" }, contact.min_dist_km.toFixed(1)),
+        h("td", null, contact.stopped ? "Stopped" : "Moving"),
+        h("td", null, watchlistLabel(contact)),
+      );
+      const ring = (): void => {
         if (map === null) return;
         const ship = contactShip(snapshot, contact);
         map.focusContact({
@@ -422,63 +843,33 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           lon: ship?.lon ?? contact.lon,
           sanctioned,
         });
-        for (const row of metList.querySelectorAll<HTMLButtonElement>(".watch-met-row")) {
-          row.removeAttribute("aria-current");
+        for (const current of table.querySelectorAll<HTMLTableRowElement>("tbody tr")) {
+          current.removeAttribute("aria-current");
         }
-        button.setAttribute("aria-current", "true");
+        row.setAttribute("aria-current", "true");
+      };
+      row.addEventListener("click", ring);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        ring();
       });
-      metList.append(h("li", null, button));
+      body.append(row);
     }
 
-    const back = h(
-      "button",
-      { class: "watch-back", type: "button", "aria-label": "Back to all alerts" },
-      "\u2190",
+    const otherEl = h(
+      "div",
+      { class: "watch-other" },
+      `Other ships in reach: ${otherShipsInReach(snapshot, alert, atMs)}`,
     );
-    back.addEventListener("click", () => {
-      location.hash = "#/watch";
-    });
 
-    panel.replaceChildren(
-      h(
-        "div",
-        { class: "watch-panel-head" },
-        h(
-          "div",
-          { class: "watch-panel-bar" },
-          back,
-          h("span", { class: `watch-panel-kind is-${alert.kind}` }, kindGlyph(alert.kind)),
-          h("span", { class: "watch-panel-label" }, shortLabel(alert.label)),
-          alert.status === "ongoing" ? h("span", { class: "watch-pill" }, "ongoing") : null,
-        ),
-        h("h2", { class: "watch-panel-name" }, alertName(alert)),
-        h(
-          "div",
-          { class: "watch-panel-meta" },
-          `${areaName(snapshot, alert.area_id)} \u00b7 MMSI ${alert.mmsi}`,
-        ),
-      ),
-      h(
-        "div",
-        { class: "watch-facts" },
-        h(
-          "div",
-          { class: "watch-fact" },
-          h("span", { class: "watch-fact-k" }, DURATION_NOUN[alert.kind]),
-          duration,
-        ),
-        h(
-          "div",
-          { class: "watch-fact" },
-          h("span", { class: "watch-fact-k" }, "Could be within"),
-          radiusEl,
-        ),
-      ),
+    detailBody.replaceChildren(
+      fields,
       h(
         "section",
-        { class: "watch-met" },
-        h("h3", null, "Could have met"),
-        met.length === 0 ? h("div", { class: "watch-none" }, "No ships in reach") : metList,
+        { class: "watch-nearby" },
+        h("h3", null, "Nearby vessels"),
+        contacts.length === 0 ? h("div", { class: "watch-none" }, "No ships in reach") : table,
       ),
       otherEl,
     );
@@ -499,12 +890,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       selectedId === null ? null : (data.alerts.find((entry) => entry.id === selectedId) ?? null);
 
     main.classList.toggle("is-focus", alert !== null);
-    worldRail.hidden = alert !== null;
-    panel.hidden = alert === null;
+    details.hidden = alert === null;
     markRows();
 
     if (alert === null) {
-      panel.replaceChildren();
+      detailBody.replaceChildren();
       panelParts = null;
       stopPanelTicker();
       appliedId = null;
@@ -512,7 +902,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       return;
     }
 
-    renderPanel(data, alert);
+    if (appliedId !== alert.id) details.scrollTop = 0;
+    renderDetails(data, alert);
     map?.focusAlert(alert, {
       animate: !options.keepCamera,
       moveCamera: !options.keepCamera,
@@ -547,9 +938,9 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       },
     });
 
-    main.replaceChildren(stage, worldRail, panel);
+    main.replaceChildren(stage, events, details);
     map.setData(snapshot);
-    renderRows(snapshot);
+    renderEvents(snapshot);
     paintChip(Date.now());
 
     const initial = pending ?? selectedId;
@@ -591,7 +982,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       } else {
         data = response;
         map?.setData(response);
-        renderRows(response);
+        renderEvents(response);
         paintChip(Date.now());
         applySelection({ keepCamera: true });
       }
