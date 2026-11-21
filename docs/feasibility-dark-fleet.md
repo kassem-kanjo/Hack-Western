@@ -34,3 +34,9 @@
 | Gate | Result | Evidence |
 |---|---|---|
 | F5 live AIS | **PASS** (Fri 23:08 ET) | aisstream, Baltic bbox [53.5-66N, 9.5-30.5E], 60 s: 763 messages, 591 unique vessels (362 position reports, 206 static data). Coverage is dense enough to detect silences live. |
+| F1 GFW access | **PASS** (Fri 23:20 ET) | Token works; events endpoint (POST /v3/events with geometry) returns gaps, encounters, loitering. |
+| F3 dark activity, Baltic | **FAIL** | 0 gap events Sep 1-Nov 15 in the Baltic box: GFW counts "intentional disabling" only > 50 nm offshore (research.md). Encounters 522 / loitering 3,289 exist but are fishing-centric. |
+| F3 other regions | **PASS** | Gap events Aug 15-Nov 15: global 86,438; Gulf of Oman/Arabian Sea 55 (cargo + non-fishing); Argentine EEZ edge 130 (fishing); West Africa 1,040 (mostly gear buoys, filter out). Each gap has off/on positions, times, implied speed: exactly the prism inputs. |
+| F2 SAR granularity | **PASS** (Hormuz) / FAIL (Baltic) | 4Wings `public-global-sar-presence` at HIGH res = 0.01° cells (~1 km), DAILY date (no time of day). Oct 2026, Gulf of Oman box [54-60E, 22-27N]: 11,036 detection cells, **5,551 unmatched to AIS**. Gulf of Finland: 1 detection. |
+
+**Decision (Chief, Fri 23:25): demo region moves from the Baltic to the Strait of Hormuz / Gulf of Oman.** Rich radar coverage, real gap events, and the centre of sanctioned Iranian oil STS activity. SAR has day resolution only, so a detection matches a prism if its cell intersects the union of lenses over that day.

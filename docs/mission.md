@@ -18,7 +18,7 @@ Every team has the same models. Judges see 15-20 tables of chat wrappers on mock
 a prompt can't produce:
 1. **A real finding, not a feature list.** The demo opens on a specific ship, from real data, that went
    dark, and shows where it most likely went and who it met. Judges can look it up.
-2. **One original, explainable algorithm: space-time prisms.** A ship last seen at A (time t0) and
+2. **A peer-reviewed method, made visible: space-time prisms** (Sharma & Shekhar, ACM TIST 2022; Hägerstrand time geography). No public tool combines prisms, radar-in-lens matching and sanctions on one map (docs/research.md). A ship last seen at A (time t0) and
    seen again at B (t1) can only have been inside the lens where two speed-limited circles overlap
    (time geography, Hägerstrand). Radar detections inside the lens are candidate sightings of that ship.
    Two dark ships whose prisms overlap in space *and* time = **possible hidden rendezvous** (ship-to-ship
@@ -58,8 +58,8 @@ Not entering: Gemini, Auth0, Solana, TinyFish, Sun Life, Canada Life, PCBWay.
   memorable moment is the lens revealing a hidden meeting.
 
 ## Scope guardrails
-- **One region, one month, done well.** Default: Baltic Sea (shadow-fleet tankers, dense Sentinel-1 and
-  AIS coverage). Fallback region chosen by the data probe if the Baltic is thin.
+- **One region, one month, done well.** Strait of Hormuz / Gulf of Oman (decided by the data probe, see
+  docs/feasibility-dark-fleet.md: the Baltic has no GFW gap events and almost no SAR).
 - Demo must run with no internet (snapshot) and optionally live (aisstream layer).
 - Non-commercial data only; attribution "Powered by Global Fishing Watch" on every view.
 
