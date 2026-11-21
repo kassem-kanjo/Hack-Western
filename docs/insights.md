@@ -52,3 +52,9 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     40 min) and SPAR ARIES + CSM HYDRA in Singapore's anchorage (35 min). Both look like bunkering. Why it
     matters: shadow-fleet STS transfers hide among thousands of routine ones; location and watchlist context,
     not the transfer itself, are what make one worth a look.
+15. **A detector's recall depends on what you ask it to find.** Cutting 512 random 1-6 h gaps out of our own
+    Baltic tracks, the silence rule found 43 (8.4%). But it only claims gaps that start while a ship is underway
+    (a moored ship going quiet is normal), and only 83 of the cuts did; within that scope it found 43 of 83
+    (51.8%). Our space-time prism held the hidden route in 62 of 66 masked windows (93.9%). Why it matters: a
+    single recall number without its scope can make a sound rule look broken, or a weak one look fine; the
+    51.8% is still low and we are tracing the misses. Source: docs/validation-tracks.md (seed 7).

@@ -441,6 +441,28 @@
   padding: var(--sp-4) var(--sp-4) var(--sp-2);
 }
 
+/* A region with nothing to report is a result, not a blank panel: text only,
+   no border and no box, so it cannot read as a control or a loading state. */
+.live-empty {
+  padding: var(--sp-4) var(--sp-4) var(--sp-5);
+}
+
+.live-empty h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  color: var(--c-text-1);
+}
+
+.live-empty p {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--c-text-2);
+}
+
 .live-list-head h2 {
   margin: 0;
   font-size: var(--fs-h2);

@@ -1,9 +1,67 @@
 {
- "generated_at": "2026-11-21T08:56:17+00:00",
+ "generated_at": "2026-11-21T15:27:59+00:00",
  "seed": 7,
- "source": "positions in the darkfleet store",
- "pings": 0,
- "tracks": 0,
- "status": "no data",
- "reason": "the store has no AIS positions (and no usable --jsonl-dir was given)"
+ "source": "aisstream files in ais/BALTIC_WATCH",
+ "pings": 271535,
+ "tracks": 300,
+ "status": "ok",
+ "config": {
+  "vessels_used": 300,
+  "max_vessels": 300,
+  "max_cases": 250,
+  "decoys": 20,
+  "ping_gap_min": 2.0,
+  "max_scored_truths_per_case": 40,
+  "mask_hours": [
+   1,
+   12
+  ],
+  "mask_min_sog": 2.0
+ },
+ "caps_knots": {
+  "default": 16.099999999999998
+ },
+ "containment": {
+  "n": 66,
+  "inside_footprint": 63,
+  "inside_lens_at_truth_time": 62,
+  "rate": 0.9393939393939394,
+  "wilson_ci": [
+   0.8542688489926583,
+   0.9761817706953214
+  ]
+ },
+ "bridge": {
+  "sigma_km_per_sqrt_h": 6.1653116178837255,
+  "auc": 1.0,
+  "ci": [
+   1.0,
+   1.0
+  ],
+  "n_cases": 66,
+  "n_decoys": 20,
+  "min_km": 20,
+  "max_km": 80
+ },
+ "detection": {
+  "status": "ok",
+  "min_gap_min": 60.0,
+  "gaps_per_track": 3,
+  "tracks": 200,
+  "injected": 512,
+  "found": 43,
+  "recall": 0.083984375,
+  "underway_kn": 2.0,
+  "injected_underway": 83,
+  "found_underway": 43,
+  "recall_underway": 0.5180722891566265
+ },
+ "false_positive": {
+  "status": "ok",
+  "cap_knots": 16.099999999999998,
+  "tracks": 200,
+  "events": 1,
+  "per_vessel_day": 0.011477743455420337,
+  "vessel_days": 87.12513952625002
+ }
 }

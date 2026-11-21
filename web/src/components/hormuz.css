@@ -60,6 +60,29 @@
   stroke-linejoin: round;
 }
 
+/* Narrow layout (< 520 px). Eighty-four days sit ~4 px apart, so a polyline of
+   daily values reads as spikes; the raw well-covered days become dots and a
+   centred 7-day rolling median carries the shape. Low-coverage days are not
+   drawn at all there. */
+.hormuz-chart .dot-min {
+  fill: var(--c-sar);
+  opacity: 0.55;
+}
+
+.hormuz-chart .median {
+  fill: none;
+  stroke: var(--c-sar);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The focus view's key promises a grey mark for low-coverage days; the narrow
+   layout draws none, so the key would describe marks that are not there. */
+.hormuz-chart-block:has(.hormuz-chart.is-narrow) .hormuz-chart-key {
+  display: none;
+}
+
 .hormuz-chart .ref {
   stroke: var(--c-prism-stroke);
   stroke-width: 1;
