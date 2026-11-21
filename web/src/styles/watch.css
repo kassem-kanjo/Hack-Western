@@ -190,21 +190,26 @@
 .watch-map-btn.is-compass { font-size: var(--fs-11); font-weight: var(--fw-medium); }
 
 /* Layer legend: a small panel under the zoom group. */
+/* Legend and layer switch in one: each row is the map symbol it names. */
 .watch-layers {
   position: absolute;
-  top: 106px;
-  right: 10px;
+  right: 12px;
+  bottom: 30px;
   z-index: 4;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: var(--sp-2);
+  gap: 5px;
+  padding: var(--sp-2) var(--sp-3);
 }
 
 .watch-layer {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
   font-size: var(--fs-11);
   line-height: 14px;
   color: var(--text-2);
@@ -212,12 +217,26 @@
   cursor: pointer;
 }
 
-.watch-layer-check {
-  width: 11px;
-  height: 11px;
-  margin: 0;
-  accent-color: var(--text-2);
+.watch-layer[aria-pressed="false"] {
+  color: var(--text-4);
 }
+
+.watch-layer[aria-pressed="false"] .watch-layer-glyph {
+  opacity: 0.45;
+}
+
+.watch-layer-glyph {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-2);
+}
+
+.watch-layer-glyph svg {
+  display: block;
+}
+
 
 /* Attribution stays a quiet line: the status bar owns the full sources. */
 .watch-attrib {
@@ -1343,6 +1362,40 @@
 
 .watch-glyph svg {
   display: block;
+}
+
+/* Focus panel: the three figures a dark alert is about, in one row. */
+.watch-figs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line-1);
+}
+
+.watch-fig {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.watch-fig + .watch-fig {
+  border-left: 1px solid var(--line-1);
+}
+
+.watch-fig-value {
+  font-size: var(--fs-20);
+  font-weight: var(--fw-light);
+  letter-spacing: var(--track-tight);
+  line-height: 1.1;
+  color: var(--text-1);
+  font-variant-numeric: var(--numeric);
+  white-space: nowrap;
+}
+
+.watch-fig-label {
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  color: var(--text-3);
 }
 
 .watch-row > .watch-glyph {

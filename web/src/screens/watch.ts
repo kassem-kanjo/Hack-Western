@@ -231,6 +231,16 @@ function openingBox(snapshot: WatchResponse): [number, number, number, number] |
   return snapshot.areas.find((area) => area.id === first?.area_id)?.bbox ?? null;
 }
 
+/** One large figure with its plain label under it (the focus panel's top row). */
+function figure(value: string, label: string): HTMLElement {
+  return h(
+    "div",
+    { class: "watch-fig" },
+    h("span", { class: "watch-fig-value" }, value),
+    h("span", { class: "watch-fig-label" }, label),
+  );
+}
+
 /** How long an alert has been (or was) live, for the detail table. */
 function durationMs(alert: WatchAlert, nowMs: number): number {
   const start = Date.parse(alert.t_start);
@@ -1309,7 +1319,21 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         : []),
     );
 
-    const parts: HTMLElement[] = [fields];
+    // The three numbers a dark alert is about, set large above the detail.
+    const parts: HTMLElement[] = [];
+    if (alert.kind === "dark") {
+      const met = alert.contacts.filter((contact) => contact.could_meet === true).length;
+      parts.push(
+        h(
+          "div",
+          { class: "watch-figs" },
+          figure(fmtDuration(durationMs(alert, now)), "Dark for"),
+          figure(`${Math.round(reachRadiusKm(alert, atMs))} km`, "Could be this far"),
+          figure(String(met), "Ships it could have met"),
+        ),
+      );
+    }
+    parts.push(fields);
 
     // #185: a dark alert's replay sits under the field table.
     if (alert.kind === "dark") {

@@ -568,27 +568,35 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   const layerState = { vessels: true, events: true, areas: true, reach: true };
   type LayerKey = keyof typeof layerState;
 
-  const layerPanel = h("div", {
-    class: "watch-layers",
-    role: "group",
-    "aria-label": "Map layers",
-  });
+  // The legend doubles as the layer switch: each row is the map symbol it names.
+  // Clicking a row hides that layer; a hidden row is dimmed, not removed.
+  const LEGEND_GLYPH: Record<LayerKey, string> = {
+    vessels: '<path d="M7 2L11 12L7 9.5L3 12Z" fill="currentColor"/>',
+    events: '<circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="20 6"/>',
+    areas: '<rect x="2" y="3" width="10" height="8" fill="none" stroke="currentColor" stroke-dasharray="3 2"/>',
+    reach: '<circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor"/>',
+  };
+  const layerPanel = h("div", { class: "watch-layers", role: "group", "aria-label": "Map legend" });
   for (const [key, label] of [
-    ["vessels", "Vessels"],
-    ["events", "Events"],
-    ["areas", "Areas"],
+    ["vessels", "Ships"],
+    ["events", "Alerts"],
+    ["areas", "Watched areas"],
     ["reach", "Reach"],
   ] as [LayerKey, string][]) {
-    const input = h("input", {
-      class: "watch-layer-check",
-      type: "checkbox",
-      checked: layerState[key],
-    });
-    input.addEventListener("change", () => {
-      layerState[key] = input.checked;
+    const glyph = h("span", { class: "watch-layer-glyph", "aria-hidden": "true" });
+    glyph.innerHTML = `<svg viewBox="0 0 14 14" width="14" height="14">${LEGEND_GLYPH[key]}</svg>`;
+    const row = h(
+      "button",
+      { class: "watch-layer", type: "button", "aria-pressed": "true" },
+      glyph,
+      h("span", null, label),
+    );
+    row.addEventListener("click", () => {
+      layerState[key] = !layerState[key];
+      row.setAttribute("aria-pressed", layerState[key] ? "true" : "false");
       applyLayerVisibility();
     });
-    layerPanel.append(h("label", { class: "watch-layer" }, input, h("span", null, label)));
+    layerPanel.append(row);
   }
 
   const cursorEl = h(
