@@ -23,3 +23,8 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
    the arithmetic: reaching the radar dots needed 18.4 kn average vs 10.8 kn straight-line, and the dots were
    only reachable in a 75-minute window that doesn't match the satellite pass. Why it matters: a dramatic
    anecdote is not evidence; a tool that rules cases *out* is more trustworthy than one that only flags.
+8. **Most alarms are innocent, and physics can prove it.** Of 109 gaps with radar inside their possible-reach
+   area, 90 are ruled out: 59 never moved (off≈on), 16 had the radar dot outside the lens at the satellite's
+   actual pass time, 10 couldn't reach any dot at their class speed, 5 had the only pass outside the gap.
+   19 remain unexplained. Evidence: docs/rerank.md. Why it matters: compliance teams drown in alerts; a tool
+   that clears 83% of them with a reason each is worth more than one that flags more.
