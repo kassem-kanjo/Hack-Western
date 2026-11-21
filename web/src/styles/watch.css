@@ -947,11 +947,17 @@
   color: var(--text-2);
 }
 
-.watch-nearby-table th:nth-child(1) { width: 22%; }
-.watch-nearby-table th:nth-child(2) { width: 27%; }
-.watch-nearby-table th:nth-child(3) { width: 11%; }
-.watch-nearby-table th:nth-child(4) { width: 17%; }
-.watch-nearby-table th:nth-child(5) { width: 23%; }
+.watch-nearby-table th:nth-child(1) { width: 25%; }
+.watch-nearby-table th:nth-child(2) { width: 84px; }
+/* Distance: fixed width, one decimal, never truncated ("47.3" stays whole). */
+.watch-nearby-table th:nth-child(3),
+.watch-nearby-table td.watch-num {
+  width: 64px;
+  overflow: visible;
+  text-overflow: clip;
+}
+.watch-nearby-table th:nth-child(4) { width: 22%; }
+.watch-nearby-table th:nth-child(5) { width: 25%; }
 
 .watch-nearby-table tbody tr { cursor: pointer; }
 
