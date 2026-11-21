@@ -11,6 +11,13 @@
  * text (cluster counts, rank numbers, the selected-event label), so the map
  * needs no glyphs and keeps working with no network.
  *
+ * Calm density: only the events the rail lists (the leading `numbered` ones)
+ * get the full glyph and their rank number. Every other event is a small,
+ * faint dot in its kind's colour, with no tail and no label. A dashed tail is
+ * drawn only for the selected or hovered event, so the eye has one place to
+ * go. Below zoom 5 the cluster bubbles disappear and the vessel layer is the
+ * plain dot field again.
+ *
  * The module deliberately knows nothing about lists, chips or the rail: the
  * screen owns those and passes in already-filtered events, in list order.
  */
@@ -88,14 +95,25 @@ const KNOWN_KINDS = new Set<string>(Object.keys(KIND_PHRASE));
 /** How many leading events are numbered; matches the rail's row count. */
 const DEFAULT_NUMBERED = 7;
 
-/** Unnumbered markers keep their shape but shrink, so the seven rows stay findable. */
-const SMALL_SCALE = 0.72;
-
 /** A silence tail is a pointer, not the whole gap: past this it would cross the map. */
 const TAIL_MAX_PX = 46;
 
 /** Click target radius; the shapes themselves are smaller than a comfortable finger. */
 const HIT_RADIUS = 14;
+
+/**
+ * Everything outside the list is a dot, not a glyph: 3 px at half opacity in
+ * its kind's colour. It has a smaller hit target than a full marker so a field
+ * of them does not swallow every pan gesture.
+ */
+const DOT_RADIUS = 3;
+const DOT_OPACITY = 0.5;
+const DOT_HIT_RADIUS = 7;
+
+/** Below this zoom, event markers win and the vessel layer is only the dot field. */
+const CLUSTER_ZOOM = 5;
+const CLUSTER_RADIUS = 28;
+const CLUSTER_MAX_ZOOM = 9;
 
 /** The white ring around the selected event. */
 const SELECT_RADIUS = 15;
@@ -265,7 +283,9 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
   const svg = svgEl("svg", { class: "live-map-marker-svg", "aria-label": "Event markers" });
   svg.style.cssText = "position:absolute;left:0;top:0;overflow:visible;";
   markerLayer.append(svg);
-  // Connectors and tails paint under the shapes; the markers above the labels.
+  // Faint dots sit under everything; tails under the shapes; the selected ring
+  // and its label above them all.
+  const dotLayer = svgEl("g", { class: "live-marker-dots" });
   const lineLayer = svgEl("g", { class: "live-marker-lines" });
   const shapeLayer = svgEl("g", { class: "live-marker-shapes" });
   const selectedRing = svgEl("circle", {
@@ -278,7 +298,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     "stroke-width": 1.5,
   });
   selectedRing.style.display = "none";
-  svg.append(lineLayer, shapeLayer, selectedRing);
+  svg.append(dotLayer, lineLayer, shapeLayer, selectedRing);
 
   overlay.append(labelLayer, markerLayer, selectionLayer);
   opts.container.append(overlay);
@@ -291,11 +311,24 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
   let events: LiveEvent[] = [];
   let numberedCount = DEFAULT_NUMBERED;
   let selected: LiveEvent | null = null;
+  let hovered: LiveEvent | null = null;
 
   let markers: MarkerRefs[] = [];
 
   let selectedLabel: HTMLElement | null = null;
   let selectedLngLat: [number, number] | null = null;
+
+  /** null until the first zoom check: true below CLUSTER_ZOOM, false above it. */
+  let flatField: boolean | null = null;
+
+  /** Dots colour by kind, so a faint event still says what it is. */
+  const dotColor: Record<EventKind, string> = {
+    silence: colors.gap,
+    jump: colors.candidate,
+    clone: colors.candidate,
+    meeting: colors.rdv,
+    spoof: colors.candidate,
+  };
 
   // Cluster id -> label and the cluster's position, so a label can follow the
   // cluster during a pan without re-querying the layer every frame.
@@ -352,6 +385,17 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     );
   }
 
+  /** Tails and connectors explain one story at a time: the selection or the hover. */
+  function emphasised(event: LiveEvent): boolean {
+    return event === selected || event === hovered;
+  }
+
+  function setHovered(event: LiveEvent | null): void {
+    if (destroyed || hovered === event) return;
+    hovered = event;
+    positionOverlays();
+  }
+
   /** Reposition every marker and overlay; cheap, so it can run on each rendered frame. */
   function positionOverlays(): void {
     if (destroyed || !ready) return;
@@ -380,13 +424,14 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       if (marker.secondary !== null) {
         const other = map.project(marker.secondary);
         const visibleOther = onScreen(other.x, other.y);
+        const explained = emphasised(marker.event);
 
         if (marker.tail !== null && marker.tailDot !== null) {
           const dx = other.x - point.x;
           const dy = other.y - point.y;
           const distance = Math.hypot(dx, dy);
           const ring = 8;
-          if (visibleOther && distance > ring + 4) {
+          if (explained && visibleOther && distance > ring + 4) {
             const ux = dx / distance;
             const uy = dy / distance;
             const reach = Math.min(distance - ring, TAIL_MAX_PX);
@@ -408,7 +453,10 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
         if (marker.link !== null && marker.squareB !== null) {
           if (visibleOther) {
-            marker.link.style.display = "";
+            // The second square is half of the twin-square glyph; the dotted
+            // hop between the two places is the part that only earns its ink
+            // when this marker is the one being explained.
+            marker.link.style.display = explained ? "" : "none";
             marker.squareB.style.display = "";
             marker.link.setAttribute("x1", String(point.x));
             marker.link.setAttribute("y1", String(point.y));
@@ -448,6 +496,13 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     }
   }
 
+  /** Remove every cluster count; used when the bubbles themselves are hidden. */
+  function clearClusterLabels(): void {
+    for (const label of clusterLabels.values()) label.remove();
+    clusterLabels.clear();
+    clusterPoints.clear();
+  }
+
   /**
    * Rebuild the cluster labels from what is actually rendered. queryRendered-
    * Features only reports clusters inside the viewport, which is exactly the
@@ -455,6 +510,13 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
    */
   function syncClusterLabels(): void {
     if (!ready || destroyed) return;
+
+    // Below CLUSTER_ZOOM there are no bubbles to label: the vessel layer is the
+    // plain dot field, so any leftover counts must go rather than float alone.
+    if (flatField === true) {
+      clearClusterLabels();
+      return;
+    }
 
     const features = map.queryRenderedFeatures({ layers: ["vessel-clusters"] });
     const seen = new Set<number>();
@@ -479,13 +541,15 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       let label = clusterLabels.get(id);
       if (label === undefined) {
         label = h("div", { class: "live-cluster-count" });
+        // Quieter than an event: a thinner ring and a 9 px, 60%-opacity count
+        // keeps the vessel layer behind the findings.
         label.style.cssText = [
           "position:absolute",
           "left:0",
           "top:0",
-          `color:${colors.text2}`,
+          `color:${rgba(colors.text2, 0.6)}`,
           "font-family:var(--font-mono)",
-          "font-size:10px",
+          "font-size:9px",
           "font-weight:500",
           "line-height:1",
           "white-space:nowrap",
@@ -508,6 +572,46 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     }
 
     positionOverlays();
+  }
+
+  /**
+   * One vessel field, two densities. Below CLUSTER_ZOOM the source is left
+   * unclustered so every ship is its own faint teal dot; above it the bubbles
+   * carry the density instead. Toggling the source is what makes the field
+   * actually appear at region zoom, where every ship would otherwise sit
+   * inside a bubble.
+   */
+  function applyVesselDensity(): void {
+    if (!ready || destroyed) return;
+
+    const next = map.getZoom() < CLUSTER_ZOOM;
+    if (flatField === next) return;
+    flatField = next;
+
+    const vesselSource = source("vessels");
+    if (vesselSource !== undefined) {
+      void vesselSource
+        .setClusterOptions(
+          next
+            ? { cluster: false }
+            : {
+                cluster: true,
+                clusterRadius: CLUSTER_RADIUS,
+                clusterMaxZoom: CLUSTER_MAX_ZOOM,
+              },
+        )
+        .catch(() => {
+          // The visibility switch below still hides the bubbles on engines
+          // where the options could not be applied.
+        });
+    }
+
+    if (map.getLayer("vessel-clusters")) {
+      map.setLayoutProperty("vessel-clusters", "visibility", next ? "none" : "visible");
+    }
+
+    if (next) clearClusterLabels();
+    else syncClusterLabels();
   }
 
   /** (Re)build the selected-event label, which is DOM rather than text-field. */
@@ -553,10 +657,15 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
   /* ---- markers ---------------------------------------------------------- */
 
-  /** Bind click and keyboard to one marker group; the hit shape carries the cursor. */
-  function makeSelectable(group: SVGGElement, event: LiveEvent): void {
+  /**
+   * Bind click, keyboard and hover to one marker group; the hit shape carries
+   * the cursor. Faint dots stay clickable but out of the tab order: the rail
+   * and the timeline are the keyboard path to a finding, and a hundred tab
+   * stops would drown the seven that matter.
+   */
+  function makeSelectable(group: SVGGElement, event: LiveEvent, focusable = true): void {
     group.setAttribute("role", "button");
-    group.setAttribute("tabindex", "0");
+    group.setAttribute("tabindex", focusable ? "0" : "-1");
     group.setAttribute("aria-label", `${KIND_LABEL[event.kind]}: ${vesselName(event.mmsi, vessels)}`);
     const pick = (): void => {
       if (!destroyed) opts.onSelect(event);
@@ -570,25 +679,59 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       pressed.preventDefault();
       pick();
     });
+    group.addEventListener("mouseenter", () => setHovered(event));
+    group.addEventListener("mouseleave", () => setHovered(null));
   }
 
-  function hitCircle(): SVGCircleElement {
-    return svgEl("circle", { cx: 0, cy: 0, r: HIT_RADIUS, class: "live-marker-hit" });
+  function hitCircle(radius = HIT_RADIUS): SVGCircleElement {
+    return svgEl("circle", { cx: 0, cy: 0, r: radius, class: "live-marker-hit" });
   }
 
   /**
-   * Build one marker. `scale` shrinks the unnumbered markers; the rank number is
-   * only drawn for the seven rows the rail lists, matching their 1..7 badges.
+   * A faint dot for every event outside the list: its kind's colour, half
+   * opacity, no tail, no number and no label. Still a click target, just a
+   * smaller one than a ranked marker.
    */
-  function buildMarker(event: LiveEvent, rank: number | null): MarkerRefs | null {
+  function buildDot(event: LiveEvent): MarkerRefs | null {
     if (!KNOWN_KINDS.has(event.kind)) return null;
 
-    const numbered = rank !== null;
-    const s = numbered ? 1 : SMALL_SCALE;
-    const stroke = (base: number): number => Math.max(1.8, base * s);
-    const group = svgEl("g", {
-      class: `live-marker is-${event.kind}${numbered ? "" : " is-small"}`,
-    });
+    const group = svgEl("g", { class: `live-marker is-dot is-${event.kind}` });
+    group.append(
+      svgEl("circle", {
+        cx: 0,
+        cy: 0,
+        r: DOT_RADIUS,
+        fill: dotColor[event.kind],
+        "fill-opacity": DOT_OPACITY,
+        class: "live-marker-dot",
+      }),
+      hitCircle(DOT_HIT_RADIUS),
+    );
+    makeSelectable(group, event, false);
+    dotLayer.append(group);
+
+    return {
+      event,
+      group,
+      primary: [event.lon, event.lat],
+      secondary: null,
+      tail: null,
+      tailDot: null,
+      link: null,
+      squareB: null,
+      hitB: null,
+    };
+  }
+
+  /**
+   * Build one of the ranked markers: the full kind glyph, its rank number and
+   * the evidence ends it needs when the tail/link is shown. Only the leading
+   * `numbered` events reach this function, matching the rail's 1..7 badges.
+   */
+  function buildMarker(event: LiveEvent, rank: number): MarkerRefs | null {
+    if (!KNOWN_KINDS.has(event.kind)) return null;
+
+    const group = svgEl("g", { class: `live-marker is-${event.kind}` });
 
     let primary: [number, number] = [event.lon, event.lat];
     let secondary: [number, number] | null = null;
@@ -603,13 +746,14 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
         svgEl("circle", {
           cx: 0,
           cy: 0,
-          r: 7 * s,
+          r: 7,
           fill: colors.sea,
           stroke: colors.gap,
-          "stroke-width": stroke(2.5),
+          "stroke-width": 2.5,
         }),
       );
-      // The dashed tail points at the next fix the ship reported.
+      // The dashed tail points at the next fix the ship reported. It is built
+      // here but only shown while this event is selected or hovered.
       secondary = evidencePoint(event.evidence, "next_lat", "next_lon");
       if (secondary !== null) {
         tail = svgEl("line", {
@@ -618,30 +762,30 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
           x2: 0,
           y2: 0,
           stroke: colors.gap,
-          "stroke-width": stroke(2),
-          "stroke-dasharray": `${Math.round(6 * s)} ${Math.round(5 * s)}`,
+          "stroke-width": 2,
+          "stroke-dasharray": "6 5",
           "stroke-linecap": "round",
         });
-        tailDot = svgEl("circle", { cx: 0, cy: 0, r: 3.2 * s, fill: colors.gap });
+        tailDot = svgEl("circle", { cx: 0, cy: 0, r: 3.2, fill: colors.gap });
         lineLayer.append(tail, tailDot);
       }
     } else if (event.kind === "jump") {
-      const top = -8 * s;
-      const bottom = 7 * s;
-      const half = 7.5 * s;
+      const top = -8;
+      const bottom = 7;
+      const half = 7.5;
       group.append(
         svgEl("path", {
           d: `M0 ${top} L${half} ${bottom} L${-half} ${bottom} Z`,
           fill: colors.sea,
           stroke: colors.candidate,
-          "stroke-width": stroke(2.2),
+          "stroke-width": 2.2,
           "stroke-linejoin": "round",
         }),
       );
     } else if (event.kind === "clone") {
       const clusterA = evidenceTuple(event.evidence, "cluster_a");
       const clusterB = evidenceTuple(event.evidence, "cluster_b");
-      const size = 12 * s;
+      const size = 12;
 
       if (clusterA !== null && clusterB !== null) {
         // Two clusters: one square per place, a dotted hop between them.
@@ -655,7 +799,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
             height: size,
             fill: colors.sea,
             stroke: colors.candidate,
-            "stroke-width": stroke(2.2),
+            "stroke-width": 2.2,
           }),
         );
         link = svgEl("line", {
@@ -664,7 +808,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
           x2: 0,
           y2: 0,
           stroke: colors.candidate,
-          "stroke-width": stroke(1.5),
+          "stroke-width": 1.5,
           "stroke-dasharray": "2 4",
         });
         lineLayer.append(link);
@@ -675,7 +819,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
           height: size,
           fill: colors.sea,
           stroke: colors.candidate,
-          "stroke-width": stroke(2.2),
+          "stroke-width": 2.2,
         });
         shapeLayer.append(squareB);
         hitB = svgEl("circle", {
@@ -687,8 +831,8 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
         shapeLayer.append(hitB);
       } else {
         // No clusters in evidence: the glyph's twin squares, centred on the point.
-        const square = 10 * s;
-        const corner = 7.5 * s;
+        const square = 10;
+        const corner = 7.5;
         group.append(
           svgEl("rect", {
             x: -corner,
@@ -697,7 +841,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
             height: square,
             fill: colors.sea,
             stroke: colors.candidate,
-            "stroke-width": stroke(2.2),
+            "stroke-width": 2.2,
           }),
           svgEl("rect", {
             x: -corner + square / 2,
@@ -706,7 +850,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
             height: square,
             fill: colors.sea,
             stroke: colors.candidate,
-            "stroke-width": stroke(2.2),
+            "stroke-width": 2.2,
           }),
         );
       }
@@ -715,18 +859,18 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
         svgEl("circle", {
           cx: 0,
           cy: 0,
-          r: 12 * s,
+          r: 12,
           fill: rgba(colors.rdv, 0.18),
           stroke: colors.rdv,
-          "stroke-width": stroke(2.2),
+          "stroke-width": 2.2,
         }),
         svgEl("circle", {
           cx: 0,
           cy: 0,
-          r: 6 * s,
+          r: 6,
           fill: "none",
           stroke: colors.rdv,
-          "stroke-width": stroke(2.2),
+          "stroke-width": 2.2,
         }),
       );
     } else {
@@ -735,14 +879,14 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
         svgEl("circle", {
           cx: 0,
           cy: 0,
-          r: 6.5 * s,
+          r: 6.5,
           fill: colors.sea,
           stroke: colors.candidate,
-          "stroke-width": stroke(2.2),
+          "stroke-width": 2.2,
         }),
       );
-      const inner = 9.5 * s;
-      const outer = 13.5 * s;
+      const inner = 9.5;
+      const outer = 13.5;
       for (const [x1, y1, x2, y2] of [
         [0, -inner, 0, -outer],
         [0, inner, 0, outer],
@@ -756,23 +900,21 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
             x2,
             y2,
             stroke: colors.candidate,
-            "stroke-width": stroke(2),
+            "stroke-width": 2,
             "stroke-linecap": "round",
           }),
         );
       }
     }
 
-    if (rank !== null) {
-      const text = svgEl("text", {
-        x: -NUMBER_CLEARANCE[event.kind] - 2,
-        y: 4,
-        "text-anchor": "end",
-        class: "live-marker-num",
-      });
-      text.textContent = String(rank);
-      group.append(text);
-    }
+    const number = svgEl("text", {
+      x: -NUMBER_CLEARANCE[event.kind] - 2,
+      y: 4,
+      "text-anchor": "end",
+      class: "live-marker-num",
+    });
+    number.textContent = String(rank);
+    group.append(number);
 
     group.append(hitCircle());
     makeSelectable(group, event);
@@ -812,6 +954,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
   /** Drop every marker node and its connectors; the SVG groups stay. */
   function clearMarkers(): void {
+    dotLayer.replaceChildren();
     lineLayer.replaceChildren();
     shapeLayer.replaceChildren();
     markers = [];
@@ -819,10 +962,13 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
 
   function rebuildMarkers(): void {
     clearMarkers();
+    hovered = null;
     if (!ready) return;
+
+    // Strong shapes only where the rail has a row; everything else is a dot.
     events.forEach((event, index) => {
-      const rank = index < numberedCount ? index + 1 : null;
-      const marker = buildMarker(event, rank);
+      const marker =
+        index < numberedCount ? buildMarker(event, index + 1) : buildDot(event);
       if (marker !== null) markers.push(marker);
     });
     positionOverlays();
@@ -855,11 +1001,12 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       type: "geojson",
       data: vesselData(vessels),
       cluster: true,
-      clusterRadius: 28,
-      clusterMaxZoom: 9,
+      clusterRadius: CLUSTER_RADIUS,
+      clusterMaxZoom: CLUSTER_MAX_ZOOM,
     });
 
     // Dim field: one small dot per vessel, drawn first so markers sit above it.
+    // With clustering off (below CLUSTER_ZOOM) this is every ship in the region.
     map.addLayer({
       id: "vessel-points",
       type: "circle",
@@ -872,6 +1019,8 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       },
     });
 
+    // Deliberately quiet: a hairline ring and a low fill, so the bubbles read
+    // as density and never compete with an event marker.
     map.addLayer({
       id: "vessel-clusters",
       type: "circle",
@@ -879,9 +1028,10 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
       filter: ["has", "point_count"],
       paint: {
         "circle-color": colors.ais,
-        "circle-opacity": 0.18,
+        "circle-opacity": 0.1,
         "circle-stroke-color": colors.ais,
-        "circle-stroke-width": 1,
+        "circle-stroke-opacity": 0.5,
+        "circle-stroke-width": 0.75,
         "circle-radius": [
           "step",
           ["get", "point_count"],
@@ -900,6 +1050,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     map.fitBounds(view, { padding: 40, duration: 0 });
 
     sizeSvg();
+    applyVesselDensity();
     rebuildMarkers();
     syncClusterLabels();
   });
@@ -909,6 +1060,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
   map.on("render", positionOverlays);
   map.on("move", positionOverlays);
   map.on("moveend", syncClusterLabels);
+  map.on("zoom", applyVesselDensity);
   map.on("idle", syncClusterLabels);
 
   return {
@@ -962,9 +1114,9 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
-      clusterLabels.clear();
-      clusterPoints.clear();
+      clearClusterLabels();
       markers = [];
+      hovered = null;
       selectedLabel = null;
       overlay.remove();
       // Removing the map also detaches every listener registered on it.

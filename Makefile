@@ -1,6 +1,9 @@
-.PHONY: check lint test web-build dev-api dev-web
+.PHONY: check lint test web-build dev-api dev-web snapshot
 
 check: lint test web-build
+
+snapshot:
+	uv run python scripts/build_all.py
 
 lint:
 	uv run ruff check . && uv run ruff format --check .
