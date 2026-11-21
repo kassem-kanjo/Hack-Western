@@ -19,7 +19,7 @@ Kassem's words: "global in theory and we have our recording for those areas"; "s
     {"id": "HORMUZ_STRAIT", "name": "Strait of Hormuz", "kind": "watched", "bbox": [...]}
   ],
   "ships": [
-    {"mmsi": 273128130, "valid": true, "name": "GESTIA", "lat": 54.87, "lon": 10.84, "t": "...Z", "sog": 0.0,
+    {"mmsi": 273128130, "valid": true, "name": "GESTIA", "lat": 54.87, "lon": 10.84, "t": "...Z", "sog": 0.0, "cog": 90.0 | null,
      "class": "tanker", "watchlist": "sanctioned" | "shadow_fleet" | null, "alert_ids": ["dark-273128130-..."]}
   ],
   "alerts": [
@@ -44,7 +44,7 @@ Kassem's words: "global in theory and we have our recording for those areas"; "s
 Rules:
 - `alerts` contains only suspicious items: kind dark/meeting/sanctioned_stop inside a watched area, any spoof, any alert involving a watchlisted ship, and the daily fleet-level `radar_unmatched` alert. Everything else is counted in `hidden_routine`, not listed.
 - **Identity gate.** An MMSI that cannot be a real ship identity — not 9 digits, every digit the same, a straight run such as `123456789`, or a first-three-digit prefix outside the 201–775 Maritime Identification Digits range — never produces an alert of any kind and never appears as a contact. `ships` still lists it, marked `"valid": false`, because the map should show what the receiver heard without claiming it is a ship. (The fleet-level radar alert has `mmsi: 0` by design; it is not an identity.)
-- `ships` = latest position of every ship heard in the last 2 h across all listening areas (all shown, dimmed).
+- `ships` = latest position of every ship heard in the last 2 h across all listening areas (all shown, dimmed). Each entry carries `cog`, its last reported course in degrees, or `null` when the hull sent none; the map draws a chevron only when both `cog` and `sog >= 0.5` are present.
 - **Leaving coverage is not going dark.** A dark alert whose last fix is inside a listening box, within 25 km of its edge, and steering out of it (course within 60° of that edge's outward normal) is dropped for both ongoing and ended gaps: the hull drove out of our receivers. Fixes outside every box, or with no course, are never suppressed this way. `--explain` counts these as `left coverage`.
 - Reach at time t for an alert: radius_km = speed_cap_kn × 1.852 × hours(t − last.t); if `next` exists, also within speed_cap_kn × 1.852 × hours(next.t − t) of `next` (the lens). Ongoing alerts: the UI grows the circle from `last.t` to now.
 - `speed_cap_kn` for a dark alert is `effective_cap_kn(class cap, the ship's track in the recording window)`: the larger of the class bound and 1.2 × the fastest SOG two consecutive fixes both report, clamped to 45 kn. A hull filing a slow class but really making 30 kn therefore gets 36 kn, and its `contacts` are computed with that same cap. Other kinds keep the plain class cap.

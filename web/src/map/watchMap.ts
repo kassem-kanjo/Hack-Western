@@ -81,16 +81,25 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Alerts are the only map things with a colour of their own. */
 const ALERT_TOKEN: Record<WatchAlert["kind"], string> = {
-  dark: "--c-risk-high",
-  spoof: "--c-prism-stroke",
-  jump: "--c-risk-high",
-  meeting: "--c-gap",
-  sanctioned_stop: "--c-gap",
-  radar_unmatched: "--c-risk-high",
+  dark: "--st-dark",
+  spoof: "--st-spoof",
+  jump: "--st-spoof",
+  meeting: "--text-1",
+  sanctioned_stop: "--st-sanctioned",
+  radar_unmatched: "--st-radar",
 };
 
 /** Fallback when an alert kind is not one this build knows. */
-const ALERT_FALLBACK = "#FF6B5E";
+const ALERT_FALLBACK = "#F26457";
+
+/**
+ * A hull under way with a known course (speed over 0.5 kn, a numeric course):
+ * drawn as a chevron, every other ship as a dot, so none is drawn twice.
+ */
+const MOVING_FILTER: maplibregl.ExpressionSpecification = ["all",
+  [">=", ["to-number", ["get", "sog"], 0], 0.5],
+  ["==", ["typeof", ["get", "cog"]], "number"],
+];
 
 export interface FocusShip {
   mmsi: number;
@@ -121,6 +130,8 @@ export interface WatchMapOptions {
   onSelectAlert: (id: string) => void;
   /** A ship dot was clicked; the screen opens that hull's dossier (#182). */
   onSelectVessel?: (mmsi: number) => void;
+  /** Where the camera opens (the first alert's area); null or absent opens on the world. */
+  opening?: [number, number, number, number] | null;
 }
 
 export interface WatchMapHandle {
@@ -354,6 +365,9 @@ function displayName(name: string | null, mmsi: number): string {
 interface ShipProps {
   mmsi: number;
   watch: number;
+  sanctioned: number;
+  sog: number | null;
+  cog: number | null;
 }
 
 interface AreaProps {
@@ -395,21 +409,29 @@ function shipFeatures(ships: WatchShip[]): GeoJSON.FeatureCollection<GeoJSON.Poi
         mmsi: ship.mmsi,
         watch:
           ship.watchlist === "sanctioned" || ship.watchlist === "shadow_fleet" ? 1 : 0,
+        sanctioned: ship.watchlist === "sanctioned" ? 1 : 0,
+        sog: ship.sog ?? null,
+        cog: (ship as { cog?: number | null }).cog ?? null,
       },
     });
   }
   return { type: "FeatureCollection", features };
 }
 
+type ShipStoreEntry = {
+  lon: number; lat: number; watch: number;
+  sanctioned?: number; sog?: number | null; cog?: number | null;
+};
+
 function storeFeatures(
-  store: Map<number, { lon: number; lat: number; watch: number }>,
+  store: Map<number, ShipStoreEntry>,
 ): GeoJSON.FeatureCollection<GeoJSON.Point, ShipProps> {
   const features: GeoJSON.Feature<GeoJSON.Point, ShipProps>[] = [];
   for (const [mmsi, ship] of store) {
     features.push({
       type: "Feature",
       geometry: { type: "Point", coordinates: [ship.lon, ship.lat] },
-      properties: { mmsi, watch: ship.watch },
+      properties: { mmsi, watch: ship.watch, sanctioned: ship.sanctioned ?? 0, sog: ship.sog ?? null, cog: ship.cog ?? null },
     });
   }
   return { type: "FeatureCollection", features };
@@ -457,10 +479,12 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     lineStrong: themeColor("--c-line-strong", "#34485F"),
     panel: themeColor("--c-panel", "#101923"),
     sea: themeColor("--c-bg", "#0A1017"),
-    ais: themeColor("--c-ais", "#4FD1B0"),
-    alert: themeColor("--c-risk-high", "#FF6B5E"),
-    gap: themeColor("--c-gap", "#FFB020"),
-    prism: themeColor("--c-prism-stroke", "#A78BFA"),
+    ais: themeColor("--geo-vessel", "#8797A9"),
+    alert: themeColor("--st-sanctioned", "#F26457"),
+    gap: themeColor("--st-dark", "#F0A33A"),
+    prism: themeColor("--geo-reach", "#C9D6E3"),
+    radar: themeColor("--st-radar", "#56B3EA"),
+    track: themeColor("--geo-track", "#A9B6C3"),
   };
 
   const alertColor = (kind: WatchAlert["kind"]): string =>
@@ -469,8 +493,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   const map = new maplibregl.Map({
     container: opts.container,
     style: offlineStyle(),
-    bounds: WORLD_BOUNDS,
-    fitBoundsOptions: { padding: 12, animate: false },
+    bounds: opts.opening ? [[opts.opening[0], opts.opening[1]], [opts.opening[2], opts.opening[3]]] : WORLD_BOUNDS,
+    fitBoundsOptions: { padding: opts.opening ? 48 : 12, animate: false },
     attributionControl: false,
     interactive: true,
   });
@@ -625,11 +649,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   // Live dots: the store is the one truth the ship layer is drawn from, so a
   // snapshot refresh and a streamed fix cannot disagree about where a hull is.
-  interface StoredShip {
-    lon: number;
-    lat: number;
-    watch: number;
-  }
+  type StoredShip = ShipStoreEntry;
   interface Glide {
     lon0: number;
     lat0: number;
@@ -656,7 +676,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   /** Layer groups behind the four checkboxes in the top-right panel. */
   const AREA_LAYERS = ["watch-area-fill", "watch-area-watched-edge", "watch-area-listening"];
-  const SHIP_LAYERS = ["watch-ship", "watch-ship-watch", "watch-ship-hit"];
+  const SHIP_LAYERS = ["watch-ship", "watch-ship-watch", "watch-ship-chevron", "watch-ship-hit"];
   const REACH_LAYERS = ["watch-reach-fill", "watch-reach-edge"];
 
   function applyLayerVisibility(): void {
@@ -1251,7 +1271,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     for (const item of items) {
       const known = shipStore.get(item.mmsi);
       if (known === undefined) {
-        shipStore.set(item.mmsi, { lon: item.lon, lat: item.lat, watch: 0 });
+        shipStore.set(item.mmsi, { lon: item.lon, lat: item.lat, watch: 0, sog: item.sog ?? null });
       } else if (reduced) {
         known.lon = item.lon;
         known.lat = item.lat;
@@ -1564,6 +1584,10 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         lon: ship.lon,
         lat: ship.lat,
         watch: ship.watchlist === "sanctioned" || ship.watchlist === "shadow_fleet" ? 1 : 0,
+        sanctioned: ship.watchlist === "sanctioned" ? 1 : 0,
+        sog: ship.sog ?? null,
+        // `cog` comes from /api/watch but is not in the api.ts type yet.
+        cog: (ship as { cog?: number | null }).cog ?? null,
       });
     }
 
@@ -1743,13 +1767,13 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-graticule",
       paint: { "line-color": colors.lineStrong, "line-opacity": 0.3, "line-width": 0.5 },
     });
-    // Radar-seen vessels with no matching broadcast: red is the one meaning.
+    // Radar-seen vessels with no matching broadcast: radar is the one meaning.
     map.addLayer({
       id: "watch-radar-fill",
       type: "fill",
       source: "watch-radar",
       paint: {
-        "fill-color": colors.alert,
+        "fill-color": colors.radar,
         "fill-opacity": ["*", 1, ["interpolate", ["linear"], ["get", "w"], 0, 0.14, 1, 0.9]],
         "fill-opacity-transition": { duration: 60 },
       },
@@ -1841,7 +1865,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-reach",
       paint: {
         "fill-color": colors.prism,
-        "fill-opacity": 0.08,
+        "fill-opacity": 0.04,
       },
     });
     map.addLayer({
@@ -1850,34 +1874,52 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-reach",
       paint: {
         "line-color": colors.prism,
-        "line-opacity": 0.85,
+        "line-opacity": 0.75,
         "line-width": 1,
-        "line-dasharray": [3, 3],
       },
     });
 
-    // Every ship: 1.5 px across, muted; watchlisted hulls only a little brighter.
+    // Every ship: a muted neutral dot. Hulls under way are drawn once, as chevrons.
     map.addLayer({
       id: "watch-ship",
       type: "circle",
       source: "watch-ships",
-      filter: ["==", ["get", "watch"], 0],
+      filter: ["all", ["==", ["get", "watch"], 0], ["!", MOVING_FILTER]],
       paint: {
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 5, 1.5, 8, 2.6, 11, 3.6],
-        "circle-color": colors.text2,
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 6, 0.75],
+        "circle-color": colors.ais,
+        "circle-opacity": 0.55,
       },
     });
     map.addLayer({
       id: "watch-ship-watch",
       type: "circle",
       source: "watch-ships",
-      filter: ["==", ["get", "watch"], 1],
+      filter: ["all", ["==", ["get", "watch"], 1], ["!", MOVING_FILTER]],
       paint: {
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 1.2, 5, 2.2, 8, 3.4, 11, 4.4],
-        "circle-color": colors.text1,
-        "circle-opacity": 0.9,
+        "circle-color": ["match", ["get", "sanctioned"], 1, colors.alert, colors.ais],
+        "circle-opacity": 0.8,
       },
+    });
+
+    // SDF chevron, point up: 7 x 10 white-on-transparent in a 16 x 16 canvas.
+    if (!map.hasImage("watch-chev")) {
+      const ctx = Object.assign(document.createElement("canvas"), { width: 16, height: 16 }).getContext("2d");
+      if (ctx !== null) {
+        ctx.fillStyle = "#FFFFFF";
+        ctx.beginPath();
+        ctx.moveTo(8, 3); ctx.lineTo(11.5, 13); ctx.lineTo(8, 10.2); ctx.lineTo(4.5, 13);
+        ctx.fill();
+        map.addImage("watch-chev", ctx.getImageData(0, 0, 16, 16), { sdf: true });
+      }
+    }
+    map.addLayer({
+      id: "watch-ship-chevron", type: "symbol", source: "watch-ships", filter: MOVING_FILTER,
+      layout: { "icon-image": "watch-chev", "icon-rotate": ["get", "cog"], "icon-rotation-alignment": "map",
+        "icon-allow-overlap": true, "icon-ignore-placement": true,
+        "icon-size": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 10, 0.9] },
+      paint: { "icon-color": ["match", ["get", "sanctioned"], 1, colors.alert, colors.ais], "icon-opacity": 0.8 },
     });
     // The ship dots are a pixel across; this transparent disc is the click target
     // and is hidden with the rest of the vessel layers. Dossier hook (#182).
@@ -1899,9 +1941,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-dossier-track",
       filter: ["==", ["geometry-type"], "LineString"],
       paint: {
-        "line-color": colors.ais,
-        "line-opacity": 0.55,
-        "line-width": 1.5,
+        "line-color": colors.track,
+        "line-opacity": 1,
+        "line-width": 1.25,
       },
     });
     map.addLayer({
@@ -1911,7 +1953,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       filter: ["==", ["geometry-type"], "Point"],
       paint: {
         "circle-radius": ["match", ["get", "role"], "end", 3, 2],
-        "circle-color": ["match", ["get", "role"], "end", colors.ais, colors.text3],
+        "circle-color": ["match", ["get", "role"], "end", colors.text1, colors.text3],
         "circle-opacity": 1,
         "circle-stroke-color": colors.sea,
         "circle-stroke-width": 1,

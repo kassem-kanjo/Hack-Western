@@ -8,8 +8,8 @@
  * starts. `fallback` is a complete sentence without the number, so a missing
  * endpoint never puts "undefined" or a stale figure on screen.
  *
- * Beat 2 is conditional: it exists only when the API says the Hormuz trend was
- * validated against the 2026-02-28 event. Without that proof the tour skips it
+ * Beat 2 is conditional: it exists only when /api/hormuz/trend reports
+ * regime.verdict "moves with event". Without that proof the tour skips it
  * entirely rather than claim a number we have not tested.
  */
 
@@ -39,7 +39,10 @@ export type PresentToken =
   | "offset_min"
   | "offset_max"
   | "recovery"
-  | "null_ratio";
+  | "null_ratio"
+  | "hormuz_before"
+  | "hormuz_after"
+  | "did_pts";
 
 /** The two lines the overlay shows for one beat. */
 export interface PresentCaption {
@@ -59,9 +62,9 @@ export interface PresentStep {
   alert?: "spoof";
   /**
    * Show this beat only when a condition was proved at tour start. The lone
-   * condition is the Hormuz event validation; unproved means the beat is gone.
+   * condition is the Hormuz trend verdict; unproved means the beat is gone.
    */
-  requires?: "hormuz_event";
+  requires?: "hormuz_trend";
   /** One sentence the room reads (<= 12 words). */
   headline: string;
   /** One supporting line under it (<= 18 words). */
@@ -83,9 +86,12 @@ export const PRESENT_STEPS: readonly PresentStep[] = [
   {
     id: "trend",
     route: "hormuz",
-    requires: "hormuz_event",
+    requires: "hormuz_trend",
     headline: "Since the strait closed, dark ships doubled",
-    line: "We checked the date: the share moves with the event, not our receivers.",
+    line: "Not broadcasting went from {hormuz_before}% to {hormuz_after}%: {did_pts} points beyond the Gulf of Oman control.",
+    fallback: {
+      line: "Not broadcasting rose after the strait closed, and the Gulf of Oman control did not move the same way.",
+    },
   },
   {
     id: "live",

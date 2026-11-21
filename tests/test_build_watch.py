@@ -290,6 +290,9 @@ def test_ships_carry_watchlist_and_alert_ids(tmp_path: Path) -> None:
     assert ships[DARK]["watchlist"] is None
     assert ships[DARK]["alert_ids"], "the dark ship's own alert must be linked back"
     assert ships[SANCTIONED]["alert_ids"], "the contact must carry the alert it appears in"
+    for ship in payload["ships"]:
+        assert "cog" in ship, "every ship carries its last course (null when unknown)"
+        assert ship["cog"] is None or 0 <= ship["cog"] < 360
 
 
 def test_contract_shape_and_areas(tmp_path: Path) -> None:

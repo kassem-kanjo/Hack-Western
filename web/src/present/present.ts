@@ -8,8 +8,8 @@
  *
  * Every number on every beat is fetched once when the tour starts and cached
  * for the whole run, so the radar share, the live counts and the spoof offsets
- * cannot disagree between screens. The Hormuz-trend beat only exists when the
- * validation file proves the 2026-02-28 event; otherwise it is not in the list.
+ * cannot disagree between screens. The Hormuz-trend beat only exists when
+ * /api/hormuz/trend reports regime.verdict "moves with event"; otherwise it is not in the list.
  *
  * The overlay itself is pointer-events: none: only the app's own controls and
  * the topbar stay clickable. Keys: -> / Space next, <- back, Esc exits and
@@ -32,19 +32,16 @@ import {
 
 const HORMUZ_UNSEEN_URL = "/api/hormuz/unseen";
 /**
- * The validation written from data/snapshot/hormuz_validation.json. A 404 (or
- * an older API that has no route yet) means "not proved", and the trend beat is
- * skipped: the tour never claims a trend we have not tested.
+ * The Hormuz trend vs the Gulf of Oman control. A 404 (or an API without the
+ * route) means "not proved", and the trend beat is skipped.
  */
-const HORMUZ_VALIDATION_URL = "/api/hormuz/validation";
-const HORMUZ_EVENT = "2026-02-28";
+const HORMUZ_TREND_URL = "/api/hormuz/trend";
 const HORMUZ_VERDICT = "moves with event";
 /** Matches the CSS breakpoint: the tour is desktop-only. */
 const PHONE_QUERY = "(max-width: 1000px)";
 
 const TOKEN = /\{([a-z_]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
-const EVENT_KEYS = ["event", "event_date", "date", "day", "t", "start"] as const;
 
 /**
  * Live values for the caption tokens. A missing key means "no number from the
@@ -55,7 +52,7 @@ type TokenValues = Partial<Record<PresentToken, string>>;
 
 interface TourValues {
   tokens: TokenValues;
-  /** True only when the validation file names the 2026-02-28 event as proved. */
+  /** True only when the trend endpoint's regime verdict is "moves with event". */
   trend: boolean;
 }
 
@@ -85,9 +82,9 @@ let line: HTMLElement | null = null;
 let progress: HTMLElement | null = null;
 let progressFill: HTMLElement | null = null;
 
-/** The tour list after the run's one validation fetch answers. */
+/** The tour list after the run's one trend fetch answers. */
 function visibleSteps(showTrend: boolean): readonly PresentStep[] {
-  return PRESENT_STEPS.filter((beat) => beat.requires !== "hormuz_event" || showTrend);
+  return PRESENT_STEPS.filter((beat) => beat.requires !== "hormuz_trend" || showTrend);
 }
 
 /** Hash navigation is the router's contract; never touch the screen directly. */
@@ -197,51 +194,6 @@ function spoofFacts(alert: WatchAlert): SpoofFacts {
   return { ships, minKm: Math.min(...offsets), maxKm: Math.max(...offsets) };
 }
 
-/** Does any string under this key mention the event date? */
-function mentionsEvent(value: unknown): boolean {
-  if (typeof value === "string") return value.includes(HORMUZ_EVENT);
-  if (Array.isArray(value)) return value.some(mentionsEvent);
-  if (isRecord(value)) return Object.values(value).some(mentionsEvent);
-  return false;
-}
-
-function normalVerdict(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-/** The event date sits in this object under one of the usual keys, or as a key. */
-function eventHere(node: Record<string, unknown>): boolean {
-  return Object.entries(node).some(([key, value]) => {
-    if (key.includes(HORMUZ_EVENT)) return true;
-    return (EVENT_KEYS as readonly string[]).includes(key) && mentionsEvent(value);
-  });
-}
-
-function isPositiveVerdict(node: Record<string, unknown>): boolean {
-  if (node["moves_with_event"] === true) return true;
-  const verdict = node["verdict"];
-  if (typeof verdict === "string" && normalVerdict(verdict) === HORMUZ_VERDICT) return true;
-  // A compact file may key the result by the event date itself.
-  return Object.entries(node).some(
-    ([key, value]) =>
-      key.includes(HORMUZ_EVENT) && typeof value === "string" && normalVerdict(value) === HORMUZ_VERDICT,
-  );
-}
-
-/**
- * Walk the validation document looking for one object that both names the
- * 2026-02-28 event and carries the positive verdict. Pairing them in the same
- * scope is what makes a stray verdict elsewhere in the file harmless.
- */
-function provesEvent(node: unknown, inScope: boolean): boolean {
-  if (Array.isArray(node)) return node.some((child) => provesEvent(child, inScope));
-  if (!isRecord(node)) return false;
-
-  const scope = inScope || eventHere(node);
-  if (scope && isPositiveVerdict(node)) return true;
-  return Object.values(node).some((child) => provesEvent(child, scope));
-}
-
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`GET ${path} failed: HTTP ${response.status}`);
@@ -258,28 +210,61 @@ interface HormuzUnseenLite {
   summary?: HormuzSummaryLite;
 }
 
-async function loadHormuzTrendValidated(): Promise<boolean> {
+/** The trend's regime block: the only fields the tour prints or gates on. */
+interface HormuzTrendLite {
+  regime?: {
+    treated?: { baseline?: number | null; current?: number | null };
+    did?: number | null;
+    verdict?: string | null;
+  };
+}
+
+function normalVerdict(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Fractions (0.316) become one-decimal percents for the caption ("31.6"). */
+function percentToken(value: unknown): string | undefined {
+  const fraction = finite(value);
+  return fraction === null ? undefined : (fraction * 100).toFixed(1);
+}
+
+/**
+ * The trend beat is shown only when the endpoint's own regime verdict says the
+ * share moves with the event. Numbers come from the same response, never from
+ * a constant here; a missing route (404) means no beat.
+ */
+async function loadHormuzTrend(): Promise<{ proved: boolean; tokens: TokenValues }> {
   try {
-    return provesEvent(await getJson<unknown>(HORMUZ_VALIDATION_URL), false);
+    const regime = (await getJson<HormuzTrendLite>(HORMUZ_TREND_URL)).regime;
+    const proved = normalVerdict(regime?.verdict ?? "") === HORMUZ_VERDICT;
+    const tokens: TokenValues = {};
+    const before = percentToken(regime?.treated?.baseline);
+    const after = percentToken(regime?.treated?.current);
+    const did = percentToken(regime?.did);
+    if (before !== undefined) tokens.hormuz_before = before;
+    if (after !== undefined) tokens.hormuz_after = after;
+    if (did !== undefined) tokens.did_pts = did;
+    return { proved, tokens };
   } catch {
-    // No file, no route, or unreadable JSON: the trend beat is not proved.
-    return false;
+    // No route, or unreadable JSON: the trend beat is not proved.
+    return { proved: false, tokens: {} };
   }
 }
 
 /**
  * Fetch every number the captions may print, once per tour run. The calls are
  * independent (`allSettled`) so one dead endpoint only removes its own numbers;
- * each beat then reads its fallback sentence. `validation` resolves to a bool
+ * each beat then reads its fallback sentence. `trend` resolves to a verdict
  * rather than rejecting, so "missing" and "not proved" take the same path.
  */
 async function loadTourValues(): Promise<TourValues> {
-  const [watch, unseen, stats, edge, validation] = await Promise.allSettled([
+  const [watch, unseen, stats, edge, trend] = await Promise.allSettled([
     fetchWatch(),
     getJson<HormuzUnseenLite>(HORMUZ_UNSEEN_URL),
     fetchStats(),
     fetchEdgeStatus(),
-    loadHormuzTrendValidated(),
+    loadHormuzTrend(),
   ]);
 
   const values: TokenValues = {};
@@ -323,9 +308,11 @@ async function loadTourValues(): Promise<TourValues> {
     values.recovery = recoveryToken(finite(edge.value.last_recovery_ms));
   }
 
+  if (trend.status === "fulfilled") Object.assign(values, trend.value.tokens);
+
   return {
     tokens: values,
-    trend: validation.status === "fulfilled" && validation.value,
+    trend: trend.status === "fulfilled" && trend.value.proved,
   };
 }
 
