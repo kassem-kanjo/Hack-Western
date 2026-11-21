@@ -41,8 +41,6 @@ interface SarDetection {
   lat: number;
   lon: number;
   chip?: string;
-  optical_chip?: string;
-  optical_scene?: { time?: string } | null;
 }
 
 interface SarScan {
@@ -86,7 +84,7 @@ function chartBlock(trend: HormuzTrend): HTMLElement {
   return h(
     "section",
     { class: "hz-section" },
-    h("h2", { class: "hz-label" }, "Share not broadcasting, by week"),
+    h("h2", { class: "hz-label" }, "Share not broadcasting, 4-week average (weekly faint)"),
     trendChart(trend),
     h(
       "p",
@@ -182,25 +180,18 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       sarBox.replaceChildren();
       return;
     }
-    const optical = d.optical_chip
-      ? h(
-          "figure",
-          { class: "hz-optical" },
-          h("img", { src: chipUrl(d.optical_chip), alt: "Optical image of the same area, older" }),
-          h(
-            "figcaption",
-            { class: "hz-small" },
-            `Optical context, older: ${d.optical_scene?.time?.slice(0, 10) ?? "earlier scene"}. Ships move, so this is the sea and coast, not proof.`,
-          ),
-        )
-      : null;
-    const radar = h(
-      "figure",
-      { class: "hz-radar" },
-      h("img", { src: chipUrl(d.chip), alt: "Radar detection" }),
-      h("figcaption", { class: "hz-small" }, `Radar detection ${selected + 1} of ${sar?.detections?.length ?? 0}`),
+    sarBox.replaceChildren(
+      h(
+        "figure",
+        { class: "hz-radar" },
+        h("img", { src: chipUrl(d.chip), alt: `Radar detection ${selected + 1}` }),
+        h(
+          "figcaption",
+          { class: "hz-small" },
+          `Radar detection ${selected + 1} of ${sar?.detections?.length ?? 0} · ${passLabel(sar?.time)}`,
+        ),
+      ),
     );
-    sarBox.replaceChildren(...(optical ? [radar, optical] : [radar]));
   }
 
   function satellitePass(scan: SarScan): HTMLElement {

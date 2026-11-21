@@ -92,6 +92,24 @@ export function trendHeadline(regime: TrendRegime): {
 /** Week-start ISO date to epoch ms, or NaN when unreadable. */
 const ms = (day: string): number => Date.parse(`${day}T00:00:00Z`);
 
+/**
+ * Pooled rolling share over `span` weeks: sum of dark over sum of seen. A point
+ * is drawn only once a full window exists, so the first weeks never show a
+ * partial average.
+ */
+function rolling(rows: TrendWeek[], span = 4): TrendWeek[] {
+  const sorted = rows
+    .filter((row) => Number.isFinite(ms(row.week)))
+    .sort((a, b) => ms(a.week) - ms(b.week));
+  return sorted.map((row, i) => {
+    if (i < span - 1) return { ...row, dark_share: null };
+    const window = sorted.slice(i - span + 1, i + 1);
+    const seen = window.reduce((sum, w) => sum + w.seen, 0);
+    const dark = window.reduce((sum, w) => sum + w.dark, 0);
+    return { ...row, dark_share: seen > 0 ? dark / seen : null };
+  });
+}
+
 /** The weekly two-line chart. Hormuz is the state colour, the control is grey. */
 export function trendChart(trend: HormuzTrend): HTMLElement {
   const weeks = [...trend.treated, ...trend.control].map((row) => ms(row.week)).filter(Number.isFinite);
@@ -126,8 +144,12 @@ export function trendChart(trend: HormuzTrend): HTMLElement {
       .map((p) => `${x(p.t).toFixed(1)},${y(p.share).toFixed(1)}`);
     if (points.length > 1) root.append(svg("polyline", { points: points.join(" "), class: cls, fill: "none" }));
   };
-  line(trend.control, "trend-control");
-  line(trend.treated, "trend-treated");
+  // The bold line is a 4-week pooled share (dark over seen across the window), so a
+  // single quiet week cannot draw a spike; the weekly line stays as a faint underlay.
+  line(trend.control, "trend-control-week");
+  line(trend.treated, "trend-treated-week");
+  line(rolling(trend.control), "trend-control");
+  line(rolling(trend.treated), "trend-treated");
 
   // Other events: faint ticks on the base line, title on hover.
   for (const event of trend.events) {
