@@ -1,5 +1,6 @@
 import { fmtUtcFull } from "../format";
 import { h } from "./dom";
+import { mountSearchBox } from "./SearchBox";
 
 export type ConsoleMode = "SNAPSHOT" | "LIVE" | "ERROR";
 
@@ -64,6 +65,8 @@ export function topBar(opts: {
     { class: opts.active === "watch" ? "topbar is-watch" : "topbar" },
     h("span", { class: "brand" }, "Dark Fleet"),
     h("nav", { class: "tabs" }, ...tabs),
+    /* [search #183] one mount; the field's behaviour lives in SearchBox.ts. */
+    mountSearchBox(),
     h("span", { class: "topbar-spacer" }),
     present,
     h(

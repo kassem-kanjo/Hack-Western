@@ -18,9 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from darkfleet.api.areas import router as areas_router
 from darkfleet.api.edge import router as edge_router
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
+from darkfleet.api.search import router as search_router
+from darkfleet.api.vessels import router as vessels_router
 from darkfleet.api.watch import router as watch_router
 
 # Only these CaseDetail fields belong in a list response; the rest are detail-only.
@@ -57,6 +60,9 @@ app.include_router(live_router)
 app.include_router(hormuz_router)
 app.include_router(edge_router)
 app.include_router(watch_router)
+app.include_router(vessels_router)
+app.include_router(search_router)
+app.include_router(areas_router)
 
 
 def data_dir() -> Path:

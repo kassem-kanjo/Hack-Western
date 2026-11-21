@@ -28,9 +28,13 @@ import {
   watchStream,
 } from "../api";
 import type { HormuzHistoryFile, HormuzUnseenFile, WatchArea, WatchRecording } from "../api";
+import { mountReplay, type ReplayView } from "../components/AlertReplay";
 import { h } from "../components/dom";
+import { onVesselFocus } from "../components/SearchBox";
 import { topBar } from "../components/TopBar";
+import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
 import { fmtUtc } from "../format";
+import { alertBreakdown, fetchAreaStats, sparkline, totalAlerts } from "../model/areaStats";
 import { timeAgo } from "../model/liveFacts";
 import { LIVE_REGIONS, openLiveFeed, type LiveFeed } from "../model/liveFeed";
 import {
@@ -715,7 +719,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     ),
     h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Snapshot"), statusSnap),
     h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "AIS feed"), statusFeed),
-    h("span", { class: "watch-status-item is-keys" }, keyHint("J"), keyHint("K"), "move", keyHint("Esc"), "back", keyHint("/"), "filter"),
+    h("span", { class: "watch-status-item is-keys" }, keyHint("J"), keyHint("K"), "move", keyHint("Esc"), "back", keyHint("/"), "find ship"),
     h("span", { class: "watch-status-item is-clock" }, h("span", { class: "watch-status-k" }, "UTC"), statusClock),
   );
 
@@ -736,6 +740,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   /** What the panel and map currently show, so a refresh does not rebuild a running view. */
   let appliedKey: string | null = null;
   let map: WatchMapHandle | null = null;
+  /** #185: the dark-period scrubber, kept across a same-alert refresh so the playhead stays put. */
+  let replay: ReplayView | null = null;
+  let replayAlertId: string | null = null;
+  /** #183: unsubscribe for the top-bar search -> map bridge. */
+  let searchFocusOff: (() => void) | null = null;
   let stream: WatchStream | null = null;
   let feed: LiveFeed | null = null;
   let panelParts: {
@@ -949,6 +958,28 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   }
 
   /** One way to pick an area: filter the list and move the camera there (null = opening view). */
+  /** #186: add alerts (12 h) and a ship-count sparkline to each chip; plain chips if the API is down. */
+  async function enrichChips(): Promise<void> {
+    try {
+      const stats = await fetchAreaStats(abort.signal);
+      const byId = new Map(stats.map((stat) => [stat.id, stat]));
+      for (const { id, chip } of areaChips) {
+        const stat = byId.get(id);
+        if (stat === undefined) continue;
+        chip.querySelectorAll(".watch-chip-alerts, .watch-chip-spark").forEach((node) => node.remove());
+        const alerts = totalAlerts(stat);
+        if (alerts > 0) {
+          chip.append(h("span", { class: "watch-mono watch-chip-alerts" }, `${alerts}\u26a0`));
+        }
+        chip.append(sparkline(stat.sparkline));
+        const breakdown = alertBreakdown(stat);
+        chip.title = `${stat.name}: ${stat.ships_now} ships now, ${alerts} alerts in 12 h${breakdown ? ` (${breakdown})` : ""}`;
+      }
+    } catch {
+      // Chips stay as they are.
+    }
+  }
+
   function chooseArea(areaId: string | null): void {
     state.areaId = areaId;
     if (data !== null) {
@@ -1030,6 +1061,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       chips.append(chip);
       areaChips.push({ id: entry.area.id, chip });
     }
+    void enrichChips();
 
     windowButtons = [];
     const windowGroup = h("div", { class: "watch-window", role: "group", "aria-label": "Window" });
@@ -1057,7 +1089,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const search = h("input", {
       class: "watch-search",
       type: "search",
-      placeholder: "Filter name or MMSI  ( / )",
+      placeholder: "Filter this list",
       "aria-label": "Filter events by name or MMSI",
       autocomplete: "off",
       spellcheck: "false",
@@ -1170,6 +1202,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           current.removeAttribute("aria-current");
         }
         row.setAttribute("aria-current", "true");
+        openDossier(contact.mmsi); // #182: a vessel row opens its dossier
       };
       row.addEventListener("click", ring);
       row.addEventListener("keydown", (event) => {
@@ -1232,11 +1265,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         }
         row.setAttribute("aria-current", "true");
       };
-      row.addEventListener("click", ring);
+      row.addEventListener("click", () => {
+        ring();
+        openDossier(vessel.mmsi); // #182: a spoof-table row opens its dossier
+      });
       row.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         ring();
+        openDossier(vessel.mmsi);
       });
       body.append(row);
     }
@@ -1310,6 +1347,16 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     );
 
     const parts: HTMLElement[] = [fields];
+
+    // #185: a dark alert's replay sits under the field table.
+    if (alert.kind === "dark") {
+      if (replay === null || replayAlertId !== alert.id) {
+        replay?.destroy();
+        replay = map === null ? null : mountReplay(alert, map);
+        replayAlertId = alert.id;
+      }
+      if (replay !== null) parts.push(replay.element);
+    }
 
     // The receivers were off for part of this window: say so, and say it was not counted.
     const gap = overlappingGap(snapshot, alert, now);
@@ -1567,6 +1614,12 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
   // ---- selection ------------------------------------------------------------
 
+  function dropReplay(): void {
+    replay?.destroy();
+    replay = null;
+    replayAlertId = null;
+  }
+
   function applySelection(options: { keepCamera: boolean }): void {
     if (data === null) return;
     const alert =
@@ -1579,6 +1632,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       (alert === null && area !== null && area.id === "HORMUZ_STRAIT");
     const areaMode = alert === null && area !== null && !radarMode;
     const open = alert !== null || area !== null;
+    if (alert === null || alert.kind !== "dark") dropReplay();
 
     main.classList.toggle("is-focus", open);
     details.hidden = !open;
@@ -1594,6 +1648,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       stopPanelTicker();
       disposeRadar();
       setAttrib(false);
+      if (appliedKey !== null) closeDossier(); // leaving a selection drops its dossier overlay
       appliedKey = null;
       map?.showWorld();
       if (pendingFit !== null) {
@@ -1609,6 +1664,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         ? `area:${area?.id}`
         : `alert:${alert?.id}`;
     const same = appliedKey === key;
+    if (!same) closeDossier(); // #182: a new selection replaces the dossier overlay
 
     if (radarMode) {
       detailsTitle.textContent = "Radar picture";
@@ -1675,11 +1731,6 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     }
     if (typing) return;
 
-    if (event.key === "/") {
-      event.preventDefault();
-      searchInput?.focus();
-      return;
-    }
     if ((event.key === "j" || event.key === "k" || event.key === "J" || event.key === "K") && data !== null) {
       const list = visibleAlerts(data, state);
       if (list.length === 0) return;
@@ -1712,6 +1763,12 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         location.hash = watchAreaHref(id);
       },
       onSelectMarker: (kind, index) => radarMarkerHandler?.(kind, index),
+      onSelectVessel: (mmsi) => openDossier(mmsi), // #182: any ship dot opens its dossier
+    });
+    setDossierTrackRenderer((track) => map?.showDossierTrack(track));
+    searchFocusOff = onVesselFocus((vessel) => {
+      map?.flyToVessel(vessel.lat, vessel.lon); // #183
+      openDossier(vessel.mmsi); // search hit = fly + dossier
     });
     map.setData(snapshot);
     renderEvents(snapshot);
@@ -1811,6 +1868,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       feed?.close();
       feed = null;
       abort.abort();
+      dropReplay();
+      searchFocusOff?.();
+      searchFocusOff = null;
+      setDossierTrackRenderer(null);
+      closeDossier();
       map?.destroy();
       map = null;
     },

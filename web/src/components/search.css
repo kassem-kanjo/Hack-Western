@@ -1,0 +1,198 @@
+/* Top-bar ship search (#183). Dense console: hairline box, mono identities,
+   a small-caps count header, no pills, no glow, no rounded corners.
+   Tokens only; layout follows the 4 px scale. */
+
+.df-search {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex: 0 1 300px;
+  align-items: stretch;
+  width: 300px;
+  min-width: 180px;
+  height: 26px;
+  border: 1px solid var(--c-line);
+  background: var(--c-bg);
+}
+
+.df-search:focus-within {
+  border-color: var(--c-line-strong);
+}
+
+.df-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: var(--c-text-1);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1;
+  outline: none;
+  appearance: none;
+}
+
+.df-search-input::placeholder {
+  color: var(--c-text-3);
+  opacity: 1;
+}
+
+.df-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.df-search-kbd {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 0 6px;
+  border-left: 1px solid var(--c-line);
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* ---------- results ---------- */
+
+.df-search-pop {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  z-index: 40;
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  background: var(--c-panel);
+  border: 1px solid var(--c-line-strong);
+}
+
+.df-search-pop[hidden] {
+  display: none;
+}
+
+.df-search-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-bottom: 1px solid var(--c-line);
+  color: var(--c-text-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.df-search-count {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.df-search-list {
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.df-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 26px;
+  padding: 3px var(--sp-2) 3px 6px;
+  border-bottom: 1px solid var(--c-line);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+.df-search-row:last-child {
+  border-bottom: 0;
+}
+
+.df-search-row.is-active {
+  border-left-color: var(--c-focus);
+  background: var(--c-panel-raised);
+}
+
+.df-search-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-text-1);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-search-mmsi {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.df-search-type {
+  max-width: 72px;
+  overflow: hidden;
+  color: var(--c-text-3);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-search-tag {
+  min-width: 56px;
+  color: var(--c-text-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-align: right;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.df-search-tag.is-sanctioned {
+  color: var(--c-risk-high);
+}
+
+.df-search-tag.is-shadow {
+  color: var(--c-gap);
+}
+
+.df-search-none {
+  padding: 10px var(--sp-2);
+  color: var(--c-text-3);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* ---------- phone: the field takes its own row under the brand ---------- */
+
+@media (max-width: 760px) {
+  .df-search {
+    order: 2;
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    margin-bottom: var(--sp-1);
+  }
+
+  .df-search-pop {
+    width: 100%;
+    max-width: none;
+  }
+}

@@ -25,7 +25,14 @@
 
 import * as maplibregl from "maplibre-gl";
 
-import type { WatchAlert, WatchArea, WatchContact, WatchResponse, WatchShip } from "../api";
+import type {
+  VesselTrackPoint,
+  WatchAlert,
+  WatchArea,
+  WatchContact,
+  WatchResponse,
+  WatchShip,
+} from "../api";
 import type { LivePosition } from "../model/liveFeed";
 import { offlineStyle } from "../basemap";
 import { h } from "../components/dom";
@@ -112,6 +119,8 @@ export interface WatchMapOptions {
   onSelectMarker?: (kind: "encounter" | "hotspot", index: number) => void;
   /** An alert dot was clicked; the screen decides what that means for the URL. */
   onSelectAlert: (id: string) => void;
+  /** A ship dot was clicked; the screen opens that hull's dossier (#182). */
+  onSelectVessel?: (mmsi: number) => void;
 }
 
 export interface WatchMapHandle {
@@ -137,8 +146,14 @@ export interface WatchMapHandle {
   applyLive(items: LivePosition[]): void;
   /** Move the camera to an area, or back to the opening view with null. */
   fitArea(bbox: [number, number, number, number] | null): void;
+  /** Draw one hull's 12 h track for the dossier, or clear it with null (#182). */
+  showDossierTrack(track: readonly VesselTrackPoint[] | null): void;
+  /** [search #183] center on one hull with no alert open: the top-bar search hook. */
+  flyToVessel(lat: number, lon: number): void;
   /** Back to the world: clear every focus drawing and restore the camera. */
   showWorld(): void;
+  /** #185: AlertReplay owns its own sources on this map. */
+  replayMap: maplibregl.Map;
   resize(): void;
   destroy(): void;
 }
@@ -442,6 +457,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     lineStrong: themeColor("--c-line-strong", "#34485F"),
     panel: themeColor("--c-panel", "#101923"),
     sea: themeColor("--c-bg", "#0A1017"),
+    ais: themeColor("--c-ais", "#4FD1B0"),
     alert: themeColor("--c-risk-high", "#FF6B5E"),
     gap: themeColor("--c-gap", "#FFB020"),
     prism: themeColor("--c-prism-stroke", "#A78BFA"),
@@ -572,6 +588,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   let destroyed = false;
 
   let data: WatchResponse | null = null;
+  /** Dossier hook (#182): the open hull's 12 h track, kept through snapshot refreshes. */
+  let dossierTrack: VesselTrackPoint[] = [];
   let dots: AlertDot[] = [];
   let areaLabels = new Map<string, HTMLElement>();
   /** Measured once per rebuild: reading offsetWidth every frame would relayout. */
@@ -638,7 +656,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   /** Layer groups behind the four checkboxes in the top-right panel. */
   const AREA_LAYERS = ["watch-area-fill", "watch-area-watched-edge", "watch-area-listening"];
-  const SHIP_LAYERS = ["watch-ship", "watch-ship-watch"];
+  const SHIP_LAYERS = ["watch-ship", "watch-ship-watch", "watch-ship-hit"];
   const REACH_LAYERS = ["watch-reach-fill", "watch-reach-edge"];
 
   function applyLayerVisibility(): void {
@@ -1651,6 +1669,40 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     positionOverlays();
   }
 
+  // ---- dossier track hook (#182) --------------------------------------------
+  //
+  // One hull's own path, drawn above the ship field in the AIS colour. The
+  // dossier owns the data; the map only renders what it is handed.
+
+  function dossierTrackFeatures(): GeoJSON.FeatureCollection {
+    const features: GeoJSON.Feature[] = [];
+    if (dossierTrack.length >= 2) {
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: dossierTrack.map(([lon, lat]) => [lon, lat]),
+        },
+        properties: {},
+      });
+    }
+    const dots =
+      dossierTrack.length === 1
+        ? [dossierTrack[0]]
+        : dossierTrack.length > 1
+          ? [dossierTrack[0], dossierTrack[dossierTrack.length - 1]]
+          : [];
+    dots.forEach((point, index) => {
+      if (point === undefined) return;
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [point[0], point[1]] },
+        properties: { role: index === 0 ? "start" : "end" },
+      });
+    });
+    return { type: "FeatureCollection", features };
+  }
+
   map.on("load", () => {
     if (destroyed) return;
 
@@ -1701,6 +1753,11 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         "fill-opacity": ["*", 1, ["interpolate", ["linear"], ["get", "w"], 0, 0.14, 1, 0.9]],
         "fill-opacity-transition": { duration: 60 },
       },
+    });
+    // Dossier hook (#182): one hull's 12 h path, empty until a dossier opens.
+    map.addSource("watch-dossier-track", {
+      type: "geojson",
+      data: dossierTrackFeatures(),
     });
 
     // Watched areas: a thin solid outline, no fill at world zoom (a very faint
@@ -1822,6 +1879,59 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         "circle-opacity": 0.9,
       },
     });
+    // The ship dots are a pixel across; this transparent disc is the click target
+    // and is hidden with the rest of the vessel layers. Dossier hook (#182).
+    map.addLayer({
+      id: "watch-ship-hit",
+      type: "circle",
+      source: "watch-ships",
+      paint: {
+        "circle-radius": 7,
+        "circle-color": colors.text1,
+        "circle-opacity": 0,
+      },
+    });
+
+    // Dossier track: a hairline path with a hollow origin and a filled last fix.
+    map.addLayer({
+      id: "watch-dossier-track-line",
+      type: "line",
+      source: "watch-dossier-track",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: {
+        "line-color": colors.ais,
+        "line-opacity": 0.55,
+        "line-width": 1.5,
+      },
+    });
+    map.addLayer({
+      id: "watch-dossier-track-dot",
+      type: "circle",
+      source: "watch-dossier-track",
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-radius": ["match", ["get", "role"], "end", 3, 2],
+        "circle-color": ["match", ["get", "role"], "end", colors.ais, colors.text3],
+        "circle-opacity": 1,
+        "circle-stroke-color": colors.sea,
+        "circle-stroke-width": 1,
+      },
+    });
+
+    // Dossier hook (#182): any ship dot opens that hull's dossier.
+    if (opts.onSelectVessel !== undefined) {
+      const selectVessel = opts.onSelectVessel;
+      map.on("click", "watch-ship-hit", (event) => {
+        const mmsi = Number(event.features?.[0]?.properties?.["mmsi"]);
+        if (Number.isFinite(mmsi)) selectVessel(mmsi);
+      });
+      map.on("mouseenter", "watch-ship-hit", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "watch-ship-hit", () => {
+        map.getCanvas().style.cursor = "";
+      });
+    }
 
     map.addControl(new maplibregl.ScaleControl({ maxWidth: 90, unit: "metric" }), "bottom-left");
 
@@ -1912,7 +2022,17 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       }
     },
 
+    showDossierTrack(track: readonly VesselTrackPoint[] | null): void {
+      if (destroyed) return;
+      dossierTrack = track === null ? [] : [...track];
+      if (!ready) return;
+      const src = source("watch-dossier-track");
+      if (src !== undefined) void src.setData(dossierTrackFeatures());
+    },
+
     showWorld,
+
+    replayMap: map, // #185
     fitArea(bbox: [number, number, number, number] | null): void {
       if (destroyed || !ready) return;
       const box: Bounds =
@@ -1936,6 +2056,17 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     setRadarIntensity(k: number): void {
       radarIntensity = Math.max(0, Math.min(1.2, k));
       applyRadarIntensity();
+    },
+
+    /** [search #183] fly to a hull from the top bar; no alert focus is required. */
+    flyToVessel(lat: number, lon: number): void {
+      if (destroyed || !ready) return;
+      const center: LngLat = [lon, lat];
+      if (prefersReducedMotion()) {
+        map.jumpTo({ center, zoom: FOCUS_ZOOM });
+        return;
+      }
+      map.flyTo({ center, zoom: FOCUS_ZOOM, duration: FOCUS_MS, essential: true });
     },
 
     resize(): void {
