@@ -1,7 +1,10 @@
 from datetime import UTC, date, datetime, timedelta
 
-from darkfleet.core.geo import GEOD, KNOT_KM_H, Fix
-from darkfleet.core.match import SarCell, candidate_sightings, rendezvous_windows
+from shapely.geometry import box
+
+from darkfleet.core.geo import GEOD, KNOT_KM_H, Fix, distance_km
+from darkfleet.core.match import SarCell, candidate_sightings, rendezvous_windows, verdict_at_scene
+from darkfleet.core.prism import lens_polygon
 from darkfleet.core.speeds import max_speed_knots
 
 T0 = datetime(2026, 10, 7, 2, 0, tzinfo=UTC)
@@ -58,3 +61,65 @@ def test_slack_deeper_is_higher():
     res = {c.cell: c.slack for c in candidate_sightings(A, B, V, [centre, edge])}
     assert centre in res
     assert edge not in res or res[centre] > res[edge]
+
+
+def _cell_box(cell):
+    h = cell.size_deg / 2.0
+    return box(cell.lon - h, cell.lat - h, cell.lon + h, cell.lat + h)
+
+
+def test_scene_inside_lens():
+    mid = SarCell(24.75, 57.0, date(2026, 10, 7))
+    scene_time = T0 + timedelta(hours=12)  # middle of the gap, where the lens is largest
+    inside, slack, reason = verdict_at_scene(A, B, V, mid, scene_time)
+    assert inside is True
+    assert 0.0 < slack <= 1.0
+    assert reason.startswith("inside lens")
+    assert lens_polygon(A, B, V, scene_time).intersects(_cell_box(mid))
+
+
+def test_day_lens_but_not_scene_lens():
+    mid = SarCell(24.75, 57.0, date(2026, 10, 7))
+    # the day lens says yes (any moment of 2026-10-07 works) ...
+    assert [c.cell for c in candidate_sightings(A, B, V, [mid])] == [mid]
+    # ... but the instant says no: half an hour after the first fix the vessel cannot be here yet
+    assert verdict_at_scene(A, B, V, mid, T0 + timedelta(minutes=30)) == (
+        False,
+        0.0,
+        "outside lens at scene time",
+    )
+
+
+def test_scene_outside_gap():
+    mid = SarCell(24.75, 57.0, date(2026, 10, 7))
+    assert verdict_at_scene(A, B, V, mid, T1 + timedelta(hours=1)) == (
+        False,
+        0.0,
+        "scene time outside the gap",
+    )
+
+
+def test_inconsistent_gap():
+    mid = SarCell(24.75, 57.0, date(2026, 10, 7))
+    d_ab = distance_km(A.lat, A.lon, B.lat, B.lon)
+    # ~112 km in 28 h would need ~2.2 kn, so 1 kn cannot cover it
+    assert d_ab > 1.0 * KNOT_KM_H * 28
+    assert verdict_at_scene(A, B, 1.0, mid, T0 + timedelta(hours=12)) == (
+        False,
+        0.0,
+        "gap not consistent at this speed",
+    )
+
+
+def test_slack_in_unit_range():
+    for hours in (1, 12):
+        scene_time = T0 + timedelta(hours=hours)
+        c = lens_polygon(A, B, V, scene_time).centroid
+        cell = SarCell(c.y, c.x, date(2026, 10, 7))
+        inside, slack, _ = verdict_at_scene(A, B, V, cell, scene_time)
+        assert inside is True
+        assert 0.0 <= slack <= 1.0
+    # T0+30h is past the end of the gap, so slack is 0 and still in range
+    mid = SarCell(24.75, 57.0, date(2026, 10, 7))
+    _, slack_outside, _ = verdict_at_scene(A, B, V, mid, T0 + timedelta(hours=30))
+    assert 0.0 <= slack_outside <= 1.0
