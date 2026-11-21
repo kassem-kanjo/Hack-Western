@@ -65,11 +65,19 @@ def test_build_snapshot_shape_and_arithmetic(tmp_path: Path) -> None:
     assert payload["region"] == "HORMUZ"
     assert payload["period"] == {"start": "2026-08-15", "end": "2026-11-15"}
     assert payload["source"] == "Global Fishing Watch SAR vessel detections (Sentinel-1)"
-    assert payload["caveats"] == [
+    assert payload["caveats"][:3] == [
         "Radar misses vessels under ~25 m",
         "'Dark' means no AIS match, not wrongdoing",
         "Daily resolution",
     ]
+    if payload["summary"]["n_days_excluded"]:
+        assert "excluded" in payload["caveats"][3]
+    else:
+        assert payload["caveats"] == [
+            "Radar misses vessels under ~25 m",
+            "'Dark' means no AIS match, not wrongdoing",
+            "Daily resolution",
+        ]
 
     daily = payload["daily"]
     assert daily
@@ -83,10 +91,70 @@ def test_build_snapshot_shape_and_arithmetic(tmp_path: Path) -> None:
     assert payload["summary"]["seen_total"] == seen
     assert payload["summary"]["dark_total"] == dark
     assert payload["summary"]["days"] == len(daily)
+    assert set(payload["summary"]) == {
+        "days",
+        "seen_total",
+        "dark_total",
+        "dark_share_mean",
+        "dark_share_ci",
+        "median_dark_share",
+        "iqr",
+        "headline_share",
+        "n_days_used",
+        "n_days_excluded",
+        "excluded_days",
+        "busiest_day",
+    }
+    assert payload["summary"]["n_days_used"] + payload["summary"]["n_days_excluded"] == len(daily)
 
     for cell in payload["grid"]:
         assert set(cell) == {"lat", "lon", "n"}
         assert cell["n"] > 0
+
+
+class _RowsClient:
+    """Return a fixed matched/unmatched series, filtered by the requested window."""
+
+    def __init__(self, matched: list[SarCellRow], unmatched: list[SarCellRow]) -> None:
+        self.matched = matched
+        self.unmatched = unmatched
+
+    def sar_cells(
+        self,
+        region,
+        start: date,
+        end: date,
+        unmatched_only: bool | None = None,
+        *,
+        matched: bool | None = None,
+    ) -> list[SarCellRow]:
+        rows = self.matched if matched is True else self.unmatched
+        return [row for row in rows if start <= row.day <= end]
+
+
+def test_low_coverage_days_are_excluded_and_named_in_the_caveats() -> None:
+    days = [date(2026, 10, offset) for offset in range(1, 6)]
+    seen = [100, 100, 100, 100, 2]  # the last day is a partial satellite pass
+    dark = [5, 10, 20, 40, 2]
+    matched = [
+        SarCellRow(day=day, lat=25.0, lon=56.0, detections=total - dark_n, vessel_ids=1)
+        for day, total, dark_n in zip(days, seen, dark, strict=True)
+    ]
+    unmatched = [
+        SarCellRow(day=day, lat=25.0, lon=56.0, detections=dark_n, vessel_ids=1)
+        for day, dark_n in zip(days, dark, strict=True)
+    ]
+    start, end = days[0], days[-1]
+
+    payload = build_unseen_fleet.build_snapshot(_RowsClient(matched, unmatched), "HORMUZ", start, end)
+
+    headline = payload["summary"]
+    assert headline["days"] == 5
+    assert headline["n_days_used"] == 4
+    assert headline["n_days_excluded"] == 1
+    assert headline["excluded_days"] == ["2026-10-05"]
+    assert headline["headline_share"] == headline["median_dark_share"]
+    assert any("excluded" in caveat and "2026-10-05" in caveat for caveat in payload["caveats"])
 
 
 def test_chunks_cover_the_window_in_at_most_31_days(tmp_path: Path) -> None:

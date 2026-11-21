@@ -3,6 +3,7 @@
     uv run python scripts/build_live.py --region BALTIC_WATCH [--hours 12]
         [--out data/snapshot] [--land web/public/basemap/land.geojson]
         [--sanctions data/sanctions/maritime.csv]
+        [--meeting-types cargo-tanker|all] [--min-offshore-km 5]
 
 The recorder drops one ``*.jsonl.gz`` per UTC hour under ``data/cache/ais/<REGION>/``, but the
 engine itself knows nothing about a region: it takes whatever pings it is given. This script is
@@ -38,6 +39,7 @@ from typing import Any
 from darkfleet.core import kinematics
 from darkfleet.core.encounters import meetings
 from darkfleet.core.speeds import max_speed_knots
+from darkfleet.core.spoofing import filter_explained_jumps, ghost_points
 from darkfleet.core.tracks import (
     CoverageMinute,
     Event,
@@ -63,6 +65,20 @@ MAX_EVENTS = 500
 
 KEEP_STRENGTHS = frozenset({"imo", "strong_name"})
 """Watchlist strengths worth surfacing: a hull number or a distinctive full name, not a guess."""
+
+MEETING_TYPES = ("cargo-tanker", "all")
+"""CLI choices for who can be in a meeting: the two commercial classes, or every hull."""
+
+CARGO_TANKER_TYPES = frozenset(range(70, 90))
+"""AIS ship-type codes 70-89: cargo (70-79) and tanker (80-89), the oil-transfer classes.
+
+Fishing, passenger and unknown hulls are excluded by default because the Baltic recordings
+showed most of their close pairs were harbour traffic rather than rendezvous. Unknown is
+never treated as a member: an untyped hull cannot prove it is a cargo ship or a tanker.
+"""
+
+ALERT_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
+"""Watchlist categories that are an alert; detention is context, not an accusation."""
 
 
 def resolve_region_dir(region: str) -> Path:
@@ -225,6 +241,21 @@ def _watchlist_rows(
     return sorted(kept, key=lambda case: int(case.get("mmsi") or 0))
 
 
+def _split_watchlist(rows: Sequence[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Split watchlist rows into alerts and informational hits.
+
+    The live screen paints red only for a sanctions or shadow-fleet hit; a detention is
+    worth showing but it is a port-state action, not evidence of a dark-fleet operator.
+    Keeping the two lists separate lets the UI style them differently without re-reading
+    categories, and an unknown category falls to ``info`` rather than disappearing.
+    """
+    alerts: list[dict[str, Any]] = []
+    info: list[dict[str, Any]] = []
+    for row in rows:
+        (alerts if row.get("category") in ALERT_CATEGORIES else info).append(row)
+    return {"alerts": alerts, "info": info}
+
+
 def _event_payload(event: Event) -> dict[str, Any]:
     """Event as a JSON dict, with datetimes rendered as ISO strings."""
     row = asdict(event)
@@ -246,6 +277,8 @@ def build(
     hours: int | None = None,
     land: Path | None = None,
     sanctions: Path | None = None,
+    meeting_types: str = "cargo-tanker",
+    min_offshore_km: float = 5.0,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run every detector over one recording and write ``live_<region>.json``.
@@ -253,7 +286,14 @@ def build(
     Pure detectors are called with the whole cleaned track map where they are pairwise (meetings)
     and per track where they are not (silences, jumps, clones); this keeps the cost linear in
     pings for the per-vessel rules. Returns the payload for callers that want to assert on it.
+
+    Meetings default to cargo/tanker hulls at least 5 km offshore. The Baltic recording's
+    meeting false positives were moored or harbour-adjacent hulls, so the filter is applied at
+    the join (static types plus a wider land buffer) rather than in ``core.encounters``; a
+    caller that wants every hull passes ``meeting_types="all"``.
     """
+    if meeting_types not in MEETING_TYPES:
+        raise ValueError(f"meeting_types must be one of {MEETING_TYPES}, got {meeting_types!r}")
     pings, vessels = _read_pings_and_vessels(Path(directory))
     pings = _last_hours(pings, hours)
 
@@ -274,10 +314,26 @@ def build(
     jump_events = [event for event in jump_events if event.mmsi not in cloned_mmsis]
 
     land_geom = load_land(land) if land is not None and Path(land).is_file() else None
-    meeting_events = meetings(tracks, land=land_geom)
-    watch = _watchlist_rows(tracks, vessels, sanctions)
+    if meeting_types == "cargo-tanker":
+        vessel_types = {mmsi: info.ship_type for mmsi, info in vessels.items()}
+        meeting_events = meetings(
+            tracks,
+            land=land_geom,
+            min_offshore_km=min_offshore_km,
+            ship_types=CARGO_TANKER_TYPES,
+            vessel_types=vessel_types,
+        )
+    else:
+        meeting_events = meetings(tracks, land=land_geom, min_offshore_km=min_offshore_km)
+    # Ghost points: several unrelated ships reporting one fixed (often inland) point is GNSS
+    # spoofing; their "jumps" to that point are the spoof, not the ships, so drop those jumps.
+    spoof_events = ghost_points(tracks, land=land_geom)
+    jump_events = filter_explained_jumps(jump_events, spoof_events)
 
-    events = [*silences, *jump_events, *clone_events, *meeting_events]
+    watch = _watchlist_rows(tracks, vessels, sanctions)
+    watchlist = _split_watchlist(watch)
+
+    events = [*silences, *jump_events, *clone_events, *meeting_events, *spoof_events]
     payload_events = sorted((_event_payload(event) for event in events), key=_event_sort_key)
     payload_events = payload_events[:MAX_EVENTS]
 
@@ -300,10 +356,13 @@ def build(
             "jumps": by_kind.get("jump", 0),
             "clones": by_kind.get("clone", 0),
             "meetings": by_kind.get("meeting", 0),
+            "spoofs": by_kind.get("spoof", 0),
             "watchlist": len(watch),
+            "watchlist_alerts": len(watchlist["alerts"]),
+            "watchlist_info": len(watchlist["info"]),
         },
         "events": payload_events,
-        "watchlist": watch,
+        "watchlist": watchlist,
         "vessels": _vessel_rows(tracks, vessels),
     }
 
@@ -321,6 +380,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot output folder")
     parser.add_argument("--land", type=Path, default=DEFAULT_LAND, help="land GeoJSON for meeting filtering")
     parser.add_argument("--sanctions", type=Path, default=DEFAULT_SANCTIONS, help="maritime sanctions CSV")
+    parser.add_argument(
+        "--meeting-types",
+        choices=MEETING_TYPES,
+        default="cargo-tanker",
+        help="who can be in a meeting: cargo/tanker AIS types 70-89, or all vessels",
+    )
+    parser.add_argument(
+        "--min-offshore-km",
+        type=float,
+        default=5.0,
+        help="minimum distance from land for a meeting in km (default 5)",
+    )
     return parser
 
 
@@ -330,6 +401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.hours is not None and args.hours <= 0:
         parser.error("--hours must be a positive integer")
+    if args.min_offshore_km < 0:
+        parser.error("--min-offshore-km must be zero or positive")
 
     directory = resolve_region_dir(args.region)
     if not directory.is_dir():
@@ -343,13 +416,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         hours=args.hours,
         land=args.land,
         sanctions=args.sanctions,
+        meeting_types=args.meeting_types,
+        min_offshore_km=args.min_offshore_km,
     )
     counts = payload["counts"]
     name = Path(args.region).name or "region"
     print(
         f"{args.region}: {counts['pings']} pings, {counts['vessels']} vessels, "
         f"{counts['silences']} silences, {counts['jumps']} jumps, {counts['clones']} clones, "
-        f"{counts['meetings']} meetings, {counts['watchlist']} watchlist "
+        f"{counts['meetings']} meetings, {counts['watchlist_alerts']} watchlist alerts, "
+        f"{counts['watchlist_info']} watchlist info "
         f"-> {Path(args.out) / f'live_{name}.json'}"
     )
     return 0

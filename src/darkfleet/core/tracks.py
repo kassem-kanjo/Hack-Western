@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-EventKind = Literal["silence", "jump", "clone", "meeting", "dark_meeting"]
+EventKind = Literal["silence", "jump", "clone", "meeting", "dark_meeting", "spoof"]
 
 
 @dataclass(frozen=True)

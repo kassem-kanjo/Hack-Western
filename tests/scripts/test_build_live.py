@@ -74,9 +74,12 @@ def test_main_writes_every_contract_key(tmp_path: Path, monkeypatch) -> None:
         "clones",
         "meetings",
         "watchlist",
+        "watchlist_alerts",
+        "watchlist_info",
     }
     assert payload["counts"]["pings"] > 0
     assert payload["counts"]["vessels"] > 0
+    assert set(payload["watchlist"]) == {"alerts", "info"}
     assert payload["vessels"]
     for vessel in payload["vessels"]:
         assert set(vessel) == {"mmsi", "name", "imo", "ship_type", "class", "last"}
@@ -98,7 +101,9 @@ def test_counts_match_the_events_written(tmp_path: Path, monkeypatch) -> None:
     assert counts["clones"] == by_kind["clone"]
     assert counts["meetings"] == by_kind["meeting"]
     assert counts["vessels"] == len(payload["vessels"])
-    assert counts["watchlist"] == len(payload["watchlist"])
+    assert counts["watchlist"] == len(payload["watchlist"]["alerts"]) + len(payload["watchlist"]["info"])
+    assert counts["watchlist_alerts"] == len(payload["watchlist"]["alerts"])
+    assert counts["watchlist_info"] == len(payload["watchlist"]["info"])
     assert len(payload["events"]) <= 500
 
     severities = [event["severity"] for event in payload["events"]]
@@ -106,6 +111,86 @@ def test_counts_match_the_events_written(tmp_path: Path, monkeypatch) -> None:
     for event in payload["events"]:
         assert event["start"].endswith("Z")
         assert event["end"].endswith("Z")
+
+
+def test_default_meetings_use_cargo_tanker_types_and_five_km_offshore(tmp_path: Path, monkeypatch) -> None:
+    region_dir = _write_recording(tmp_path)
+    captured: dict = {}
+
+    def fake_meetings(tracks, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(build_live, "meetings", fake_meetings)
+
+    build_live.build(REGION, region_dir, tmp_path / "out")
+
+    assert captured["min_offshore_km"] == 5.0
+    assert captured["ship_types"] == frozenset(range(70, 90))
+    # 266128000 is a fishing hull (type 30) in the fixture: it carries a known type, so
+    # the filter can positively exclude it rather than relying on "unknown" handling.
+    assert captured["vessel_types"][266128000] == 30
+    assert 266128000 not in captured["ship_types"]
+
+
+def test_cli_all_meeting_types_remove_the_type_filter(tmp_path: Path, monkeypatch) -> None:
+    _write_recording(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    captured: dict = {}
+
+    def fake_meetings(tracks, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(build_live, "meetings", fake_meetings)
+
+    code = build_live.main(
+        ["--region", REGION, "--out", "out", "--meeting-types", "all", "--min-offshore-km", "12.5"]
+    )
+
+    assert code == 0
+    assert captured["min_offshore_km"] == 12.5
+    assert captured.get("ship_types") is None
+    assert "vessel_types" not in captured
+
+
+def test_cli_cargo_tanker_is_the_default_meeting_filter(tmp_path: Path, monkeypatch) -> None:
+    _write_recording(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    captured: dict = {}
+
+    def fake_meetings(tracks, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(build_live, "meetings", fake_meetings)
+
+    assert build_live.main(["--region", REGION, "--out", "out"]) == 0
+
+    assert captured["ship_types"] == frozenset(range(70, 90))
+    assert captured["min_offshore_km"] == 5.0
+
+
+def test_watchlist_is_split_into_alerts_and_info(tmp_path: Path, monkeypatch) -> None:
+    _write_recording(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rows = [
+        {"mmsi": 1, "category": "sanctioned"},
+        {"mmsi": 2, "category": "shadow_fleet"},
+        {"mmsi": 3, "category": "detained"},
+        {"mmsi": 4, "category": "other"},
+    ]
+    monkeypatch.setattr(build_live, "_watchlist_rows", lambda *args, **kwargs: rows)
+
+    assert build_live.main(["--region", REGION, "--out", "out"]) == 0
+
+    watchlist = _snapshot(tmp_path)["watchlist"]
+    assert [case["mmsi"] for case in watchlist["alerts"]] == [1, 2]
+    assert [case["mmsi"] for case in watchlist["info"]] == [3, 4]
+    counts = _snapshot(tmp_path)["counts"]
+    assert counts["watchlist"] == 4
+    assert counts["watchlist_alerts"] == 2
+    assert counts["watchlist_info"] == 2
 
 
 def test_coverage_holes_merge_adjacent_quiet_minutes() -> None:
