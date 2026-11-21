@@ -310,7 +310,8 @@ def test_tiger_supplies_the_sparkline_and_rate(
 
     baltic = rows["BALTIC_WATCH"]
     assert baltic["source"] == "tiger"
-    assert baltic["msgs_per_min"] == 7.0
+    # 10-minute average ending at the newest minute with data: (3 + 7) / 10.
+    assert baltic["msgs_per_min"] == 1.0
     assert len(baltic["sparkline"]) == 60
     assert baltic["sparkline"][-1] == 7
     assert baltic["sparkline"][-3] == 3

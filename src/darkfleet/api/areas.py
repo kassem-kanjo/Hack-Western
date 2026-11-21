@@ -317,6 +317,9 @@ def _tiger_repo() -> Any | None:
     return _tiger_repo_instance
 
 
+RATE_WINDOW_MINUTES = 10
+
+
 def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
     """Last sixty complete minutes for one area, or None when files should answer.
 
@@ -355,7 +358,14 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
         _close_tiger_repo()
         raise
 
-    rate = float(counts[-1])
+    # The recorder flushes quiet regions every 5 minutes, so the newest minutes are often
+    # still empty. Average the 10 minutes ending at the newest minute that has data.
+    last = max((i for i, c in enumerate(counts) if c), default=None)
+    if last is None:
+        rate = 0.0
+    else:
+        window = counts[max(0, last - RATE_WINDOW_MINUTES + 1) : last + 1]
+        rate = round(sum(window) / len(window), 1)
     _tiger_cache[key] = (now + TIGER_CACHE_SECONDS, rate, tuple(counts))
     return rate, counts
 

@@ -64,6 +64,11 @@ FROM positions
 GROUP BY time_bucket('1 minute', ts), region
 WITH NO DATA;
 
+-- Real-time aggregation: the newest minutes are not materialized yet (the policy runs every
+-- 60 s with a 1-minute end offset), so without this the live strip read 0 for the current
+-- minute. Real-time mode unions the raw rows past the watermark.
+ALTER MATERIALIZED VIEW ais_minutely SET (timescaledb.materialized_only = false);
+
 SELECT remove_continuous_aggregate_policy('ais_minutely', if_exists => TRUE);
 
 SELECT add_continuous_aggregate_policy(
