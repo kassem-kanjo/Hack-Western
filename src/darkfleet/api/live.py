@@ -289,6 +289,12 @@ class _SlottedStream:
             _release_stream_slot()
 
 
+def _default_ais_dir() -> Path:
+    """data/cache/ais beside the snapshot directory (data/snapshot), where the recorder writes."""
+    data = Path(os.environ.get("DARKFLEET_DATA", "data/snapshot"))
+    return data.parent / "cache" / "ais"
+
+
 async def event_stream(region: str, request: Request | None = None) -> AsyncIterator[str]:
     """Yield SSE frames until the client disconnects; split out so tests need no server.
 
@@ -302,8 +308,10 @@ async def event_stream(region: str, request: Request | None = None) -> AsyncIter
         if request is not None and await request.is_disconnected():
             return
         yield _frame({"type": "heartbeat", "t": int(time.time())})
-        root = os.environ.get("DARKFLEET_AIS_DIR")
-        if root:
+        # Default to the recorder's own folder next to the snapshot dir, so a plain launch (the
+        # desktop app, `make dev-api`) streams live positions instead of heartbeats only.
+        root = os.environ.get("DARKFLEET_AIS_DIR") or str(_default_ais_dir())
+        if root and Path(root).is_dir():
             # Bounded file I/O runs off the event loop; it is a short hop, never a held thread.
             positions = await asyncio.to_thread(tail.poll, Path(root) / region, emit=primed)
             if positions:
