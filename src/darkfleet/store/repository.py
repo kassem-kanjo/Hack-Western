@@ -16,11 +16,13 @@ from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
 
 __all__ = [
+    "AisHourBucket",
     "DarkHoursBucket",
     "DarkHoursDay",
     "PositionRow",
     "Repository",
     "SarDailyRow",
+    "SarWeekBucket",
 ]
 
 
@@ -50,6 +52,23 @@ class DarkHoursBucket(TypedDict):
     day: date
     hours: float
     gaps: int
+
+
+class SarWeekBucket(TypedDict):
+    """One region/week of the radar series, read from the weekly aggregate."""
+
+    week: date
+    region: str
+    seen: int
+    broadcasting: int
+    dark: int
+
+
+class AisHourBucket(TypedDict):
+    """One UTC hour of position/AIS traffic: ``msgs`` rows landed in ``positions``."""
+
+    hour: datetime
+    msgs: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +157,25 @@ class Repository(Protocol):
 
     def sar_cells_in(self, region: str, start: date, end: date) -> list[SarCellRow]:
         """SAR cells whose UTC day falls in ``[start, end]``, ordered by day, lat, lon."""
+        ...
+
+    def sar_weekly(self, start: date, end: date) -> list[SarWeekBucket]:
+        """Weekly radar buckets whose week falls in ``[start, end]``, ordered by week, region.
+
+        One ``{"week", "region", "seen", "broadcasting", "dark"}`` row per region and
+        seven-day UTC bucket. Backends that materialise the weekly aggregate refresh it
+        for the window before reading; backends that compute on read ignore that step.
+        """
+        ...
+
+    def ais_hourly(self, start: datetime, end: datetime) -> list[AisHourBucket]:
+        """Hourly position counts for hours in ``[start, end)``, ordered by hour.
+
+        Returns one ``{"hour", "msgs"}`` bucket per UTC hour with at least one row in
+        ``positions`` (GFW position reports and raw AIS pings alike). ``hour`` is
+        timezone-aware UTC. Backends that materialise the hourly aggregate refresh it
+        for the window before reading.
+        """
         ...
 
     @overload

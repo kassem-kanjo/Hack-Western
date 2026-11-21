@@ -27,6 +27,27 @@ ALTER TABLE positions ADD COLUMN IF NOT EXISTS cog real;
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS heading integer;
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS nav_status integer;
 
+-- Hourly message counts over every position row: GFW position reports and raw AIS pings
+-- share the table, so this is the recorder's own activity, not a gap series. No DISTINCT
+-- (Timescale continuous aggregates do not allow it); count(*) is already one row per ping.
+CREATE MATERIALIZED VIEW IF NOT EXISTS ais_hourly
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 hour', ts) AS hour,
+       count(*) AS msgs
+FROM positions
+GROUP BY time_bucket('1 hour', ts)
+WITH NO DATA;
+
+SELECT remove_continuous_aggregate_policy('ais_hourly', if_exists => TRUE);
+
+SELECT add_continuous_aggregate_policy(
+    'ais_hourly',
+    start_offset => INTERVAL '7 days',
+    end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour',
+    if_not_exists => TRUE
+);
+
 -- Latest static/voyage data per vessel (AIS messages 5 and 24). One row per MMSI.
 CREATE TABLE IF NOT EXISTS vessels_static (
     mmsi text PRIMARY KEY,

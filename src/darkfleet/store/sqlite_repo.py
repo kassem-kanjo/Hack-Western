@@ -15,7 +15,14 @@ from pathlib import Path
 
 from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow, SarDailyRow
+from darkfleet.store.repository import (
+    AisHourBucket,
+    DarkHoursBucket,
+    DarkHoursDay,
+    PositionRow,
+    SarDailyRow,
+    SarWeekBucket,
+)
 
 __all__ = ["SqliteRepo"]
 
@@ -288,6 +295,31 @@ GROUP BY day
 ORDER BY day
 """
 
+# Equivalent of the Timescale weekly aggregate: 7-day buckets aligned to the same Monday
+# origin (2000-01-03), one row per region and bucket that had radar days.
+_SAR_WEEKLY_RANGE = """
+SELECT date(day, 'weekday 0', '-6 days') AS week,
+       region,
+       SUM(seen) AS seen,
+       SUM(broadcasting) AS broadcasting,
+       SUM(dark) AS dark
+FROM sar_daily
+WHERE day >= ? AND day < ?
+GROUP BY week, region
+ORDER BY week, region
+"""
+
+# Equivalent of the Timescale hourly aggregate: timestamps are stored as UTC ISO-8601, so
+# the leading 13 characters are the UTC hour and group cleanly.
+_AIS_HOURLY_RANGE = """
+SELECT substr(ts, 1, 13) AS hour,
+       COUNT(*) AS msgs
+FROM positions
+WHERE ts >= ? AND ts < ?
+GROUP BY hour
+ORDER BY hour
+"""
+
 
 def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
@@ -551,6 +583,31 @@ class SqliteRepo:
                 lon=row[2],
                 detections=row[3],
                 vessel_ids=row[4],
+            )
+            for row in rows
+        ]
+
+    def sar_weekly(self, start: date, end: date) -> list[SarWeekBucket]:
+        """Weekly radar series computed from ``sar_daily``; matches the Timescale buckets."""
+        rows = self._conn.execute(_SAR_WEEKLY_RANGE, (start.isoformat(), _day_after(end))).fetchall()
+        return [
+            SarWeekBucket(
+                week=date.fromisoformat(row[0]),
+                region=row[1],
+                seen=int(row[2]),
+                broadcasting=int(row[3]),
+                dark=int(row[4]),
+            )
+            for row in rows
+        ]
+
+    def ais_hourly(self, start: datetime, end: datetime) -> list[AisHourBucket]:
+        """Hourly position counts grouped from ``positions``; matches the Timescale buckets."""
+        rows = self._conn.execute(_AIS_HOURLY_RANGE, (_ts(start), _ts(end))).fetchall()
+        return [
+            AisHourBucket(
+                hour=_as_utc(datetime.fromisoformat(f"{row[0]}:00:00")),
+                msgs=int(row[1]),
             )
             for row in rows
         ]

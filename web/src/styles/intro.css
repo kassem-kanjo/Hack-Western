@@ -1,0 +1,128 @@
+/* First-visit intro card (#86). One centred card over a dimmed page, one
+   question ("what is this?") and one primary way in. Colours come from
+   tokens.css only; the fade is the only motion and it is off under reduced
+   motion. */
+
+.intro-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90; /* under presentation mode (100) so "tour" hands over cleanly */
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  overflow: auto;
+  background: color-mix(in srgb, var(--c-bg) 74%, transparent);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.intro-backdrop.is-in {
+  opacity: 1;
+}
+
+.intro-card {
+  width: 100%;
+  max-width: 520px;
+  padding: var(--sp-6);
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-3);
+  background: var(--c-panel);
+  color: var(--c-text-1);
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--c-bg) 72%, transparent);
+}
+
+.intro-title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+}
+
+.intro-copy {
+  margin-top: var(--sp-4);
+}
+
+.intro-copy p {
+  margin: 0 0 var(--sp-3);
+  color: var(--c-text-2);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+.intro-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.intro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-5);
+}
+
+.intro-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--btn-border, var(--c-line-strong));
+  border-radius: var(--r-2);
+  background: var(--btn-bg, transparent);
+  color: var(--btn-fg, var(--c-text-1));
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+/* One primary action per view: the tour. The secondary button is quieter. */
+.intro-btn--primary {
+  --btn-bg: var(--c-text-1);
+  --btn-fg: var(--c-bg);
+  --btn-border: var(--c-text-1);
+}
+
+.intro-btn:hover {
+  border-color: var(--c-focus);
+}
+
+.intro-btn--primary:hover {
+  --btn-bg: color-mix(in srgb, var(--c-text-1) 88%, var(--c-bg));
+}
+
+.intro-btn:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* Phones: the walkthrough is a desktop experience, so the tour leaves and
+   "Explore on my own" becomes the one primary action. */
+@media (max-width: 760px) {
+  .intro-card {
+    padding: var(--sp-5);
+  }
+
+  .intro-title {
+    font-size: var(--fs-h2);
+  }
+
+  .intro-btn--primary {
+    display: none;
+  }
+
+  .intro-explore {
+    --btn-bg: var(--c-text-1);
+    --btn-fg: var(--c-bg);
+    --btn-border: var(--c-text-1);
+    flex: 1 1 100%;
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-backdrop {
+    transition: none;
+  }
+}

@@ -128,6 +128,21 @@ export interface DarkHoursDay {
   gaps: number;
 }
 
+/** One region/week of the radar series (weekly continuous aggregate). */
+export interface SarWeek {
+  week: string;
+  region: string;
+  seen: number;
+  broadcasting: number;
+  dark: number;
+}
+
+/** Position/AIS messages that landed in one UTC hour (hourly continuous aggregate). */
+export interface AisHour {
+  hour: string;
+  msgs: number;
+}
+
 export interface Validation {
   null_ratio: number | null;
   null_ci: [number, number] | null;
@@ -143,6 +158,12 @@ export interface Validation {
 
 export interface StatsResponse {
   dark_hours_daily: DarkHoursDay[];
+  /** Weekly radar series; absent on older snapshots. */
+  sar_weekly?: SarWeek[];
+  /** Hourly position counts; absent on older snapshots. */
+  ais_hourly?: AisHour[];
+  /** Backend that produced the snapshot: Tiger Data (Timescale) or the SQLite cache. */
+  source?: "tiger" | "sqlite";
   validation: Validation | null;
 }
 

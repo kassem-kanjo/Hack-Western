@@ -18,6 +18,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { CasesResponse } from "./api";
 import { fetchCases } from "./api";
 import { h } from "./components/dom";
+import { initIntro } from "./components/Intro";
 import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
 import { renderHormuz } from "./screens/hormuz";
@@ -192,4 +193,8 @@ window.addEventListener("hashchange", route);
 
 route(); // first paint: the loading line until the snapshot arrives
 loadCases();
+
+// Before initPresent(): on a first visit the intro card is modal, so its
+// capture handler must see "P" (and Escape) before presentation mode does.
+initIntro();
 initPresent();

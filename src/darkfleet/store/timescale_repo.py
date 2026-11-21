@@ -15,7 +15,14 @@ import psycopg
 
 from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow, SarDailyRow
+from darkfleet.store.repository import (
+    AisHourBucket,
+    DarkHoursBucket,
+    DarkHoursDay,
+    PositionRow,
+    SarDailyRow,
+    SarWeekBucket,
+)
 
 __all__ = ["TimescaleRepo"]
 
@@ -200,6 +207,29 @@ _REFRESH_RANGE = "CALL refresh_continuous_aggregate('dark_hours_daily', %s, %s)"
 _REFRESH = "CALL refresh_continuous_aggregate('dark_hours_daily', NULL, NULL)"
 
 _SAR_WEEKLY_REFRESH = "CALL refresh_continuous_aggregate('sar_weekly', NULL, NULL)"
+
+# The weekly aggregate buckets whole UTC days from the Timescale 7-day origin (a Monday),
+# so the window is passed as timestamps and the view expands it to its own boundaries.
+_SAR_WEEKLY_RANGE = """
+SELECT week::date AS week, region, seen, broadcasting, dark
+FROM sar_weekly
+WHERE week >= %s AND week < %s
+ORDER BY week, region
+"""
+
+_SAR_WEEKLY_REFRESH_RANGE = "CALL refresh_continuous_aggregate('sar_weekly', %s, %s)"
+
+# Hourly position counts. The continuous aggregate is refreshed for the requested window
+# before every read: refresh_continuous_aggregate cannot run inside a transaction, and
+# this connection is autocommit.
+_AIS_HOURLY_RANGE = """
+SELECT hour, msgs
+FROM ais_hourly
+WHERE hour >= %s AND hour < %s
+ORDER BY hour
+"""
+
+_AIS_HOURLY_REFRESH_RANGE = "CALL refresh_continuous_aggregate('ais_hourly', %s, %s)"
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -454,6 +484,33 @@ class TimescaleRepo:
             )
             for row in rows
         ]
+
+    def sar_weekly(self, start: date, end: date) -> list[SarWeekBucket]:
+        """Weekly radar series. Materialises the window, then reads the aggregate."""
+        # sar_weekly is bucketed on a date column, so its refresh window must be dates too
+        # (Timescale rejects timestamptz arguments there).
+        window_start = start
+        window_end = end + timedelta(days=1)
+        self._conn.execute(_SAR_WEEKLY_REFRESH_RANGE, (window_start, window_end))
+        rows = self._conn.execute(_SAR_WEEKLY_RANGE, (window_start, window_end)).fetchall()
+        return [
+            SarWeekBucket(
+                week=row[0],
+                region=row[1],
+                seen=int(row[2]),
+                broadcasting=int(row[3]),
+                dark=int(row[4]),
+            )
+            for row in rows
+        ]
+
+    def ais_hourly(self, start: datetime, end: datetime) -> list[AisHourBucket]:
+        """Hourly position counts. Materialises the window, then reads the aggregate."""
+        window_start = _as_utc(start)
+        window_end = _as_utc(end)
+        self._conn.execute(_AIS_HOURLY_REFRESH_RANGE, (window_start, window_end))
+        rows = self._conn.execute(_AIS_HOURLY_RANGE, (window_start, window_end)).fetchall()
+        return [AisHourBucket(hour=_as_utc(row[0]), msgs=int(row[1])) for row in rows]
 
     def dark_hours_daily(
         self,
