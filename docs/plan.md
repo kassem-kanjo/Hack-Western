@@ -1,4 +1,4 @@
-# Plan v2 (evidence-based, Fri 20 Nov, midnight)
+# Plan v2.1 (evidence-based + Auditor review, Sat 21 Nov, ~1 AM)
 
 Replaces v1. Built on tonight's data probes (docs/feasibility-dark-fleet.md, docs/region-scan.md).
 GitHub issues are the source of truth; this is the map.
@@ -9,6 +9,29 @@ GitHub issues are the source of truth; this is the map.
 | One region (Baltic) | 0 GFW gaps in Baltic or Hormuz (> 50 nm rule); almost no Baltic SAR | **Global investigation**: the engine finds cases wherever gaps and radar overlap |
 | GFW gives us gaps everywhere | Per-vessel presence API down | **Our own recording** of Baltic AIS since Fri 23:18 → our own gap detection |
 | Prism + SAR would find matches | 109 of 5,624 gaps have radar candidates in their prism | Core idea confirmed; best transit case CL YICHUN off Guyana |
+
+## Auditor review (Opus, round 1) and what we changed
+Verdict was "not ready as written": the planned opener (CL YICHUN) fails our own physics (needs 18.4 kn
+average to reach the radar cells vs 10.8 kn straight-line; reachable only ~06:30-07:45 UTC, not at the
+Sentinel-1 pass), and nothing showed the signal beats chance. All 10 findings accepted:
+1. **Scene times + class speeds** (#28): get each radar scene's real acquisition time from the Copernicus
+   Data Space STAC catalogue (free); test the dot against the lens *at that instant*; use per-class service
+   speeds from research; re-rank. The opener is chosen from what survives, or we open on how a case is
+   ruled out.
+2. **Validation is the headline** (#27, never cut): (a) null test: shift prisms in time/space, recount,
+   report "N x chance"; (b) recall test: take GFW encounters where both ships broadcast, hide one ship's
+   track to fake a gap, measure how often prism + radar recovers its true position.
+3. **False-positive filters** (#28): off≈on within 5 km = stationary (not a case); radar cells recurring on
+   >= 3 days = fixed structure; show meetings only with slack > 0.3.
+4. **One story in 3 minutes: Investigate.** Baltic gets one line or is cut; Edge only at the QNX sponsor table.
+5. **Offline basemap** (#30): bundle Natural Earth coastlines; rehearse CP3 with wifi off.
+6. **Radar vs lens at scene time only**; never compare a day-resolution dot to an hourly lens.
+7. **Schema first** (#29): Chief freezes `/api/cases/{id}` JSON + one real fixture before lanes start;
+   Tiger Data gets a real issue (#31: `dark_hours_daily` continuous aggregate → `/api/stats`).
+8. **Lane C moves to validation**; Baltic #19 becomes an optional offline batch with berth/box-exit filters.
+9. **QNX: Pi in hand by Sat 12 PM or the edge lane is cut.**
+10. **Wording**: "109 gaps had an unexplained radar detection their ship could have reached", plus caveats
+    (radar misses small boats; GFW and OpenSanctions are CC BY-NC, non-commercial).
 
 ## The product: one engine, three views
 1. **Investigate (historical, global).** GFW gap events → prisms → unmatched radar inside the prism →
@@ -33,7 +56,7 @@ merges after CI is green and the gate passes. Every piece = issue → branch →
 | #10 API | FastAPI read-only: `/api/cases`, `/api/cases/{id}` (gap, footprint GeoJSON, lens polygons at 24 time steps, candidates, meetings, score factors, sources), `/api/stats`, `/api/live/silences`, `/api/edge/status`; `SNAPSHOT=1` serves frozen JSON with zero network | #25 |
 | #11 Console | screens 01 overview, 02 case file, 03 meeting, built one at a time and compared to the wireframe PNGs; fonts bundled; "Powered by Global Fishing Watch" on every map | #10 (mock JSON first) |
 
-Parallel lanes Saturday morning: lane A #25 → #12 → #10 · lane B #11 against mock JSON · lane C #19.
+Parallel lanes: **overnight** #29 schema (Chief) + #28 scene times/filters + #27 validation · **Sat AM** lane A #25 → #12 → #10 · lane B #11 against the frozen schema fixture · lane C #30 basemap + #31 Tiger aggregate. #19 Baltic only if ahead.
 
 ## M2 Demo ready → CP3, Sat 10 PM
 #13 live layer · #14 edge sync + console view · #7 edge on Pi (if obtained) · #15 deploy (Vultr + domain;
@@ -45,7 +68,7 @@ and live site · submit by 8:30. After: DEV post from docs/insights.md.
 
 ## Cut order if behind at CP2 (keep the core)
 1. Watchlist sanctions in live view → 2. live layer → 3. edge on laptop (keep only if Pi) →
-4. meeting view polish. Never cut: case list + case file with prism scrubber + radar candidates + snapshot mode.
+4. meeting view polish. Never cut: validation numbers (#27), case list + case file with prism scrubber + radar candidates at scene time, offline snapshot + basemap, the rehearsed 3:00 script.
 
 ## Gates (every PR)
 CI green · `make check` · tests for new behaviour · UI: screenshot vs wireframe · Chief re-runs checks.

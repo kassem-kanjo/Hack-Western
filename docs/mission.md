@@ -58,8 +58,8 @@ Not entering: Gemini, Auth0, Solana, TinyFish, Sun Life, Canada Life, PCBWay.
   memorable moment is the lens revealing a hidden meeting.
 
 ## Scope guardrails
-- **One region, one month, done well.** Strait of Hormuz / Gulf of Oman (decided by the data probe, see
-  docs/feasibility-dark-fleet.md: the Baltic has no GFW gap events and almost no SAR).
+- **One story: Investigate, global** (plan v2.1). Cases come from wherever gaps and radar overlap; the demo's
+  claim is the validation number, not a single dramatic ship. Baltic live and Edge are add-ons.
 - Demo must run with no internet (snapshot) and optionally live (aisstream layer).
 - Non-commercial data only; attribution "Powered by Global Fishing Watch" on every view.
 
