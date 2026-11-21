@@ -3,6 +3,7 @@
     uv run python scripts/build_snapshot.py [--gaps-scanned 5624]
         [--counts data/cases/rerank_counts.json]
         [--land web/public/basemap/land.geojson]
+        [--sanctions data/sanctions/maritime.csv]
 
 The API only ever reads data/snapshot/, so this is the single place where the
 re-ranked case export becomes the frozen v1 shapes. When the re-rank counts table
@@ -30,12 +31,19 @@ from darkfleet.core.bridge import bridge_ellipse
 from darkfleet.core.geo import Fix
 from darkfleet.core.scoring import score_case
 from darkfleet.core.water import clip_to_water, load_land
+from darkfleet.ingest.sanctions import (
+    SANCTIONS_SOURCE,
+    build_index,
+    load_vessels,
+    match_vessel,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = ROOT / "data" / "cases" / "cases_v2.json"
 DEFAULT_COUNTS = ROOT / "data" / "cases" / "rerank_counts.json"
 DEFAULT_VALIDATION = ROOT / "data" / "validation"
 DEFAULT_LAND = ROOT / "web" / "public" / "basemap" / "land.geojson"
+DEFAULT_SANCTIONS = ROOT / "data" / "sanctions" / "maritime.csv"
 DEFAULT_OUT = ROOT / "data" / "snapshot"
 
 WATER_CAVEAT = (
@@ -75,6 +83,28 @@ def _score_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
         scored.append(scored_case)
     scored.sort(key=lambda case: case["score"], reverse=True)
     return scored
+
+
+def load_sanctions_index(path: Path | None) -> dict[str, dict[str, Any]] | None:
+    """Index the OpenSanctions maritime list, or None when the export is absent.
+
+    The CSV is CC BY-NC 4.0 and never committed, so a missing file simply means the
+    snapshot keeps the API's ``sanctions: null`` shape.
+    """
+    if path is None or not Path(path).is_file():
+        return None
+    return build_index(load_vessels(path))
+
+
+def add_sanctions(case: dict[str, Any], index: dict[str, dict[str, Any]]) -> None:
+    """Attach the OpenSanctions match to one case, in place.
+
+    A miss is still recorded with the source so the UI can say the list was checked.
+    """
+    vessel = case.get("vessel")
+    vessel = vessel if isinstance(vessel, dict) else {}
+    found = match_vessel(index, vessel.get("mmsi"), vessel.get("name"))
+    case["sanctions"] = found or {"match": False, "source": SANCTIONS_SOURCE, "entry": None}
 
 
 def _had_candidates(case: dict[str, Any]) -> bool:
@@ -333,13 +363,20 @@ def build(
     counts_path: Path | None = DEFAULT_COUNTS,
     validation_dir: Path | None = DEFAULT_VALIDATION,
     land: Path | None = None,
+    sanctions: Path | None = DEFAULT_SANCTIONS,
 ) -> dict[str, Any]:
     """Write both snapshot files and return the totals for the caller to print.
 
     `land` is optional so programmatic callers that do not need coastal clipping keep
-    the historical behaviour; the CLI passes the default Natural Earth file.
+    the historical behaviour; the CLI passes the default Natural Earth file. `sanctions`
+    works the same way: when the OpenSanctions export is present every case gains a
+    ``sanctions`` object (and scoring sees it), otherwise the field is left untouched.
     """
     cases, generated_at = _read_cases(source)
+    sanctions_index = load_sanctions_index(sanctions)
+    if sanctions_index is not None:
+        for case in cases:
+            add_sanctions(case, sanctions_index)
     cases = _score_cases(cases)
     totals = compute_totals(cases, gaps_scanned, _read_counts(counts_path))
     sigma = read_sigma(validation_dir)
@@ -372,14 +409,21 @@ def main() -> None:
     parser.add_argument("--gaps-scanned", type=int, default=5624)
     parser.add_argument("--counts", type=Path, default=DEFAULT_COUNTS)
     parser.add_argument("--land", type=Path, default=DEFAULT_LAND)
+    parser.add_argument("--sanctions", type=Path, default=DEFAULT_SANCTIONS)
     args = parser.parse_args()
 
     if not args.source.is_file():
         parser.error(f"missing cases export: {args.source}")
 
-    totals = build(args.source, args.out, args.gaps_scanned, args.counts, land=args.land)
+    totals = build(
+        args.source, args.out, args.gaps_scanned, args.counts, land=args.land, sanctions=args.sanctions
+    )
     used = args.counts if args.counts.is_file() else "none (legacy totals)"
-    print(f"wrote {args.out / 'cases.json'} and {args.out / 'stats.json'} from counts {used}: {totals}")
+    sanctions_used = args.sanctions if args.sanctions.is_file() else "none (sanctions left null)"
+    print(
+        f"wrote {args.out / 'cases.json'} and {args.out / 'stats.json'} from counts {used} "
+        f"and sanctions {sanctions_used}: {totals}"
+    )
 
 
 if __name__ == "__main__":

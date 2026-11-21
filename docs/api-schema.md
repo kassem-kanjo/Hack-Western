@@ -44,7 +44,11 @@ check; keep it, the UI shows why), `plain` (no evidence either way).
                   "max_overlap_km2": 120.5, "centroid": [lon, lat], "slack": 0.35 } ],
   "score_factors": [ { "key": "gap_hours", "label": "Gap length", "value": "22.9 h", "points": 12,
                        "note": "median gap in data: 14 h" } ],
-  "sanctions": { "match": false, "source": "OpenSanctions maritime (CC BY-NC)", "entry": null },
+  "sanctions": { "match": true, "method": "mmsi", "category": "sanctioned",
+                 "source": "OpenSanctions maritime (CC BY-NC 4.0)",
+                 "entry": { "caption": "CL YICHUN", "imo": "9427366", "mmsi": "538001234",
+                            "risk": ["sanction"], "url": "https://www.opensanctions.org/entities/...",
+                            "datasets": ["us_ofac_sdn"] } },
   "sources": [ { "name": "Global Fishing Watch gap event", "dataset": "public-global-gaps-events:v5.0",
                  "accessed": "2026-11-21" } ],
   "caveats": [ "Speed cap is a class default, not measured.", "Radar misses vessels under ~25 m." ] }
@@ -56,6 +60,23 @@ lens, not a measured track.
 `footprint`, `lens_frames[].polygon` and `lens_frames[].likely` are clipped to water against a coarse 50 m
 coastline, so any of them may be a `MultiPolygon` when a zone crosses a headland or island (and `null` when the
 whole zone falls on land). Cases built with clipping also carry the matching caveat.
+
+`sanctions` is `null` when no OpenSanctions export was loaded at build time (`--sanctions` missing). Otherwise
+it is one of:
+- a miss: `{ "match": false, "source": "OpenSanctions maritime (CC BY-NC 4.0)", "entry": null }`.
+- a hit: `{ "match": true, "method": "mmsi" | "name", "category": ...,
+  "source": "OpenSanctions maritime (CC BY-NC 4.0)", "entry": {...} }`, plus
+  `"note": "name match only, needs analyst confirmation"` when `method` is `name`.
+  `method` is `mmsi` for an exact MMSI hit (the stronger signal) or `name` for an exact match on the
+  caption or an alias after upper-casing and keeping only ASCII alphanumerics (weaker).
+- `category` is the strongest risk tag on the entry, checked in order: `sanctioned` (`sanction*`),
+  `shadow_fleet` (`mare.shadow*`), `detained` (`mare.detained*`), else `other`.
+- `entry` is the matched record: `caption`, `imo` and `mmsi` as digits, `risk` (tag list), `url` and
+  `datasets` (OpenSanctions collection ids).
+
+Only `category` `sanctioned` or `shadow_fleet` adds the +40 sanctions score factor. `detained` and `other`
+add a 0-point factor with the note "port detention record, not a sanction"; a name-only match adds
+"name match only, needs analyst confirmation".
 
 ## GET /api/stats
 ```json
