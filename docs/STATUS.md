@@ -1,16 +1,18 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 00:24 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Sat 21 Nov, 00:37 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
-## In flight
-- #27 rescue test (Brownian bridge, pre-registered) on branch feat/validation-bb.
-- PRs in CI: #41 API (#10), #42 Tiger aggregate (#31), #43 offline basemap (#30), #44 validation (#27). All code by DeepSeek except the validation runner.
-- Baltic AIS recorder (hole 23:48-23:59 during commute); health + audit loop every 30 min.
+## In flight (handover: Claude usage limit reached)
+- #11 console UI: Haiku lead + DeepSeek coders in .worktrees/console on branch feat/console (not merged; verify screenshots vs design/png before PR).
+- Baltic AIS recorder running (scripts/record_ais.py); health/audit cron is session-only.
+
+## Next (in order)
+1. CP1 9 AM: Kassem decides docs/decisions/0001-demo-story.md (Chief recommends A).
+2. Review + PR feat/console (#11); then #52 bridge heat map + validation panel; #12 scoring + #26 sanctions.
+3. #45 GEOS fix; #19 Baltic gaps (optional); #15 deploy (needs Vultr sign-up); #36 edge on Pi (cut at noon if no Pi).
 
 ## Key results tonight
-- Re-rank (#28): of 109 radar-backed gaps, 90 ruled out with a reason, 19 unexplained.
-- Validation (#27): radar-in-prism does NOT beat chance (ratio 1.07, CI 0.91-1.25): prisms too large to be specific. Prism geometry itself is right (truth inside 96-100%).
-- **Decision for Kassem at 9 AM** if the bridge test also fails: story = "clear the false alarms with physics" vs "likelihood-ranked zone".
+- Funnel 5,624 → 109 → 19 (90 ruled out with reasons). Validation: radar-in-prism = chance (1.07, bridge 1.03, held-out inconclusive); bridge localisation AUC 0.87.
 
 ## Done (merged)
 #1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
