@@ -1,4 +1,4 @@
-# API schema (frozen v1, Sat 21 Nov ~1 AM, issue #29)
+# API schema (frozen v1, Fri 20 Nov ~23:35 ET, issue #29)
 
 Read-only JSON. Times are ISO 8601 UTC with `Z`. Coordinates are `[lon, lat]` (GeoJSON order) everywhere.
 Changing a field after this point needs a PR that updates this file, the fixture and both sides.
