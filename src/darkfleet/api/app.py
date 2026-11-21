@@ -16,6 +16,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
 
 # Only these CaseDetail fields belong in a list response; the rest are detail-only.
@@ -45,6 +46,7 @@ app.add_middleware(
 )
 
 app.include_router(live_router)
+app.include_router(hormuz_router)
 
 
 def data_dir() -> Path:
