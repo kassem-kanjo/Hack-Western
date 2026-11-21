@@ -22,3 +22,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 2:** ~90% DeepSeek (API, basemap, Tiger, #28 pieces, validation core); Claude: validation runner (needs keys), two-line format fix.
 - **Rule breaks:** guessed timestamp (repeat).
 - **Change for next 30 min:** timestamps only via `$(date)` inside the command that writes them (done here); Chief no longer types times by hand.
+
+## Sat 21 Nov, 02:02 ET (audit 4, covers 00:24-02:05, includes a Claude usage-limit stop)
+- **Went well:** three pre-registered validation experiments with honest nulls (no tuning); console built mostly by 4 DeepSeek coders and checked with Playwright; funnel bug (#47) caught by Chief running the real data before any UI used it; superseded PR closed instead of merged twice.
+- **Went wrong:** Claude usage limit hit around 01:00 (three Sonnet/Haiku leads in parallel plus Opus orchestration); subagent reports got refused twice (harness one-report rule), so Chief read results from branches instead; the GLM reviewer hung 900 s on the console lane; local snapshot was stale (99) while main had the fix.
+- **Code share since audit 3:** ~80% DeepSeek (console components/map/rail/timeline, funnel fix, bridge module); Claude: validation runners (keys), console api/format/frames, merge-conflict resolution.
+- **Rule breaks:** none new; visual review skipped the Critic/Director agents (Chief reviewed screenshots himself to save tokens; noted).
+- **Change for next 30 min:** no more parallel Sonnet leads; new work goes lead-less to DeepSeek with Chief review, one Haiku lead at most; rebuild the local snapshot after every data merge.
