@@ -41,6 +41,25 @@ def gaps(draw, consistent=True):
     return a, b, v
 
 
+@st.composite
+def near_cap_gaps(draw):
+    """Consistent gaps whose speed cap is 0.1%-5% above the straight-line requirement."""
+    lat = draw(st.floats(-60, 60))
+    lon = draw(st.floats(-170, 170))
+    hours = draw(st.floats(2, 48))
+    az = draw(st.floats(0, 360))
+    base_v = draw(st.floats(5, 25))
+    dist = base_v * KNOT_KM_H * hours * draw(st.floats(0.05, 0.9))
+    lon2, lat2, _ = GEOD.fwd(lon, lat, az, dist * 1000)
+    if abs(lat2) > 80:
+        lat2 = lat
+    d = distance_km(lat, lon, float(lat2), float(lon2))
+    v = d / (KNOT_KM_H * hours) * draw(st.floats(1.001, 1.05))
+    a = Fix(lat, lon, T0)
+    b = Fix(float(lat2), float(lon2), T0 + timedelta(hours=hours))
+    return a, b, v
+
+
 def _scatter(a, b, v, rng, n=200):
     """Random points around the gap, within reach of a."""
     reach = v * KNOT_KM_H * (b.t - a.t).total_seconds() / 3600
@@ -67,6 +86,20 @@ def test_inconsistent_gives_empty(g):
     mid = a.t + (b.t - a.t) / 2
     assert lens_polygon(a, b, v, mid).is_empty
     assert footprint_polygon(a, b, v).is_empty
+
+
+@SET
+@given(near_cap_gaps(), st.floats(0.0, 1.0))
+def test_thin_lens_never_raises(g, frac_t):
+    a, b, v = g
+    assert is_consistent(a, b, v)
+    t = a.t + (b.t - a.t) * frac_t
+
+    lens = lens_polygon(a, b, v, t)
+    assert lens.is_empty or (lens.is_valid and lens.geom_type == "Polygon")
+
+    day = day_lens_polygon(a, b, v, t.date())
+    assert day.is_empty or (day.is_valid and day.geom_type in {"Polygon", "MultiPolygon"})
 
 
 @SET

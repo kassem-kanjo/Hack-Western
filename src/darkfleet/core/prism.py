@@ -12,6 +12,8 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 from pyproj import Transformer
+from shapely import make_valid
+from shapely.errors import GEOSException
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
@@ -19,6 +21,43 @@ from .geo import GEOD, KNOT_KM_H, Fix, distance_km
 
 EPS_KM = 1e-6
 _MIN_R_KM = 1e-3  # avoids degenerate zero-radius circles at t0 / t1
+
+
+def _polygonal(geom) -> Polygon:
+    """Largest polygonal component of `geom` (recursively), or an empty Polygon."""
+    if geom is None or geom.is_empty:
+        return Polygon()
+    if geom.geom_type == "Polygon":
+        return geom
+    parts: list[Polygon] = []
+    for part in getattr(geom, "geoms", ()):
+        if part.geom_type == "Polygon":
+            parts.append(part)
+        elif part.geom_type in ("MultiPolygon", "GeometryCollection"):
+            sub = _polygonal(part)
+            if not sub.is_empty:
+                parts.append(sub)
+    return max(parts, key=lambda p: p.area) if parts else Polygon()
+
+
+def _valid(geom) -> Polygon:
+    """Repair `geom` if needed, then keep only its largest polygonal part (empty if none).
+
+    GEOS is not exact: nearly tangent circles (thin lenses) and tiny circles near t0/t1 can
+    produce invalid rings or GeometryCollections, so every polygon is normalised before it is
+    used for an overlay operation.
+    """
+    if geom is None or geom.is_empty:
+        return Polygon()
+    if not geom.is_valid:
+        try:
+            geom = make_valid(geom)
+        except (GEOSException, ValueError):
+            try:
+                geom = geom.buffer(0)
+            except (GEOSException, ValueError):
+                return Polygon()
+    return _polygonal(geom)
 
 
 def _secs(a: Fix, b: Fix) -> float:
@@ -93,15 +132,24 @@ def lens_polygon(a: Fix, b: Fix, v_kn: float, t: datetime, n: int = 128) -> Poly
     def planar(lat: float, lon: float, r: float) -> Polygon:
         pts = _circle(lat, lon, r, n)
         xs, ys = fwd.transform([p[0] for p in pts], [p[1] for p in pts])
-        return Polygon(zip(xs, ys, strict=True)).buffer(0)
+        return _valid(Polygon(zip(xs, ys, strict=True)))
 
-    inter = planar(a.lat, a.lon, r1).intersection(planar(b.lat, b.lon, r2))
-    if inter.is_empty or inter.geom_type != "Polygon":
-        if inter.is_empty or not hasattr(inter, "geoms"):
+    p1, p2 = planar(a.lat, a.lon, r1), planar(b.lat, b.lon, r2)
+    if p1.is_empty or p2.is_empty:
+        return Polygon()
+    try:
+        inter = p1.intersection(p2)
+    except GEOSException:
+        try:
+            inter = p1.buffer(0).intersection(p2.buffer(0))
+        except GEOSException:
             return Polygon()
-        inter = max(inter.geoms, key=lambda g: g.area)
+    inter = _valid(inter)
+    if inter.is_empty:
+        return Polygon()
     xs, ys = inv.transform(*inter.exterior.xy)
-    return Polygon(zip(xs, ys, strict=True))
+    out = Polygon(zip(xs, ys, strict=True))
+    return out if out.is_valid else _valid(out)
 
 
 def day_lens_polygon(a: Fix, b: Fix, v_kn: float, day: date, step_minutes: int = 30):
@@ -117,8 +165,27 @@ def day_lens_polygon(a: Fix, b: Fix, v_kn: float, day: date, step_minutes: int =
         times.append(t)
         t += timedelta(minutes=step_minutes)
     times.append(end)
-    polys = [p for p in (lens_polygon(a, b, v_kn, x) for x in times) if not p.is_empty]
-    return unary_union(polys) if polys else Polygon()
+    polys: list[Polygon] = []
+    for x in times:
+        p = lens_polygon(a, b, v_kn, x)
+        if p.is_empty:
+            continue
+        p = _valid(p)
+        if not p.is_empty:
+            polys.append(p)
+    if not polys:
+        return Polygon()
+    try:
+        u = unary_union(polys)
+    except GEOSException:
+        # GEOS can still trip over nearly coincident edges; retry with cleaned inputs.
+        try:
+            u = unary_union([p.buffer(0) for p in polys])
+        except GEOSException:
+            return max(polys, key=lambda p: p.area)
+    if u.is_empty:
+        return Polygon()
+    return u if u.is_valid else u.buffer(0)
 
 
 def footprint_polygon(a: Fix, b: Fix, v_kn: float, n: int = 128) -> Polygon:
