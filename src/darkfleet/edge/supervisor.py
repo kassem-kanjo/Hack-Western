@@ -225,6 +225,8 @@ class Supervisor:
             cfg.patrol_name,
             "--source",
             self._source_label(),
+            "--sightings",
+            os.path.join(cfg.state_dir, "sightings.jsonl"),
         ]
         if cfg.ais:
             cmd += ["--ais", cfg.ais]

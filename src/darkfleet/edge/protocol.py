@@ -49,6 +49,7 @@ def make_detections(
     *,
     engine: str | None = None,
     source: str | None = None,
+    frame_sha256: str | None = None,
 ) -> dict[str, Any]:
     msg = {
         "type": DETECTIONS,
@@ -61,6 +62,8 @@ def make_detections(
         msg["engine"] = str(engine)
     if source is not None:
         msg["source"] = str(source)
+    if frame_sha256 is not None:
+        msg["frame_sha256"] = str(frame_sha256)
     validate(msg)
     return msg
 

@@ -14,6 +14,7 @@ as the bridge's first message when that variable is set.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import signal
 import socket
@@ -413,7 +414,13 @@ def run(args: argparse.Namespace) -> int:
                 img = decode_frame(frame)
                 boxes = model.detect(img, args.score_min)
             t_done = time.monotonic()
-            link.send(make_detections(frame_id, t_capture, t_done, boxes, engine=engine, source=args.source))
+            # Digest of the raw frame (about 3 ms): lets a sighting be matched to its picture later.
+            digest = hashlib.sha256(img.tobytes()).hexdigest() if img is not None and frames is None else None
+            link.send(
+                make_detections(
+                    frame_id, t_capture, t_done, boxes, engine=engine, source=args.source, frame_sha256=digest
+                )
+            )
             if img is not None and (frame_id % ANNOTATE_EVERY == 0 or boxes):
                 writer.write(img, boxes)
             frame_id += 1

@@ -242,6 +242,46 @@ def get_decision() -> dict[str, Any]:
     return payload
 
 
+def _sighting_feed_item(rec: dict[str, Any]) -> dict[str, Any]:
+    """One log record as a Watch-feed item (contract: docs/watch-contract.md, kind patrol_sighting)."""
+    patrol = rec.get("patrol") or {}
+    return {
+        "kind": "patrol_sighting",
+        "id": str(rec.get("hash", ""))[:16],
+        "t": rec.get("t_utc"),
+        "lat": patrol.get("lat"),
+        "lon": patrol.get("lon"),
+        "title": "Vessel not on AIS",
+        "detail": f"Seen by the patrol unit at {patrol.get('name', 'patrol')}; no AIS ship within range.",
+        "trend": rec.get("trend"),
+        "frame_sha256": rec.get("frame_sha256"),
+        "seq": rec.get("seq"),
+    }
+
+
+@router.get("/sightings")
+def get_sightings() -> dict[str, Any]:
+    """The Pi's hash-chained sightings log: chain status, last records, and Watch feed items."""
+    host = edge_host()
+    payload: dict[str, Any] | None = None
+    if host:
+        try:
+            payload = json.loads(_relay(_edge_url(host, "sightings.json"), DECISION_MAX_BYTES * 4))
+        except (httpx.HTTPError, ValueError, _RelayTooLarge):
+            payload = None
+    else:
+        from darkfleet.edge import sightings
+
+        path = str(status_path().parent / sightings.FILE_NAME)
+        records, _torn = sightings.read_records(path)
+        if records:
+            payload = {"chain": sightings.verify(path), "sightings": list(reversed(records[-20:]))}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="no sightings log")
+    items = [_sighting_feed_item(r) for r in payload.get("sightings", []) if "hash" in r]
+    return {"chain": payload.get("chain"), "sightings": payload.get("sightings", []), "feed": items}
+
+
 @router.get("/ab")
 def get_ab() -> dict[str, Any]:
     """The last priority-guard A/B result (written by the Pi's ab_test), or 404 if none yet."""

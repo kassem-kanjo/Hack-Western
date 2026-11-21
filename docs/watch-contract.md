@@ -83,3 +83,12 @@ attribution every radar view must show.
 
 ## GET /api/watch/stream  (SSE)
 `event: update` with `{"generated_at": "..."}` whenever watch.json changes (mtime poll 5 s).
+
+## GET /api/edge/sightings  (patrol unit, issue #220)
+The Pi's hash-chained log of "vessel not on AIS" sightings, relayed by the laptop API (404 until
+the unit has logged one). `{"chain": {"ok", "records", "last_seq", "last_t_utc", "torn_tail"},
+"sightings": [<log records, newest first, last 20>], "feed": [...]}`. Each `feed` item is ready for
+the Watch feed with `kind: "patrol_sighting"`: `id` (first 16 hex of the record hash), `t` (UTC
+ISO), `lat`, `lon` (the patrol position, not the ship's), `title` "Vessel not on AIS", `detail`,
+`trend` (`closing`/`opening`/`steady`/null), `frame_sha256`, `seq`. Show it as an alert-class story
+at the patrol position; there is no vessel identity, MMSI or track.
