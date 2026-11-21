@@ -97,6 +97,43 @@ def test_name_only_match_says_it_needs_confirmation() -> None:
     assert sanctions["note"] == "name match only, needs analyst confirmation"
 
 
+def test_mmsi_match_adds_40_points() -> None:
+    result = score_case(
+        {"sanctions": {"match": True, "category": "sanctioned", "method": "mmsi", "strength": "mmsi"}}
+    )
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 40
+
+
+def test_strong_name_match_adds_40_points() -> None:
+    result = score_case(
+        {"sanctions": {"match": True, "category": "sanctioned", "method": "name", "strength": "strong_name"}}
+    )
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 40
+    assert sanctions["note"] == "name match with hull number or flag, needs analyst confirmation"
+
+
+def test_weak_generic_name_adds_only_5_points() -> None:
+    base = {"hours": 10, "candidates": []}
+
+    without = score_case(base)
+    # LISBOA is a city, not a hull number: a name hit on it is usually a different ship.
+    weak = score_case(
+        {
+            **base,
+            "sanctions": {"match": True, "category": "sanctioned", "method": "name", "strength": "weak_name"},
+        }
+    )
+
+    assert weak["score"] == without["score"] + 5
+    sanctions = next(factor for factor in weak["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 5
+    assert sanctions["note"] == "common name only; probably a different ship"
+
+
 def test_band_thresholds_at_39_40_69_70() -> None:
     cases = [
         # 20 (hours) + 9 (implied speed) + 10 (intentional) = 39

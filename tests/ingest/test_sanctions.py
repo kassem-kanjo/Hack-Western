@@ -22,11 +22,15 @@ def _vessel(
     risk: list[str],
     mmsi: str = "",
     aliases: list[str] | None = None,
+    flag: str = "",
+    countries: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "caption": caption,
         "imo": "",
         "mmsi": mmsi,
+        "flag": flag,
+        "countries": countries or [],
         "risk": risk,
         "aliases": aliases or [],
         "url": f"https://www.opensanctions.org/entities/{caption}",
@@ -39,10 +43,12 @@ def test_load_vessels_normalises_every_field() -> None:
 
     assert len(vessels) == 59
     first = vessels[0]
-    assert set(first) == {"caption", "imo", "mmsi", "risk", "aliases", "url", "datasets"}
+    assert set(first) == {"caption", "imo", "mmsi", "flag", "countries", "risk", "aliases", "url", "datasets"}
     assert first["caption"] == "BOUDREAUX TIDE"
     assert first["imo"] == "9427366"  # "IMO9427366" -> digits
     assert first["mmsi"] == ""  # the sample rows carry no MMSI
+    assert first["flag"] == "vu"
+    assert first["countries"] == ["vu"]
     assert first["risk"] == ["mare.detained", "reg.warn"]
     assert first["aliases"] == []
     assert first["datasets"] == ["abuja_mou_detention"]
@@ -64,6 +70,8 @@ def test_load_vessels_keeps_vessel_rows_only(tmp_path: Path) -> None:
 
     assert [vessel["caption"] for vessel in vessels] == ["KEPT"]
     assert vessels[0]["aliases"] == ["ALIAS ONE", "ALIAS TWO"]
+    assert vessels[0]["flag"] == "pa"
+    assert vessels[0]["countries"] == []
 
 
 def test_mmsi_match_wins() -> None:
@@ -75,6 +83,7 @@ def test_mmsi_match_wins() -> None:
 
     assert hit is not None
     assert hit["method"] == "mmsi"
+    assert hit["strength"] == "mmsi"
     assert hit["entry"]["caption"] == "BOUDREAUX TIDE"
     assert hit["entry"]["mmsi"] == "538001234"
     assert hit["source"] == SANCTIONS_SOURCE
@@ -88,9 +97,58 @@ def test_name_match_is_normalised_and_flagged_as_weak() -> None:
 
     assert hit is not None
     assert hit["method"] == "name"
+    assert hit["strength"] == "weak_name"
     assert hit["entry"]["caption"] == "MT UNGIESHI"
     assert hit["note"] == NAME_MATCH_NOTE
     assert hit["category"] == "detained"
+
+
+def test_generic_name_with_a_different_flag_is_weak() -> None:
+    index = build_index([_vessel("LISBOA", ["sanction"], flag="pa", countries=["pa"])])
+
+    hit = match_vessel(index, "", "LISBOA", flag="LR")
+
+    assert hit is not None
+    assert hit["strength"] == "weak_name"
+
+
+def test_generic_name_with_the_same_flag_is_strong() -> None:
+    index = build_index([_vessel("LISBOA", ["sanction"], flag="pa", countries=["pa"])])
+
+    # GFW flags are ISO3, OpenSanctions flags are ISO2.
+    hit = match_vessel(index, "", "LISBOA", flag="PAN")
+
+    assert hit is not None
+    assert hit["strength"] == "strong_name"
+
+
+def test_iso2_case_flag_matches_directly() -> None:
+    index = build_index([_vessel("LISBOA", ["sanction"], flag="pa", countries=["pa"])])
+
+    assert match_vessel(index, "", "LISBOA", flag="PA")["strength"] == "strong_name"
+
+
+def test_iso3_flag_is_not_confused_with_a_country_sharing_its_prefix() -> None:
+    index = build_index([_vessel("LISBOA", ["sanction"], flag="ch", countries=["ch"])])
+
+    # CHN is China (CN), not Switzerland (CH).
+    assert match_vessel(index, "", "LISBOA", flag="CHN")["strength"] == "weak_name"
+
+
+def test_name_with_a_hull_number_is_strong_even_without_a_flag() -> None:
+    index = build_index([_vessel("FU YUAN YU 7869", ["sanction"], flag="cn")])
+
+    hit = match_vessel(index, "", "FU YUAN YU 7869")
+
+    assert hit is not None
+    assert hit["strength"] == "strong_name"
+
+
+def test_name_without_a_flag_is_weak() -> None:
+    index = build_index([_vessel("MARIA", ["sanction"], flag="pa")])
+
+    assert match_vessel(index, "", "MARIA")["strength"] == "weak_name"
+    assert match_vessel(index, "", "MARIA", flag="??")["strength"] == "weak_name"
 
 
 def test_alias_matches_like_a_caption() -> None:

@@ -103,7 +103,7 @@ def add_sanctions(case: dict[str, Any], index: dict[str, dict[str, Any]]) -> Non
     """
     vessel = case.get("vessel")
     vessel = vessel if isinstance(vessel, dict) else {}
-    found = match_vessel(index, vessel.get("mmsi"), vessel.get("name"))
+    found = match_vessel(index, vessel.get("mmsi"), vessel.get("name"), vessel.get("flag"))
     case["sanctions"] = found or {"match": False, "source": SANCTIONS_SOURCE, "entry": None}
 
 

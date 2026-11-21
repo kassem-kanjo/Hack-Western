@@ -19,6 +19,8 @@ SCORE_NOTE = "Ranks cases for analyst attention. It is not evidence of wrongdoin
 SANCTION_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
 DETENTION_NOTE = "port detention record, not a sanction"
 NAME_MATCH_NOTE = "name match only, needs analyst confirmation"
+STRONG_NAME_NOTE = "name match with hull number or flag, needs analyst confirmation"
+WEAK_NAME_NOTE = "common name only; probably a different ship"
 
 
 def _band(score: int) -> str:
@@ -93,13 +95,21 @@ def score_case(case: dict[str, Any]) -> dict[str, Any]:
     if isinstance(sanctions, dict) and sanctions.get("match"):
         category = sanctions.get("category")
         if category in SANCTION_CATEGORIES:
-            note = (
-                NAME_MATCH_NOTE
-                if sanctions.get("method") == "name"
-                else "possible list match, needs analyst confirmation"
-            )
             value = "on sanctions list" if category == "sanctioned" else "shadow-fleet list"
-            factors.append(_factor("sanctions", "Sanctions match", value, 40, note))
+            strength = sanctions.get("strength")
+            if strength == "weak_name":
+                # A generic name (LISBOA, MARIA) is usually a different ship.
+                factors.append(_factor("sanctions", "Sanctions match", value, 5, WEAK_NAME_NOTE))
+            elif strength == "strong_name":
+                factors.append(_factor("sanctions", "Sanctions match", value, 40, STRONG_NAME_NOTE))
+            else:
+                # MMSI hits, and older results without a strength, keep the full factor.
+                note = (
+                    NAME_MATCH_NOTE
+                    if strength is None and sanctions.get("method") == "name"
+                    else "possible list match, needs analyst confirmation"
+                )
+                factors.append(_factor("sanctions", "Sanctions match", value, 40, note))
         else:
             # Detained or other: shown so the analyst sees the hit, but worth no points.
             factors.append(_factor("sanctions", "Sanctions record", "port detention", 0, DETENTION_NOTE))
