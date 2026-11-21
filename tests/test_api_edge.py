@@ -21,6 +21,48 @@ STATUS = {
     "detector_alive": True,
 }
 
+# Frame the relay expects: try to use real JPEG magic so nothing parses it as JSON by mistake.
+JPEG = b"\xff\xd8\xff\xe0fake-jpeg"
+
+
+class FakeStream:
+    """Minimal stand-in for httpx's streaming response context manager."""
+
+    def __init__(self, chunks: list[bytes] | None = None, error: Exception | None = None) -> None:
+        self._chunks = chunks or []
+        self._error = error
+
+    def __enter__(self) -> FakeStream:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def raise_for_status(self) -> None:
+        if self._error is not None:
+            raise self._error
+
+    def iter_bytes(self) -> Iterator[bytes]:
+        yield from self._chunks
+
+
+def _patch_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    calls: dict[str, Any],
+    chunks: list[bytes] | None = None,
+    error: Exception | None = None,
+) -> None:
+    """Replace httpx.stream with a fake that records the request and yields chunks."""
+
+    def fake_stream(method: str, url: str, *, timeout: float, follow_redirects: bool) -> FakeStream:
+        calls["method"] = method
+        calls["url"] = url
+        calls["timeout"] = timeout
+        calls["follow_redirects"] = follow_redirects
+        return FakeStream(chunks, error)
+
+    monkeypatch.setattr(edge.httpx, "stream", fake_stream)
+
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
@@ -59,37 +101,28 @@ def test_pi_status_wins_when_reachable(
 ) -> None:
     monkeypatch.setenv("EDGE_HOST", "edge.local")
     calls: dict[str, Any] = {}
-
-    class FakeResponse:
-        def raise_for_status(self) -> None:
-            pass
-
-        def json(self) -> dict[str, Any]:
-            return {"state": "DEGRADED", "frames_total": 7, "detector_alive": False}
-
-    def fake_get(url: str, *, timeout: float) -> FakeResponse:
-        calls["url"], calls["timeout"] = url, timeout
-        return FakeResponse()
-
-    monkeypatch.setattr(edge.httpx, "get", fake_get)
+    remote = json.dumps({"state": "DEGRADED", "frames_total": 7, "detector_alive": False}).encode()
+    _patch_stream(monkeypatch, calls, [remote])
 
     body = client.get("/api/edge/status").json()
 
     assert body["source"] == "pi"
     assert body["state"] == "DEGRADED"
     assert body["frames_total"] == 7
-    assert calls == {"url": "http://edge.local:7071/edge_status.json", "timeout": 1.0}
+    assert calls == {
+        "method": "GET",
+        "url": "http://edge.local:7071/edge_status.json",
+        "timeout": 1.0,
+        "follow_redirects": False,
+    }
 
 
 def test_timeout_falls_back_to_the_local_file(
     client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EDGE_HOST", "edge.local")
-
-    def slow_get(url: str, *, timeout: float) -> Any:
-        raise httpx.TimeoutException(f"timed out after {timeout}s: {url}")
-
-    monkeypatch.setattr(edge.httpx, "get", slow_get)
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, error=httpx.TimeoutException("timed out"))
 
     response = client.get("/api/edge/status")
 
@@ -104,16 +137,52 @@ def test_http_error_also_falls_back(
     client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EDGE_HOST", "edge.local")
-
-    def failing_get(url: str, *, timeout: float) -> Any:
-        raise httpx.ConnectError("no route to host")
-
-    monkeypatch.setattr(edge.httpx, "get", failing_get)
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, error=httpx.ConnectError("no route to host"))
 
     body = client.get("/api/edge/status").json()
 
     assert body["source"] == "local"
     assert body["state"] == "OK"
+
+
+def test_status_over_the_byte_cap_is_502(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b"{" + b"x" * edge.STATUS_MAX_BYTES])
+
+    response = client.get("/api/edge/status")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "edge status too large"
+
+
+def test_relay_deadline_falls_back_without_streaming_forever(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setattr(edge, "RELAY_DEADLINE_S", -1.0)
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b'{"state":"OK"}'])
+
+    response = client.get("/api/edge/status")
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "local"
+
+
+def test_status_token_is_forwarded_when_configured(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "s3cret token")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b'{"state":"OK"}'])
+
+    assert client.get("/api/edge/status").json()["source"] == "pi"
+    assert calls["url"] == "http://edge.local:7071/edge_status.json?token=s3cret+token"
 
 
 def test_missing_local_file_is_still_a_status(
@@ -210,21 +279,40 @@ def test_frame_is_fetched_from_the_pi_when_configured(
 ) -> None:
     monkeypatch.setenv("EDGE_HOST", "edge.local")
     calls: dict[str, Any] = {}
-
-    class FakeResponse:
-        content = b"\xff\xd8\xff\xe0remote-jpeg"
-
-        def raise_for_status(self) -> None:
-            pass
-
-    def fake_get(url: str, *, timeout: float) -> FakeResponse:
-        calls["url"], calls["timeout"] = url, timeout
-        return FakeResponse()
-
-    monkeypatch.setattr(edge.httpx, "get", fake_get)
+    _patch_stream(monkeypatch, calls, [b"\xff\xd8\xff\xe0remote-jpeg"])
 
     response = client.get("/api/edge/frame.jpg")
 
     assert response.status_code == 200
     assert response.content == b"\xff\xd8\xff\xe0remote-jpeg"
-    assert calls == {"url": "http://edge.local:7071/latest.jpg", "timeout": 1.0}
+    assert calls == {
+        "method": "GET",
+        "url": "http://edge.local:7071/latest.jpg",
+        "timeout": 1.0,
+        "follow_redirects": False,
+    }
+
+
+def test_frame_over_the_byte_cap_is_502(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b"\xff" * (edge.FRAME_MAX_BYTES + 1)])
+
+    response = client.get("/api/edge/frame.jpg")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "edge frame too large"
+
+
+def test_frame_token_is_forwarded_when_configured(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "abc")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b"\xff\xd8jpeg"])
+
+    assert client.get("/api/edge/frame.jpg").status_code == 200
+    assert calls["url"] == "http://edge.local:7071/latest.jpg?token=abc"

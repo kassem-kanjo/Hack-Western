@@ -20,6 +20,14 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new)
 REMOTE_DIR="darkfleet"
 REMOTE_SOURCE="net:7070"
+# The Pi must be reachable from the laptop (camera frames) and the console, so the deploy
+# opens both listeners deliberately. Tokens below still gate them when configured.
+REMOTE_BIND="0.0.0.0"
+
+# Quote a value for the remote shell without ever printing it: tokens may contain quotes.
+shell_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
 usage() {
     echo "usage: bash scripts/edge_deploy.sh <user>@<pi-ip> [--camera]" >&2
@@ -124,18 +132,28 @@ fi
 # --- start ------------------------------------------------------------------
 
 echo "starting supervisor with --source $REMOTE_SOURCE"
+# Forward the optional shared tokens when the deploying shell has them. The values are
+# single-quoted for the remote shell and never echoed here.
+NET_ENV="EDGE_NET_BIND=$(shell_quote "$REMOTE_BIND")"
+STATUS_ENV=""
+if [ -n "${EDGE_NET_TOKEN:-}" ]; then
+    NET_ENV="$NET_ENV EDGE_NET_TOKEN=$(shell_quote "$EDGE_NET_TOKEN")"
+fi
+if [ -n "${EDGE_STATUS_TOKEN:-}" ]; then
+    STATUS_ENV="EDGE_STATUS_TOKEN=$(shell_quote "$EDGE_STATUS_TOKEN")"
+fi
 ssh "${SSH_OPTS[@]}" "$TARGET" "
     cd \$HOME/$REMOTE_DIR
     if [ -f supervisor.pid ]; then kill \$(cat supervisor.pid) 2>/dev/null || true; fi
     if [ -f status_http.pid ]; then kill \$(cat status_http.pid) 2>/dev/null || true; fi
-    PYTHONPATH=\$HOME/$REMOTE_DIR/src nohup python3 -m darkfleet.edge.supervisor \
+    PYTHONPATH=\$HOME/$REMOTE_DIR/src $NET_ENV nohup python3 -m darkfleet.edge.supervisor \
         --source $REMOTE_SOURCE \
         --model \$HOME/$REMOTE_DIR/models/yolox_nano.onnx \
         --state-dir \$HOME/$REMOTE_DIR \
         > \$HOME/$REMOTE_DIR/supervisor.log 2>&1 &
     echo \$! > \$HOME/$REMOTE_DIR/supervisor.pid
-    PYTHONPATH=\$HOME/$REMOTE_DIR/src nohup python3 -m darkfleet.edge.status_http \
-        --status \$HOME/$REMOTE_DIR/edge_status.json --port 7071 \
+    PYTHONPATH=\$HOME/$REMOTE_DIR/src $STATUS_ENV nohup python3 -m darkfleet.edge.status_http \
+        --status \$HOME/$REMOTE_DIR/edge_status.json --bind $REMOTE_BIND --port 7071 \
         > \$HOME/$REMOTE_DIR/status_http.log 2>&1 &
     echo \$! > \$HOME/$REMOTE_DIR/status_http.pid
     sleep 1
@@ -149,3 +167,9 @@ deployed to $TARGET
   stop:    ssh $TARGET 'kill \$(cat ~/$REMOTE_DIR/supervisor.pid) \$(cat ~/$REMOTE_DIR/status_http.pid)'
   console: EDGE_HOST=<pi-ip> in the API environment
 EOF
+if [ -n "${EDGE_STATUS_TOKEN:-}" ]; then
+    echo "         EDGE_STATUS_TOKEN=<same value> in the API environment" >&2
+fi
+if [ -n "${EDGE_NET_TOKEN:-}" ]; then
+    echo "         EDGE_NET_TOKEN=<same value> is required as camera_bridge's first message" >&2
+fi

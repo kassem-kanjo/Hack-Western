@@ -15,6 +15,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response
@@ -27,7 +28,22 @@ CONTROL_DIR = "control"
 KILL_FILE = "kill_detector"
 EDGE_STATUS_PORT = 7071
 EDGE_TIMEOUT_S = 1.0
+# A hostile or broken peer must not be able to fill the API's memory or hold the request open:
+# status is tiny JSON, a frame is one JPEG, and everything must arrive within two seconds.
+STATUS_MAX_BYTES = 64 << 10
+FRAME_MAX_BYTES = 2 << 20
+RELAY_DEADLINE_S = 2.0
 DEFAULT_EDGE_DIR = "data/edge"
+
+
+class _RelayTooLarge(Exception):
+    """The peer sent more bytes than the endpoint may return."""
+
+
+def status_token() -> str | None:
+    """Shared secret for the Pi's status server, if the deployment set one."""
+    raw = os.environ.get("EDGE_STATUS_TOKEN", "").strip()
+    return raw or None
 
 
 def status_path() -> Path:
@@ -57,6 +73,36 @@ def controls_enabled() -> bool:
     return os.environ.get("EDGE_DEMO_CONTROLS", "").strip() == "1"
 
 
+def _edge_url(host: str, name: str) -> str:
+    """Build the Pi's URL, carrying the shared token in the query when one is configured."""
+    url = f"http://{host}:{EDGE_STATUS_PORT}/{name}"
+    token = status_token()
+    if token:
+        url = f"{url}?{urlencode({'token': token})}"
+    return url
+
+
+def _relay(url: str, max_bytes: int, deadline_s: float | None = None) -> bytes:
+    """Stream one Pi response under a hard byte cap and a total (not per-read) deadline.
+
+    ``httpx``'s timeout only bounds each individual network operation, so a peer dripping one
+    byte at a time would otherwise stream forever. Raises :class:`_RelayTooLarge` past the cap.
+    """
+    if deadline_s is None:
+        deadline_s = RELAY_DEADLINE_S
+    started = time.monotonic()
+    body = bytearray()
+    with httpx.stream("GET", url, timeout=EDGE_TIMEOUT_S, follow_redirects=False) as response:
+        response.raise_for_status()
+        for chunk in response.iter_bytes():
+            if time.monotonic() - started > deadline_s:
+                raise httpx.TimeoutException(f"edge relay exceeded {deadline_s}s")
+            if len(body) + len(chunk) > max_bytes:
+                raise _RelayTooLarge(url)
+            body.extend(chunk)
+    return bytes(body)
+
+
 def _read_local() -> dict[str, Any] | None:
     try:
         payload = json.loads(status_path().read_text(encoding="utf-8"))
@@ -67,23 +113,20 @@ def _read_local() -> dict[str, Any] | None:
 
 def _fetch_remote(host: str) -> dict[str, Any] | None:
     """One bounded request to the Pi's status_http server; None on any failure."""
-    url = f"http://{host}:{EDGE_STATUS_PORT}/edge_status.json"
+    url = _edge_url(host, "edge_status.json")
     try:
-        response = httpx.get(url, timeout=EDGE_TIMEOUT_S)
-        response.raise_for_status()
-        payload = response.json()
+        body = _relay(url, STATUS_MAX_BYTES)
+        payload = json.loads(body)
     except (httpx.HTTPError, ValueError):
         return None
     return payload if isinstance(payload, dict) else None
 
 
 def _fetch_remote_frame(host: str) -> bytes | None:
-    """The Pi's latest annotated frame, or None within the same one-second budget."""
-    url = f"http://{host}:{EDGE_STATUS_PORT}/latest.jpg"
+    """The Pi's latest annotated frame, or None within the same bounded budget."""
+    url = _edge_url(host, "latest.jpg")
     try:
-        response = httpx.get(url, timeout=EDGE_TIMEOUT_S)
-        response.raise_for_status()
-        content = response.content
+        content = _relay(url, FRAME_MAX_BYTES)
     except httpx.HTTPError:
         return None
     return content or None
@@ -102,7 +145,10 @@ def get_status() -> dict[str, Any]:
     host = edge_host()
     controls = controls_enabled()
     if host:
-        remote = _fetch_remote(host)
+        try:
+            remote = _fetch_remote(host)
+        except _RelayTooLarge:
+            raise HTTPException(status_code=502, detail="edge status too large") from None
         if remote is not None:
             return {
                 **remote,
@@ -129,7 +175,10 @@ def get_frame() -> Response:
     """The latest annotated frame, straight from the Pi or the local state directory."""
     host = edge_host()
     if host:
-        body = _fetch_remote_frame(host)
+        try:
+            body = _fetch_remote_frame(host)
+        except _RelayTooLarge:
+            raise HTTPException(status_code=502, detail="edge frame too large") from None
     else:
         try:
             body = latest_path().read_bytes()

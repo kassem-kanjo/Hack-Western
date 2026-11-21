@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -151,15 +151,24 @@ def test_unknown_region_is_404_json(client: TestClient) -> None:
     assert response.json() == {"detail": "unknown region: UNKNOWN"}
 
 
-def test_stream_starts_with_a_heartbeat(live_dir: Path) -> None:
-    frames = event_stream(REGION)
+def _decode(frame: str) -> dict[str, Any]:
+    return json.loads(frame.removeprefix("data: ").strip())
+
+
+async def _one_tick(region: str) -> str:
+    """Consume the first frame of a fresh stream, then close it like a disconnecting client."""
+    frames = event_stream(region)
     try:
-        frame = next(frames)
+        return await anext(frames)
     finally:
-        frames.close()
+        await frames.aclose()
+
+
+def test_stream_starts_with_a_heartbeat(live_dir: Path) -> None:
+    frame = asyncio.run(_one_tick(REGION))
 
     assert frame.startswith("data: ")
-    payload = json.loads(frame.removeprefix("data: ").strip())
+    payload = _decode(frame)
     assert payload["type"] == "heartbeat"
     assert isinstance(payload["t"], int)
 
@@ -185,21 +194,24 @@ def test_stream_emits_positions_appended_since_the_previous_tick(
     }
 
     monkeypatch.setenv("DARKFLEET_AIS_DIR", str(live_dir.parent / "ais"))
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(live, "HEARTBEAT_SECONDS", 0.0)
 
-    frames = event_stream(REGION)
-    try:
-        # First frame is the heartbeat; the second call resumes after it and primes the
-        # tail at end-of-file, swallowing the line that existed before we connected.
-        assert json.loads(next(frames).removeprefix("data: ").strip())["type"] == "heartbeat"
-        assert json.loads(next(frames).removeprefix("data: ").strip())["type"] == "heartbeat"
+    async def scenario() -> dict[str, Any]:
+        frames = event_stream(REGION)
+        try:
+            # First frame is the heartbeat; the next iteration primes the tail at end-of-file,
+            # swallowing the line that existed before we connected.
+            assert _decode(await anext(frames))["type"] == "heartbeat"
+            assert _decode(await anext(frames))["type"] == "heartbeat"
 
-        with gzip.open(recording, "at", encoding="utf-8") as handle:
-            handle.write(json.dumps(second) + "\n")
+            with gzip.open(recording, "at", encoding="utf-8") as handle:
+                handle.write(json.dumps(second) + "\n")
 
-        positions_frame = json.loads(next(frames).removeprefix("data: ").strip())
-    finally:
-        frames.close()
+            return _decode(await anext(frames))
+        finally:
+            await frames.aclose()
+
+    positions_frame = asyncio.run(scenario())
 
     assert positions_frame["type"] == "positions"
     assert positions_frame["items"] == [

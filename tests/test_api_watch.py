@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Iterator
@@ -70,21 +71,26 @@ def test_built_snapshot_is_served(watch_dir: Path) -> None:
 
 def test_stream_emits_update_after_the_file_changes(watch_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = _write(watch_dir, "2026-11-21T19:20:00Z")
-    monkeypatch.setattr(watch.time, "sleep", lambda _seconds: None)
 
-    frames = event_stream()
-    try:
-        # The prime frame sets the mtime baseline without claiming an update.
-        assert next(frames) == ": keepalive\n\n"
+    async def no_wait(_seconds: float) -> None:
+        return None
 
-        before = path.stat().st_mtime_ns
-        _write(watch_dir, "2026-11-21T19:25:00Z")
-        # Force a distinct mtime even on a filesystem with coarse timestamps.
-        os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    monkeypatch.setattr(watch.asyncio, "sleep", no_wait)
 
-        frame = next(frames)
-    finally:
-        frames.close()
+    async def run() -> str:
+        frames = event_stream()
+        try:
+            # The prime frame sets the mtime baseline without claiming an update.
+            assert await anext(frames) == ": keepalive\n\n"
+            before = path.stat().st_mtime_ns
+            _write(watch_dir, "2026-11-21T19:25:00Z")
+            # Force a distinct mtime even on a filesystem with coarse timestamps.
+            os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))
+            return await anext(frames)
+        finally:
+            await frames.aclose()
+
+    frame = asyncio.run(run())
 
     assert frame.startswith("event: update\ndata: ")
     body = json.loads(frame.split("data: ", 1)[1])

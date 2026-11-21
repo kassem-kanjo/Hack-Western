@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import socket
+import struct
+import threading
 import time
+from pathlib import Path
 
 import pytest
 
 from darkfleet.edge import sources
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 # A synthetic JPEG: enough for sources.NetSource, which deliberately returns bytes undecoded.
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64 + b"\xff\xd9"
+
+
+def _jpeg_header(width: int, height: int) -> bytes:
+    """SOI + a valid SOF0 segment carrying the dimensions (no scan data)."""
+    payload = b"\x08" + struct.pack(">HH", height, width) + b"\x03" + b"\x01\x11\x00" * 3
+    return b"\xff\xd8\xff\xc0" + struct.pack(">H", len(payload) + 2) + payload
 
 
 def _send_frame(client: socket.socket, payload: bytes) -> None:
@@ -126,3 +137,98 @@ def test_net_source_accepts_a_reconnect() -> None:
         assert frame is not None and frame[1] == JPEG
     finally:
         source.close()
+
+
+def test_net_source_binds_loopback_by_default() -> None:
+    source = sources.NetSource(0)
+    try:
+        assert source._sock.getsockname()[0] == "127.0.0.1"
+    finally:
+        source.close()
+
+
+def test_net_source_rejects_the_wrong_token() -> None:
+    source = sources.NetSource(0, host="127.0.0.1", token="s3cret")
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5) as client:
+            _send_frame(client, b"wrong")
+            assert source.read() is None
+        assert source._conn is None  # the peer was dropped before any frame was read
+    finally:
+        source.close()
+
+
+def test_net_source_accepts_the_right_token_before_frames() -> None:
+    source = sources.NetSource(0, host="127.0.0.1", token="s3cret")
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5) as client:
+            _send_frame(client, b"s3cret")
+            _send_frame(client, JPEG)
+            frame = source.read()
+        assert frame is not None and frame[1] == JPEG
+    finally:
+        source.close()
+
+
+def test_net_source_reads_the_token_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EDGE_NET_TOKEN", "from-env")
+    source = sources.NetSource(0, host="127.0.0.1")
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5) as client:
+            _send_frame(client, b"from-env")
+            _send_frame(client, JPEG)
+            assert source.read() is not None
+    finally:
+        source.close()
+
+
+def test_net_source_enforces_a_total_frame_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sources, "FRAME_DEADLINE_S", 0.3)
+    source = sources.NetSource(0, host="127.0.0.1")
+    stop = threading.Event()
+
+    def slow_peer(client: socket.socket) -> None:
+        try:
+            client.sendall(sources.FRAME_HEADER.pack(1000))
+            while not stop.is_set():
+                client.sendall(b"x")
+                time.sleep(0.05)
+        except OSError:
+            pass
+
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5) as client:
+            thread = threading.Thread(target=slow_peer, args=(client,), daemon=True)
+            thread.start()
+            started = time.monotonic()
+            frame = source.read()
+            elapsed = time.monotonic() - started
+            stop.set()
+            thread.join(timeout=2)
+        assert frame is None
+        assert elapsed < 1.0  # per-chunk timeouts alone would have kept reading for 1000 * 0.05s
+        assert source._conn is None
+    finally:
+        source.close()
+
+
+def test_image_dimensions_reads_jpeg_and_png_headers() -> None:
+    assert sources.image_dimensions(_jpeg_header(640, 480)) == (640, 480)
+    png = (FIXTURES / "frame_00.png").read_bytes()
+    width, height = sources.image_dimensions(png)
+    assert width > 0 and height > 0
+
+
+def test_image_dimensions_rejects_unknown_bytes() -> None:
+    assert sources.image_dimensions(b"\x00" * 32) is None
+    assert sources.image_dimensions(b"\xff\xd8\xff\xc0") is None  # truncated SOF
+
+
+def test_decode_frame_rejects_oversized_dimensions_before_decoding() -> None:
+    with pytest.raises(ValueError, match="exceed"):
+        sources.decode_frame(_jpeg_header(5000, 5000))
+
+
+def test_decode_frame_rejects_bytes_without_a_readable_header() -> None:
+    with pytest.raises(ValueError, match="dimensions"):
+        sources.decode_frame(b"not an image")
