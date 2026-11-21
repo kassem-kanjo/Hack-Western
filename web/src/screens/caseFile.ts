@@ -116,7 +116,7 @@ export async function renderCaseFile(
     h(
       "div",
       { class: "map-chips" },
-      h("a", { class: "chip-pill", href: "#/" }, "Cases"),
+      h("a", { class: "chip-pill", href: "#/evidence" }, "Cases"),
       h("span", { class: "chip-pill" }, vesselLabel(detail.vessel)),
       h("span", { class: "chip-pill is-gap" }, `Gap ${fmtHours(detail.hours)}`),
       h("span", { class: "chip-pill" }, `${fmtInt(candidateSightings)} candidate sightings`),

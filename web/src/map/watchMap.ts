@@ -26,6 +26,7 @@
 import * as maplibregl from "maplibre-gl";
 
 import type { WatchAlert, WatchArea, WatchContact, WatchResponse, WatchShip } from "../api";
+import type { LivePosition } from "../model/liveFeed";
 import { offlineStyle } from "../basemap";
 import { h } from "../components/dom";
 import { rgba, themeColor } from "./theme";
@@ -33,15 +34,25 @@ import { rgba, themeColor } from "./theme";
 type LngLat = [number, number];
 type Bounds = [[number, number], [number, number]];
 
-/** The whole world, with a little room for the far north and south. */
+/**
+ * Where the screen opens: the Baltic, which is where most ships are heard.
+ * The empty world is not a first view; Esc and "All areas" come back here.
+ */
 const WORLD_BOUNDS: Bounds = [
-  [-170, -58],
-  [178, 74],
+  [9.5, 53.5],
+  [30.5, 66],
 ];
 
 /** Focus camera: close enough that a 60 km reach area is a shape, not a speck. */
 const FOCUS_ZOOM = 8;
-const FOCUS_MS = 1200;
+const FOCUS_MS = 900;
+/** Every camera move on this screen: one duration, one easing (MapLibre default). */
+const MOVE_MS = 900;
+/** Live positions glide to their new fix over this long, redrawn at most 10 times a second. */
+const GLIDE_MS = 1000;
+const GLIDE_TICK_MS = 100;
+/** At most this many pulses per batch of positions, so a busy region stays calm. */
+const MAX_PULSES = 24;
 
 /** The reach animation: 1 s, from the last fix to the display time. */
 const REACH_MS = 1000;
@@ -68,6 +79,7 @@ const ALERT_TOKEN: Record<WatchAlert["kind"], string> = {
   jump: "--c-risk-high",
   meeting: "--c-gap",
   sanctioned_stop: "--c-gap",
+  radar_unmatched: "--c-risk-high",
 };
 
 /** Fallback when an alert kind is not one this build knows. */
@@ -82,8 +94,22 @@ export interface FocusShip {
   sanctioned: boolean;
 }
 
+/** One radar view: what the Hormuz panel asks the map to draw. */
+export interface RadarMapView {
+  /** Unmatched radar detections per 0.1 degree cell, aggregated over the whole period. */
+  cells: { lat: number; lon: number; n: number }[];
+  encounters: { lat: number; lon: number; label: string }[];
+  hotspots: { lat: number; lon: number; label: string }[];
+  /** Index into `encounters` drawn with the selection ring, or null. */
+  selectedEncounter: number | null;
+}
+
 export interface WatchMapOptions {
   container: HTMLElement;
+  /** A watched area was clicked (its outline, its marker or anywhere inside it). */
+  onSelectArea?: (id: string) => void;
+  /** An encounter or hotspot marker was clicked: index into the radar view. */
+  onSelectMarker?: (kind: "encounter" | "hotspot", index: number) => void;
   /** An alert dot was clicked; the screen decides what that means for the URL. */
   onSelectAlert: (id: string) => void;
 }
@@ -98,6 +124,19 @@ export interface WatchMapHandle {
   focusAlert(alert: WatchAlert, opts?: { animate?: boolean; moveCamera?: boolean }): void;
   /** Ring one hull (a contact row) without leaving the alert. null clears it. */
   focusContact(ship: FocusShip | null): void;
+  /**
+   * Show an area or a region: clear any alert focus, fit the box, outline the
+   * area and ring the selected alert dot. Used by area clicks and the radar view.
+   */
+  showRegion(opts: { bounds: [number, number, number, number]; areaId: string | null; alertId: string | null }): void;
+  /** Draw (or clear with null) the radar density, encounters and hotspots. */
+  setRadar(view: RadarMapView | null): void;
+  /** 0..1 scale on the radar density, for the time-lapse. */
+  setRadarIntensity(k: number): void;
+  /** Glide dots to new fixes from the live feed and pulse the ones in view. */
+  applyLive(items: LivePosition[]): void;
+  /** Move the camera to an area, or back to the opening view with null. */
+  fitArea(bbox: [number, number, number, number] | null): void;
   /** Back to the world: clear every focus drawing and restore the camera. */
   showWorld(): void;
   resize(): void;
@@ -156,7 +195,7 @@ export function nextRadiusKm(alert: WatchAlert, atMs: number): number {
 }
 
 /** Great-circle km. Small enough inputs here that the sphere is plenty. */
-function distanceKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+export function distanceKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const toRad = Math.PI / 180;
   const dLat = (bLat - aLat) * toRad;
   const dLon = (bLon - aLon) * toRad;
@@ -209,6 +248,8 @@ function circleRing(rKm: number, n = 96): [number, number][] {
  * fix; the lens between the last fix and the next one when there is.
  */
 export function reachRing(alert: WatchAlert, atMs: number): LngLat[] | null {
+  // A false position has no reach, and a radar alert names no hull.
+  if (alert.kind === "spoof" || alert.kind === "radar_unmatched") return null;
   const r1 = reachRadiusKm(alert, atMs);
   if (!(r1 > 0.02)) return null;
 
@@ -345,6 +386,40 @@ function shipFeatures(ships: WatchShip[]): GeoJSON.FeatureCollection<GeoJSON.Poi
   return { type: "FeatureCollection", features };
 }
 
+function storeFeatures(
+  store: Map<number, { lon: number; lat: number; watch: number }>,
+): GeoJSON.FeatureCollection<GeoJSON.Point, ShipProps> {
+  const features: GeoJSON.Feature<GeoJSON.Point, ShipProps>[] = [];
+  for (const [mmsi, ship] of store) {
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [ship.lon, ship.lat] },
+      properties: { mmsi, watch: ship.watch },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+/** A graticule every 10 degrees: faint, so the sea reads as a measured surface. */
+function graticule(): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  const features: GeoJSON.Feature<GeoJSON.LineString>[] = [];
+  for (let lon = -180; lon <= 180; lon += 10) {
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: [[lon, -80], [lon, 80]] },
+      properties: {},
+    });
+  }
+  for (let lat = -80; lat <= 80; lat += 10) {
+    features.push({
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: [[-180, lat], [180, lat]] },
+      properties: {},
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
 /** One alert dot plus the group that carries it. */
 interface AlertDot {
   alert: WatchAlert;
@@ -403,7 +478,18 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   const contactLayer = svgEl("g", { class: "watch-contacts" });
   const alertLayer = svgEl("g", { class: "watch-alert-dots" });
   const fixLayer = svgEl("g", { class: "watch-fixes" });
-  svg.append(focusLineLayer, contactLayer, alertLayer, fixLayer);
+  const pulseLayer = svgEl("g", { class: "watch-pulses" });
+  const areaMarkLayer = svgEl("g", { class: "watch-area-marks" });
+  const radarMarkLayer = svgEl("g", { class: "watch-radar-marks" });
+  svg.append(
+    focusLineLayer,
+    pulseLayer,
+    areaMarkLayer,
+    radarMarkLayer,
+    contactLayer,
+    alertLayer,
+    fixLayer,
+  );
 
   overlay.append(labelLayer, svg);
 
@@ -470,14 +556,16 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     { class: "watch-cursor", "aria-hidden": "true" },
     "\u2014, \u2014",
   );
+  cursorEl.style.display = "none";
 
   opts.container.append(overlay, controls, layerPanel, cursorEl);
 
   map.on("mousemove", (event) => {
+    cursorEl.style.display = "";
     cursorEl.textContent = `${event.lngLat.lat.toFixed(4)}, ${event.lngLat.lng.toFixed(4)}`;
   });
   map.on("mouseout", () => {
-    cursorEl.textContent = "\u2014, \u2014";
+    cursorEl.style.display = "none";
   });
 
   let ready = false;
@@ -510,10 +598,39 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   let contactRing: SVGCircleElement | null = null;
   let contactLabel: HTMLElement | null = null;
   let contactLngLat: LngLat | null = null;
+  /** Spoof: one line per ship, from where it is to the false point. */
+  let spoofLines: { line: SVGLineElement; from: LngLat }[] = [];
 
   let raf: number | null = null;
   let ticker: number | null = null;
   let animToken = 0;
+
+  // Live dots: the store is the one truth the ship layer is drawn from, so a
+  // snapshot refresh and a streamed fix cannot disagree about where a hull is.
+  interface StoredShip {
+    lon: number;
+    lat: number;
+    watch: number;
+  }
+  interface Glide {
+    lon0: number;
+    lat0: number;
+    lon1: number;
+    lat1: number;
+    t0: number;
+  }
+  let shipStore = new Map<number, StoredShip>();
+  const glides = new Map<number, Glide>();
+  let glideTimer: number | null = null;
+
+  // Radar view and its markers.
+  let radarMarks: { lngLat: LngLat; group: SVGGElement }[] = [];
+  let radarView: RadarMapView | null = null;
+  let areaMarks: { area: WatchArea; group: SVGGElement }[] = [];
+  let selectedAlertId: string | null = null;
+  /** A region asked for before the style finished loading. */
+  let pendingRegion: { bounds: [number, number, number, number]; areaId: string | null } | null = null;
+  let radarIntensity = 1;
 
   function source(id: string): maplibregl.GeoJSONSource | undefined {
     return map.getSource(id) as maplibregl.GeoJSONSource | undefined;
@@ -668,6 +785,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     nextLine = null;
     nextDot = null;
     contacts = [];
+    spoofLines = [];
     contactRing = null;
     if (contactLabel !== null) {
       contactLabel.remove();
@@ -732,6 +850,26 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       });
       focusLineLayer.append(nextLine);
       fixLayer.append(nextDot);
+    }
+
+    if (alert.kind === "spoof") {
+      // Every ship that reported the false point: a line from where it is to the point.
+      for (const contact of alert.contacts) {
+        if (distanceKm(contact.lat, contact.lon, alert.last.lat, alert.last.lon) < 2) continue;
+        const line = svgEl("line", {
+          x1: 0,
+          y1: 0,
+          x2: 0,
+          y2: 0,
+          stroke: colors.prism,
+          "stroke-width": 1.25,
+          "stroke-dasharray": "5 3",
+          "stroke-opacity": 0.9,
+        });
+        line.append(svgTitle(`${displayName(contact.name, contact.mmsi)} \u00b7 ${Math.round(contact.min_dist_km)} km from the false point`));
+        focusLineLayer.append(line);
+        spoofLines.push({ line, from: [contact.lon, contact.lat] });
+      }
     }
 
     for (const contact of alert.contacts) {
@@ -821,6 +959,29 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       }
       dot.group.style.display = "";
       dot.group.setAttribute("transform", `translate(${point.x} ${point.y})`);
+    }
+
+    // Watched-area markers: only while the area itself is a speck; closer in the
+    // outline is the target.
+    const showMarks = layerState.areas && map.getZoom() < 6.5;
+    for (const mark of areaMarks) {
+      const [w, s, e, n] = mark.area.bbox;
+      const point = map.project([(w + e) / 2, (s + n) / 2]);
+      if (!showMarks || !onScreen(point.x, point.y, 20)) {
+        mark.group.style.display = "none";
+        continue;
+      }
+      mark.group.style.display = "";
+      mark.group.setAttribute("transform", `translate(${point.x} ${point.y})`);
+    }
+    for (const mark of radarMarks) {
+      const point = map.project(mark.lngLat);
+      if (!onScreen(point.x, point.y, 20)) {
+        mark.group.style.display = "none";
+        continue;
+      }
+      mark.group.style.display = "";
+      mark.group.setAttribute("transform", `translate(${point.x} ${point.y})`);
     }
 
     // Area names: watched first (they carry the alerts). A name that would sit
@@ -922,6 +1083,14 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       }
     }
 
+    for (const spoof of spoofLines) {
+      const from = map.project(spoof.from);
+      spoof.line.setAttribute("x1", String(from.x));
+      spoof.line.setAttribute("y1", String(from.y));
+      spoof.line.setAttribute("x2", String(last.x));
+      spoof.line.setAttribute("y2", String(last.y));
+    }
+
     for (const dot of contacts) {
       const point = map.project([dot.contact.lon, dot.contact.lat]);
       const visible = onScreen(point.x, point.y);
@@ -1016,19 +1185,382 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     }
   }
 
+  // ---- live positions ------------------------------------------------------
+
+  function pushShips(): void {
+    const ships = source("watch-ships");
+    if (ships !== undefined) void ships.setData(storeFeatures(shipStore));
+  }
+
+  function addPulse(lngLat: LngLat): void {
+    const point = map.project(lngLat);
+    if (!onScreen(point.x, point.y, 0)) return;
+    const group = svgEl("g", { transform: `translate(${point.x} ${point.y})` });
+    const ring = svgEl("circle", { cx: 0, cy: 0, r: 4, class: "watch-pulse" });
+    group.append(ring);
+    pulseLayer.append(group);
+    ring.addEventListener("animationend", () => group.remove());
+    window.setTimeout(() => group.remove(), 1600);
+  }
+
+  function glideStep(): void {
+    if (destroyed) return;
+    const now = performance.now();
+    for (const [mmsi, glide] of glides) {
+      const ship = shipStore.get(mmsi);
+      if (ship === undefined) {
+        glides.delete(mmsi);
+        continue;
+      }
+      const p = Math.min(1, (now - glide.t0) / GLIDE_MS);
+      const e = p * (2 - p); // ease-out: arrive smoothly
+      ship.lon = glide.lon0 + (glide.lon1 - glide.lon0) * e;
+      ship.lat = glide.lat0 + (glide.lat1 - glide.lat0) * e;
+      if (p >= 1) glides.delete(mmsi);
+    }
+    if (ready) pushShips();
+    if (glides.size === 0 && glideTimer !== null) {
+      window.clearInterval(glideTimer);
+      glideTimer = null;
+    }
+  }
+
+  function applyLive(items: LivePosition[]): void {
+    if (destroyed || !ready) return;
+    const now = performance.now();
+    const reduced = prefersReducedMotion();
+    let pulses = 0;
+    for (const item of items) {
+      const known = shipStore.get(item.mmsi);
+      if (known === undefined) {
+        shipStore.set(item.mmsi, { lon: item.lon, lat: item.lat, watch: 0 });
+      } else if (reduced) {
+        known.lon = item.lon;
+        known.lat = item.lat;
+      } else {
+        glides.set(item.mmsi, {
+          lon0: known.lon,
+          lat0: known.lat,
+          lon1: item.lon,
+          lat1: item.lat,
+          t0: now,
+        });
+      }
+      if (pulses < MAX_PULSES && !reduced && layerState.vessels) {
+        pulses += 1;
+        addPulse([item.lon, item.lat]);
+      }
+    }
+    if (glides.size > 0 && glideTimer === null) {
+      glideTimer = window.setInterval(glideStep, GLIDE_TICK_MS);
+    } else if (glides.size === 0) {
+      pushShips();
+    }
+  }
+
+  // ---- camera --------------------------------------------------------------
+
+  function rememberCamera(): void {
+    if (savedCamera === null) {
+      const center = map.getCenter();
+      savedCamera = { center: [center.lng, center.lat], zoom: map.getZoom() };
+    }
+  }
+
+  function fitPadding(): maplibregl.PaddingOptions {
+    // On a phone the detail panel is a sheet over the bottom of the map.
+    const phone = window.matchMedia("(max-width: 760px)").matches;
+    const h = opts.container.clientHeight;
+    return phone
+      ? { top: 36, left: 24, right: 24, bottom: Math.round(h * 0.42) }
+      : { top: 56, left: 56, right: 56, bottom: 56 };
+  }
+
+  function fitBox(bounds: Bounds, maxZoom: number): void {
+    if (!ready) return;
+    rememberCamera();
+    map.resize();
+    map.fitBounds(bounds, {
+      padding: fitPadding(),
+      maxZoom,
+      duration: prefersReducedMotion() ? 0 : MOVE_MS,
+      essential: true,
+    });
+  }
+
+  function boundsOf(points: LngLat[]): Bounds | null {
+    if (points.length === 0) return null;
+    let w = Infinity;
+    let s = Infinity;
+    let e = -Infinity;
+    let n = -Infinity;
+    for (const [lon, lat] of points) {
+      w = Math.min(w, lon);
+      e = Math.max(e, lon);
+      s = Math.min(s, lat);
+      n = Math.max(n, lat);
+    }
+    if (e - w < 0.02 && n - s < 0.02) return null;
+    return [
+      [w, s],
+      [e, n],
+    ];
+  }
+
+  // ---- trail ----------------------------------------------------------------
+
+  function trailParts(alert: WatchAlert): { pre: LngLat[]; post: LngLat[] } {
+    const pre: LngLat[] = [];
+    const post: LngLat[] = [];
+    const lastT = parseMs(alert.last.t) ?? Infinity;
+    for (const point of alert.trail ?? []) {
+      const [lon, lat, t] = point;
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      if ((parseMs(t) ?? 0) <= lastT + 1000) pre.push([lon, lat]);
+      else post.push([lon, lat]);
+    }
+    // The line ends exactly on the last fix the alert starts from.
+    if (pre.length > 0) pre.push([alert.last.lon, alert.last.lat]);
+    return { pre, post };
+  }
+
+  function drawTrail(alert: WatchAlert | null): void {
+    if (!ready) return;
+    const empty: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+    const line = (coords: LngLat[]): GeoJSON.FeatureCollection =>
+      coords.length < 2
+        ? empty
+        : {
+            type: "FeatureCollection",
+            features: [
+              { type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: {} },
+            ],
+          };
+    if (alert === null) {
+      void source("watch-trail")?.setData(empty);
+      void source("watch-trail-after")?.setData(empty);
+      return;
+    }
+    const { pre, post } = trailParts(alert);
+    void source("watch-trail")?.setData(line(pre));
+    void source("watch-trail-after")?.setData(line(post));
+  }
+
+  /** Fit the reach area (and the fixes that bound it) in view; fall back to a fixed zoom. */
+  function flyToFocus(alert: WatchAlert): void {
+    if (!ready) return;
+    const points: LngLat[] = [[alert.last.lon, alert.last.lat]];
+    if (alert.next !== null) points.push([alert.next.lon, alert.next.lat]);
+    const ring = reachRing(alert, reachTimeMs(alert, Date.now()));
+    if (ring !== null) points.push(...ring);
+    else points.push(...trailParts(alert).pre);
+    if (alert.kind === "spoof") {
+      for (const contact of alert.contacts) points.push([contact.lon, contact.lat]);
+    }
+    const bounds = boundsOf(points);
+    if (bounds !== null) {
+      fitBox(bounds, 11);
+      return;
+    }
+    rememberCamera();
+    const center: LngLat = [alert.last.lon, alert.last.lat];
+    if (prefersReducedMotion()) map.jumpTo({ center, zoom: FOCUS_ZOOM });
+    else map.flyTo({ center, zoom: FOCUS_ZOOM, duration: MOVE_MS, essential: true });
+  }
+
+  // ---- radar + areas ----------------------------------------------------------
+
+  function cellFeatures(view: RadarMapView): GeoJSON.FeatureCollection<GeoJSON.Polygon> {
+    const maxN = Math.max(1, ...view.cells.map((cell) => cell.n));
+    return {
+      type: "FeatureCollection",
+      features: view.cells.map((cell) => {
+        const half = 0.05;
+        return {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [cell.lon - half, cell.lat - half],
+                [cell.lon + half, cell.lat - half],
+                [cell.lon + half, cell.lat + half],
+                [cell.lon - half, cell.lat + half],
+                [cell.lon - half, cell.lat - half],
+              ],
+            ],
+          },
+          properties: { n: cell.n, w: Math.sqrt(cell.n / maxN) },
+        };
+      }),
+    };
+  }
+
+  function applyRadarIntensity(): void {
+    if (!ready || map.getLayer("watch-radar-fill") === undefined) return;
+    map.setPaintProperty("watch-radar-fill", "fill-opacity", [
+      "*",
+      radarIntensity,
+      ["interpolate", ["linear"], ["get", "w"], 0, 0.14, 1, 0.9],
+    ]);
+  }
+
+  function buildRadarMarks(): void {
+    radarMarkLayer.replaceChildren();
+    radarMarks = [];
+    if (radarView === null) return;
+    const make = (
+      kind: "encounter" | "hotspot",
+      index: number,
+      lngLat: LngLat,
+      label: string,
+      selected: boolean,
+    ): void => {
+      const group = svgEl("g", { class: `watch-radar-mark is-${kind}${selected ? " is-selected" : ""}` });
+      group.setAttribute("role", "button");
+      group.setAttribute("tabindex", "-1");
+      group.setAttribute("aria-label", label);
+      group.append(svgTitle(label));
+      if (kind === "encounter") {
+        // Two small rings: two hulls that met.
+        group.append(
+          svgEl("circle", { cx: -2, cy: 0, r: 3, class: "watch-enc-ring", fill: "none" }),
+          svgEl("circle", { cx: 2, cy: 0, r: 3, class: "watch-enc-ring", fill: "none" }),
+        );
+      } else {
+        group.append(
+          svgEl("rect", {
+            x: -3.5,
+            y: -3.5,
+            width: 7,
+            height: 7,
+            class: "watch-hot-mark",
+            fill: "none",
+            transform: "rotate(45)",
+          }),
+        );
+      }
+      group.append(svgEl("circle", { cx: 0, cy: 0, r: 10, class: "watch-alert-hit" }));
+      group.addEventListener("click", (clicked) => {
+        clicked.stopPropagation();
+        if (!destroyed) opts.onSelectMarker?.(kind, index);
+      });
+      radarMarkLayer.append(group);
+      radarMarks.push({ lngLat, group });
+    };
+    radarView.encounters.forEach((enc, i) =>
+      make("encounter", i, [enc.lon, enc.lat], enc.label, radarView?.selectedEncounter === i),
+    );
+    radarView.hotspots.forEach((hot, i) => make("hotspot", i, [hot.lon, hot.lat], hot.label, false));
+  }
+
+  function setRadar(view: RadarMapView | null): void {
+    if (destroyed) return;
+    radarView = view;
+    if (ready) {
+      void source("watch-radar")?.setData(
+        view === null ? { type: "FeatureCollection", features: [] } : cellFeatures(view),
+      );
+    }
+    buildRadarMarks();
+    positionOverlays();
+  }
+
+  function rebuildAreaMarks(): void {
+    areaMarkLayer.replaceChildren();
+    areaMarks = [];
+    if (data === null) return;
+    for (const area of data.areas) {
+      if (area.kind !== "watched") continue;
+      const group = svgEl("g", { class: "watch-area-mark" });
+      group.setAttribute("role", "button");
+      group.setAttribute("tabindex", "-1");
+      group.setAttribute("aria-label", `${area.name}: open area`);
+      group.append(
+        svgTitle(area.name),
+        svgEl("rect", { x: -7, y: -7, width: 14, height: 14, fill: "none", class: "watch-area-mark-box" }),
+        svgEl("circle", { cx: 0, cy: 0, r: 12, class: "watch-alert-hit" }),
+      );
+      group.addEventListener("click", (clicked) => {
+        clicked.stopPropagation();
+        if (!destroyed) opts.onSelectArea?.(area.id);
+      });
+      areaMarkLayer.append(group);
+      areaMarks.push({ area, group });
+    }
+  }
+
+  function drawAreaSelection(areaId: string | null): void {
+    if (!ready) return;
+    const area = areaId === null ? undefined : data?.areas.find((entry) => entry.id === areaId);
+    void source("watch-area-sel")?.setData(
+      area === undefined ? { type: "FeatureCollection", features: [] } : areaFeatures([area]),
+    );
+  }
+
+  function showRegion(region: {
+    bounds: [number, number, number, number];
+    areaId: string | null;
+    alertId: string | null;
+  }): void {
+    if (destroyed) return;
+    stopReachTimers();
+    focus = null;
+    appliedAlertId = null;
+    clearFocusShapes();
+    clearContactFocus();
+    focusing = true;
+    selectedAlertId = region.alertId;
+    drawTrail(null);
+    if (ready) void source("watch-reach")?.setData({ type: "FeatureCollection", features: [] });
+    for (const dot of dots) {
+      const selected = dot.alert.id === region.alertId;
+      dot.group.classList.toggle("is-selected", selected);
+      if (selected) alertLayer.append(dot.group);
+    }
+    if (!ready) {
+      pendingRegion = { bounds: region.bounds, areaId: region.areaId };
+      return;
+    }
+    drawAreaSelection(region.areaId);
+    const [w, s, e, n] = region.bounds;
+    fitBox(
+      [
+        [w, s],
+        [e, n],
+      ],
+      9,
+    );
+    positionOverlays();
+  }
+
   function setData(next: WatchResponse): void {
     if (destroyed) return;
     data = next;
 
+    shipStore = new Map();
+    glides.clear();
+    for (const ship of next.ships) {
+      if (!Number.isFinite(ship.lat) || !Number.isFinite(ship.lon)) continue;
+      shipStore.set(ship.mmsi, {
+        lon: ship.lon,
+        lat: ship.lat,
+        watch: ship.watchlist === "sanctioned" || ship.watchlist === "shadow_fleet" ? 1 : 0,
+      });
+    }
+
     if (ready) {
       const areas = source("watch-areas");
       if (areas !== undefined) void areas.setData(areaFeatures(next.areas));
-      const ships = source("watch-ships");
-      if (ships !== undefined) void ships.setData(shipFeatures(next.ships));
+      pushShips();
     }
 
     rebuildAlertDots();
     rebuildAreaLabels();
+    rebuildAreaMarks();
+    if (selectedAlertId !== null) {
+      for (const dot of dots) dot.group.classList.toggle("is-selected", dot.alert.id === selectedAlertId);
+    }
     positionOverlays();
 
     // A refresh may replace the alert object; keep the same alert open, with
@@ -1044,13 +1576,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   }
 
   function flyToLast(alert: WatchAlert, moveCamera: boolean): void {
-    if (!ready || !moveCamera) return;
-    const center: LngLat = [alert.last.lon, alert.last.lat];
-    if (prefersReducedMotion()) {
-      map.jumpTo({ center, zoom: FOCUS_ZOOM });
-      return;
-    }
-    map.flyTo({ center, zoom: FOCUS_ZOOM, duration: FOCUS_MS, essential: true });
+    if (!moveCamera) return;
+    flyToFocus(alert);
   }
 
   function applyFocus(
@@ -1058,12 +1585,11 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     options: { animate: boolean; moveCamera: boolean },
   ): void {
     if (destroyed) return;
-    if (focusing === false && savedCamera === null) {
-      const center = map.getCenter();
-      savedCamera = { center: [center.lng, center.lat], zoom: map.getZoom() };
-    }
+    if (ready) rememberCamera();
     focusing = true;
     focus = alert;
+    selectedAlertId = alert.id;
+    drawAreaSelection(null);
 
     // A contact ring belongs to the alert it was opened in; a new alert starts
     // clean, a refresh of the same alert keeps it.
@@ -1083,6 +1609,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
     buildFocusShapes(alert);
     drawContactFocus();
+    drawTrail(alert);
     positionOverlays();
     flyToLast(alert, options.moveCamera);
     animateReach(alert, options.animate);
@@ -1094,8 +1621,13 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     focus = null;
     focusing = false;
     appliedAlertId = null;
+    selectedAlertId = null;
+    pendingRegion = null;
     clearFocusShapes();
     clearContactFocus();
+    setRadar(null);
+    drawTrail(null);
+    drawAreaSelection(null);
     if (ready) {
       const src = source("watch-reach");
       if (src !== undefined) void src.setData({ type: "FeatureCollection", features: [] });
@@ -1111,7 +1643,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         map.flyTo({
           center: camera.center,
           zoom: camera.zoom,
-          duration: 900,
+          duration: MOVE_MS,
           essential: true,
         });
       }
@@ -1132,7 +1664,43 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     });
     map.addSource("watch-ships", {
       type: "geojson",
-      data: shipFeatures(data?.ships ?? []),
+      data: storeFeatures(shipStore),
+    });
+    map.addSource("watch-graticule", { type: "geojson", data: graticule() });
+    map.addSource("watch-radar", {
+      type: "geojson",
+      data: radarView === null ? { type: "FeatureCollection", features: [] } : cellFeatures(radarView),
+    });
+    map.addSource("watch-trail", {
+      type: "geojson",
+      lineMetrics: true,
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addSource("watch-trail-after", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addSource("watch-area-sel", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    map.addLayer({
+      id: "watch-graticule",
+      type: "line",
+      source: "watch-graticule",
+      paint: { "line-color": colors.lineStrong, "line-opacity": 0.3, "line-width": 0.5 },
+    });
+    // Radar-seen vessels with no matching broadcast: red is the one meaning.
+    map.addLayer({
+      id: "watch-radar-fill",
+      type: "fill",
+      source: "watch-radar",
+      paint: {
+        "fill-color": colors.alert,
+        "fill-opacity": ["*", 1, ["interpolate", ["linear"], ["get", "w"], 0, 0.14, 1, 0.9]],
+        "fill-opacity-transition": { duration: 60 },
+      },
     });
 
     // Watched areas: a thin solid outline, no fill at world zoom (a very faint
@@ -1175,6 +1743,42 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     // The reach area: the prism colour, because it is a possibility rather
     // than a finding, and dashed for the same reason. Flat, 1 px edge.
     map.addLayer({
+      id: "watch-area-selected",
+      type: "line",
+      source: "watch-area-sel",
+      paint: { "line-color": colors.text1, "line-opacity": 0.9, "line-width": 1.25 },
+    });
+    // The ship's own path: thin, fading in from the oldest fix to the last one.
+    map.addLayer({
+      id: "watch-trail-line",
+      type: "line",
+      source: "watch-trail",
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-width": 1.25,
+        "line-gradient": [
+          "interpolate",
+          ["linear"],
+          ["line-progress"],
+          0,
+          rgba(colors.text1, 0),
+          1,
+          rgba(colors.text1, 0.95),
+        ],
+      },
+    });
+    map.addLayer({
+      id: "watch-trail-after-line",
+      type: "line",
+      source: "watch-trail-after",
+      paint: {
+        "line-color": colors.text2,
+        "line-opacity": 0.5,
+        "line-width": 1,
+        "line-dasharray": [2, 3],
+      },
+    });
+    map.addLayer({
       id: "watch-reach-fill",
       type: "fill",
       source: "watch-reach",
@@ -1202,9 +1806,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-ships",
       filter: ["==", ["get", "watch"], 0],
       paint: {
-        "circle-radius": 0.75,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 0.8, 5, 1.5, 8, 2.6, 11, 3.6],
         "circle-color": colors.text2,
-        "circle-opacity": 0.45,
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 6, 0.75],
       },
     });
     map.addLayer({
@@ -1213,9 +1817,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       source: "watch-ships",
       filter: ["==", ["get", "watch"], 1],
       paint: {
-        "circle-radius": 1.1,
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 1.2, 5, 2.2, 8, 3.4, 11, 4.4],
         "circle-color": colors.text1,
-        "circle-opacity": 0.65,
+        "circle-opacity": 0.9,
       },
     });
 
@@ -1228,13 +1832,52 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     applyLayerVisibility();
     positionOverlays();
 
+    applyRadarIntensity();
+    pushShips();
+
     // A focus applied before the first frame (deep link) owns the camera now;
     // otherwise the camera would stay on the world fit.
     if (focus !== null) {
       const alert = focus;
+      drawTrail(alert);
       flyToLast(alert, true);
       animateReach(alert, false);
+    } else if (pendingRegion !== null) {
+      const region = pendingRegion;
+      pendingRegion = null;
+      showRegion({ bounds: region.bounds, areaId: region.areaId, alertId: selectedAlertId });
     }
+  });
+
+  // A click inside a watched area (or a few pixels around a small one) opens it.
+  // Alert dots and markers stop their own clicks, so this only sees the rest.
+  function watchedAreaAt(point: { x: number; y: number }): WatchArea | null {
+    let best: { area: WatchArea; size: number } | null = null;
+    for (const area of areaOrder) {
+      if (area.kind !== "watched") continue;
+      const [w, s, e, n] = area.bbox;
+      const a = map.project([w, n]);
+      const b = map.project([e, s]);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      const halfW = Math.max(Math.abs(b.x - a.x) / 2, 12);
+      const halfH = Math.max(Math.abs(b.y - a.y) / 2, 12);
+      if (Math.abs(point.x - cx) <= halfW && Math.abs(point.y - cy) <= halfH) {
+        const size = halfW * halfH;
+        if (best === null || size < best.size) best = { area, size };
+      }
+    }
+    return best?.area ?? null;
+  }
+
+  map.on("click", (event) => {
+    if (destroyed || !layerState.areas) return;
+    const area = watchedAreaAt(event.point);
+    if (area !== null) opts.onSelectArea?.(area.id);
+  });
+  map.on("mousemove", (event) => {
+    if (destroyed) return;
+    map.getCanvas().style.cursor = layerState.areas && watchedAreaAt(event.point) !== null ? "pointer" : "";
   });
 
   map.on("render", positionOverlays);
@@ -1270,6 +1913,30 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     },
 
     showWorld,
+    fitArea(bbox: [number, number, number, number] | null): void {
+      if (destroyed || !ready) return;
+      const box: Bounds =
+        bbox === null
+          ? WORLD_BOUNDS
+          : [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]],
+            ];
+      map.fitBounds(box, {
+        padding: bbox === null ? 12 : 48,
+        maxZoom: 9,
+        duration: prefersReducedMotion() ? 0 : MOVE_MS,
+        essential: true,
+      });
+      savedCamera = null;
+    },
+    showRegion,
+    setRadar,
+    applyLive,
+    setRadarIntensity(k: number): void {
+      radarIntensity = Math.max(0, Math.min(1.2, k));
+      applyRadarIntensity();
+    },
 
     resize(): void {
       if (destroyed) return;
@@ -1282,6 +1949,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       if (destroyed) return;
       destroyed = true;
       stopReachTimers();
+      if (glideTimer !== null) window.clearInterval(glideTimer);
       overlay.remove();
       controls.remove();
       layerPanel.remove();
@@ -1292,10 +1960,26 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 }
 
 /** The attribution line the world view shows under the map. */
-export function watchAttribution(): HTMLElement {
+export function watchAttribution(gfw = false): HTMLElement {
   return h(
     "div",
     { class: "watch-attrib" },
+    gfw
+      ? h(
+          "span",
+          null,
+          h(
+            "a",
+            {
+              href: "https://globalfishingwatch.org",
+              target: "_blank",
+              rel: "noopener noreferrer",
+            },
+            "Powered by Global Fishing Watch",
+          ),
+          " \u00b7 ",
+        )
+      : null,
     "Positions: our AIS recording \u00b7 Watchlist: ",
     h(
       "a",
