@@ -1,21 +1,23 @@
-# Demo script v1 (3:00, expo table) — story: the fleet nobody declares
+# Demo script v2 (3:00, expo table) — the fleet nobody declares
 
-Decisions 0001 (honest evidence) + 0002 (Hormuz leads). Every number below comes from a committed run;
-`[TBC]` marks a number that the next data rebuild will confirm before CP3. One idea per beat; the screen
-always shows the thing being said. Presentation mode (UI V2) walks these beats with keyboard → / ←.
+After the CP2 Auditor review (Sat 08:00). Numbers in {braces} are read live by presentation mode from the
+snapshot built on Sunday morning; never say a number that isn't on screen. One idea per beat.
 
-| # | Time | Screen | Say (plain, first person) | Proof on screen |
+| # | Time | Screen (route) | Say (plain, first person) | Proof on screen |
 |---|---|---|---|---|
-| 1 | 0:00 | Global → Hormuz block | "Every big ship must broadcast where it is. Around the Strait of Hormuz, radar satellites see ships every day, and on a typical day about 4 in 10 of them aren't broadcasting." | daily chart: median 41% (IQR 38-48%), 59 well-covered days of 84 |
-| 2 | 0:25 | Hormuz radar layer | "Global Fishing Watch, the best public source, logged one 'dark' event inside the strait in six months. Their rule only counts ships far offshore. The strait is too narrow for that rule." | density map; "1 gap event in 6 months" |
-| 3 | 0:45 | Live → Baltic, hero number | "So we built our own. Since Friday night we've recorded every ship in six shadow-fleet hotspots. This is the Baltic: 3,800 ships, tens of thousands of positions an hour." | live map, coverage line |
-| 4 | 1:05 | Live → spoof event | "Physics catches what statements can't. These five unrelated ships each jumped 49 km from their real route to the same point, on land near St Petersburg, and back. Ships can't do that: their satellite positions were spoofed." | spoof event: 5 ships, 49 km, on land |
-| 5 | 1:30 | Live → the same ship list | "Two of them first looked like cloned identities to our own detector. Physics showed the second position was the spoof point, so we relabelled them. The tool corrects itself." | spoof evidence: per-ship jump in/out |
-| 6 | 1:50 | Live → watchlist alert | "And we check every ship's IMO number against sanctions lists: 18 sanctioned or shadow-fleet ships sailing the Baltic right now, e.g. SAPFIR, under Canada's Russia sanctions." | red watchlist tag on a live ship |
-| 7 | 2:10 | Global funnel + "How sure are we?" | "We also tested ourselves. Of 5,624 dark gaps worldwide, 109 had radar nearby; physics cleared 90. And radar near a dark ship turns out to be no better than chance — so we don't accuse on it. Location we do well: 0.87." | funnel; evidence panel 1.07×, AUC 0.87 |
-| 8 | 2:40 | Close | "It's a tool for compliance teams and coast guards that separates what physics proves from what's just suspicious. Ask me about any dot." | back to the live map |
+| 1 | 0:00 | `#/hormuz` | "Around the Strait of Hormuz, radar satellites see vessels every day. On a typical day about {hormuz_share_pct}% of them have no matching location broadcast. Some are small boats that don't have to broadcast; many are not." | hero %, daily chart, "{hormuz_days_used} well-covered days, Aug 15 – Nov 15" |
+| 2 | 0:25 | `#/hormuz` (radar layer) | "The best public dark-ship record logs almost none of this inside the strait: its rule only counts ships far offshore, and the strait is too narrow. So the gap is real and nobody's watching it." | density layer; caption "1 GFW gap event inside the strait, May–Nov (separate query)" |
+| 3 | 0:45 | `#/live/BALTIC_WATCH` | "So we record it ourselves. Since Friday night we've captured every ship our receivers hear in three hotspots. This is the Baltic: {baltic_ships} ships in the last {window_h} hours." | live map, hero number, coverage line |
+| 4 | 1:05 | `#/live/BALTIC_WATCH/kind/spoof` | "Physics catches what statements can't. {spoof_ships} unrelated ships each jumped tens of kilometres off their route to the same point on land near St Petersburg, and back. Ships can't do that: their satellite positions were falsified, or a shared device is wrong." | spoof event: ships, out-and-back explainer, "on land" |
+| 5 | 1:35 | same event, numbers | "And we check ourselves: an early version flagged a river port in St Petersburg. We tightened the physics and it disappeared. Every alert says why it's an alert." | per-ship jump in/out speeds |
+| 6 | 1:55 | `#/live/BALTIC_WATCH/vessel/{alert_mmsi}` | "Every ship's broadcast IMO number is checked against sanctions lists: at least {alerts_at_least} sanctioned or shadow-fleet ships seen here in the last {window_h} hours. This one broadcasts as {alert_name}; the list knows it as {alert_listed_name}." | vessel card with list entry |
+| 7 | 2:20 | `#/` funnel + "How sure are we?" | "We tested our own method. Radar near a dark ship turned out to be no better than chance, so we never accuse on radar alone. Physics is what we trust." | evidence panel |
+| 8 | 2:40 | back to `#/live/BALTIC_WATCH` | "It's for compliance teams and coast guards: it separates what physics proves from what only looks suspicious. Ask me about any dot." | live map |
 
 QNX sponsor table only (Sun 10:00): Patrol unit tab, kill the detector live, recovery 0.75 s.
 
-## Rehearsal rules
-Wifi off (snapshot + offline basemap). Two runs, timed. Every `[TBC]` resolved or the line cut.
+## Rules
+- Rehearse on the **Sunday 06:00 snapshot** (counts and event order change as the recording grows).
+- Wifi off for one full run (snapshot + offline basemap).
+- Never say: "every big ship must broadcast" next to the radar share; "right now" for the watchlist;
+  "six hotspots"; "six months" for the Aug–Nov chart.
