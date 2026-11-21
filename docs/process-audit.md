@@ -57,3 +57,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 7:** ~90% DeepSeek; Chief: integration wiring (spoof into pipeline, spoofed-clone folding), 3 UI bug fixes found in the browser gate, wording fix.
 - **Rule breaks:** a backend brief changed a public JSON shape without updating the consumer or the schema doc.
 - **Change for next 30 min:** any brief that changes an API/JSON shape must update docs/api-schema.md (or baltic-spec.md) and name every consumer file; UI leads' briefs keep the browser gate mandatory and their return must include screenshot paths or it is not done.
+
+## Sat 21 Nov, 07:54 ET (audit 9, covers 05:19-07:54, incl. a ~1 h usage-limit pause)
+- **Went well:** CP2 Opus review found 12 real issues (ferries counted as impossible, AIS 102.3 = unknown speed, EOPL whitewashed, wrong demo event, stale numbers); all fixed and each verified on real data with before/after numbers; Neva river false positive caught via OpenStreetMap; walking all 8 presentation steps in the browser caught a router gap and banned phrases still on screen.
+- **Went wrong:** a UI lane wasn't allowed to touch main.ts, so its new routes silently fell through (my brief's file list was too narrow); a caption lane rewrote tokens but kept old overclaiming copy; I estimated the time again (thought 08:20, was 07:32).
+- **Code share since audit 8:** ~85% DeepSeek; Chief: router wiring, caption copy (script v2), spoofing strictness (offset + teleported-only), wording fixes from the review.
+- **Rule breaks:** time estimate (third time).
+- **Change for next 30 min:** UI briefs that add routes must include main.ts (router) in the file list; copy for captions comes from docs/demo-script.md verbatim (Chief owns words); never type a time, run `date`.
