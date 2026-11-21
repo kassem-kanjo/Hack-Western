@@ -19,6 +19,8 @@ import type { CasesResponse } from "./api";
 import { fetchCases } from "./api";
 import { h } from "./components/dom";
 import { initIntro } from "./components/Intro";
+// The Watch V3 status bar (screens/watch.ts) replaced the separate StatusBar component (#184).
+import { mountToasts } from "./components/Toasts"; // #184
 import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
 import { renderHormuz } from "./screens/hormuz";
@@ -207,6 +209,10 @@ function loadCases(): void {
       route();
     });
 }
+
+// ---- #184: app-wide status bar + live alert toasts (components are new files) ----
+
+mountToasts();
 
 window.addEventListener("hashchange", route);
 
