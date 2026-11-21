@@ -14,7 +14,7 @@ from importlib.resources import files
 import psycopg
 
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
-from darkfleet.store.repository import DarkHoursDay, PositionRow
+from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
 
 __all__ = ["TimescaleRepo"]
 
@@ -114,12 +114,27 @@ ON CONFLICT (ts, mmsi) DO UPDATE SET
     sog = EXCLUDED.sog
 """
 
-_DARK_HOURS = """
-SELECT (day AT TIME ZONE 'UTC')::date AS day, dark_hours, gap_count
-FROM dark_hours_daily
+_DARK_HOURS_BY_REGION = """
+-- The region-scoped shape predates the fleet-wide continuous aggregate; compute it from
+-- the hypertable so existing callers keep working after the aggregate changed shape.
+SELECT (start_ts AT TIME ZONE 'UTC')::date AS day,
+       sum(duration_hours) AS dark_hours,
+       count(*) AS gap_count
+FROM gap_events
 WHERE region = %s
+GROUP BY day
 ORDER BY day
 """
+
+# The continuous aggregate holds fleet-wide buckets: one row per UTC day that had a gap.
+_DARK_HOURS_RANGE = """
+SELECT (day AT TIME ZONE 'UTC')::date AS day, hours, gaps
+FROM dark_hours_daily
+WHERE day >= %s AND day < %s
+ORDER BY day
+"""
+
+_REFRESH_RANGE = "CALL refresh_continuous_aggregate('dark_hours_daily', %s, %s)"
 
 _REFRESH = "CALL refresh_continuous_aggregate('dark_hours_daily', NULL, NULL)"
 
@@ -291,14 +306,39 @@ class TimescaleRepo:
             for row in rows
         ]
 
-    def dark_hours_daily(self, region: str) -> list[DarkHoursDay]:
-        rows = self._conn.execute(_DARK_HOURS, (region,)).fetchall()
+    def dark_hours_daily(
+        self,
+        start: date | str,
+        end: date | None = None,
+        *,
+        refresh: bool = False,
+    ) -> list[DarkHoursDay] | list[DarkHoursBucket]:
+        """Daily dark hours. ``dark_hours_daily(region)`` keeps the region-scoped shape;
+        ``dark_hours_daily(start, end, refresh=True)`` reads the fleet-wide continuous
+        aggregate after materialising the window.
+        """
+        if isinstance(start, str):
+            if end is not None:
+                raise TypeError("dark_hours_daily(region) takes no end date")
+            rows = self._conn.execute(_DARK_HOURS_BY_REGION, (start,)).fetchall()
+            return [
+                DarkHoursDay(
+                    day=row[0],
+                    dark_hours=float(row[1]),
+                    gap_count=int(row[2]),
+                )
+                for row in rows
+            ]
+
+        if end is None:
+            raise TypeError("dark_hours_daily(start, end) needs both dates")
+        start_ts = _start_of(start)
+        end_ts = _day_after(end)
+        if refresh:
+            self._conn.execute(_REFRESH_RANGE, (start_ts, end_ts))
+        rows = self._conn.execute(_DARK_HOURS_RANGE, (start_ts, end_ts)).fetchall()
         return [
-            DarkHoursDay(
-                day=row[0],
-                dark_hours=float(row[1]),
-                gap_count=int(row[2]),
-            )
+            DarkHoursBucket(day=row[0], hours=float(row[1]), gaps=int(row[2]))
             for row in rows
         ]
 
