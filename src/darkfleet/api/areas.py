@@ -5,14 +5,20 @@ router answers the strip above that map: how many ships are in each box now, wha
 there in the last twelve hours, how much traffic the recorder is actually hearing, and the
 last twelve hourly ship counts for a sparkline.
 
-Everything is file-backed and read-only, like the rest of ``api/``:
+Everything else is file-backed and read-only, like the rest of ``api/``:
 
 * the area list, ships and alerts come from the current ``watch.json`` through
   :func:`darkfleet.api.watch.get_watch`, so the strip can never disagree with the map;
-* ``msgs_per_min`` and ``sparkline`` are derived from the recorder's own ``*.jsonl.gz`` hours
-  under ``DARKFLEET_AIS_DIR`` (default ``data/cache/ais``), with the one existing parser
-  (:func:`darkfleet.ingest.ais_tracks.iter_files`). The recorder's five-minute log lines are
-  deliberately *not* read: they are stdout, not data, and disappear when the process restarts.
+* ``msgs_per_min`` and ``sparkline`` come from Tiger when ``DATABASE_URL`` is set: the live
+  sink (``scripts/tiger_sink.py``) lands pings with their region in ``ais_minutely``
+  (issue #208), and each row's ``source`` says whether Tiger or the files answered. Any
+  connection or query failure silently falls back to the files, so the strip still works
+  when the database is unreachable;
+* the file fallback derives the same two fields from the recorder's own ``*.jsonl.gz``
+  hours under ``DARKFLEET_AIS_DIR`` (default ``data/cache/ais``), with the one existing
+  parser (:func:`darkfleet.ingest.ais_tracks.iter_files`). The recorder's five-minute log
+  lines are deliberately *not* read: they are stdout, not data, and disappear when the
+  process restarts.
 
 A watched box borrows its parent listening box's recording: the recorder subscribes to wide
 feeds, while the watched areas are the narrow places inside them. Per-hour parses are cached
@@ -22,6 +28,7 @@ by ``(path, mtime)`` so a burst of area requests pays for each growing hour file
 from __future__ import annotations
 
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -32,6 +39,7 @@ from fastapi import APIRouter
 from darkfleet.api.watch import get_watch
 from darkfleet.core.tracks import Ping
 from darkfleet.ingest.ais_tracks import iter_files
+from darkfleet.store.timescale_repo import TimescaleRepo
 
 router = APIRouter(tags=["areas"])
 
@@ -44,11 +52,24 @@ SPARKLINE_HOURS = 12
 RECENT_MINUTES = 5.0
 """``msgs_per_min`` is measured over the recording's newest five minutes."""
 
+TIGER_CACHE_SECONDS = 20.0
+"""The Tiger aggregates change once a minute; the strip can reuse a reading this long."""
+
+TIGER_CONNECT_TIMEOUT = 2
+"""Seconds a request may wait for Tiger before the file-backed path takes over."""
+
+SPARKLINE_MINUTES = 60
+"""The Tiger sparkline covers the last sixty complete minutes."""
+
 HOUR_FORMAT = "%Y%m%dT%H"
 """The recorder's hour-file stem, e.g. ``20261121T09``."""
 
 KIND_ORDER = ("dark", "sanctioned_stop", "spoof", "meeting", "jump", "radar_unmatched")
 """Alert kinds in the order the UI reasons about them; unknown kinds follow alphabetically."""
+
+# Per-area Tiger readings, keyed by the candidate region names (most specific first).
+_tiger_cache: dict[tuple[str, ...], tuple[float, float, tuple[int, ...]]] = {}
+_tiger_repo_instance: Any = None
 
 
 def data_dir() -> Path:
@@ -58,8 +79,10 @@ def data_dir() -> Path:
 
 
 def reset_cache() -> None:
-    """Drop parsed hour statistics; tests change ``DARKFLEET_AIS_DIR`` between cases."""
+    """Drop parsed hour statistics and Tiger readings; tests swap data sources between cases."""
     _hour_stats.cache_clear()
+    _tiger_cache.clear()
+    _close_tiger_repo()
 
 
 def _parse_iso(value: Any) -> datetime | None:
@@ -256,6 +279,87 @@ def _recording_metrics(directory: Path | None) -> tuple[float, list[int]]:
     return newest_rate, sparkline
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Treat a naive DB timestamp as UTC, as the rest of the codebase does."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _close_tiger_repo() -> None:
+    """Forget the shared Tiger connection; the next reading reconnects with a 2 s budget."""
+    global _tiger_repo_instance
+    repo = _tiger_repo_instance
+    _tiger_repo_instance = None
+    if repo is None:
+        return
+    close = getattr(repo, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _tiger_repo() -> Any | None:
+    """The shared Tiger connection, or None without ``DATABASE_URL``.
+
+    Built lazily and reused: opening one and running the schema on every strip poll would
+    cost more than the aggregate saves. Tests monkeypatch this to inject a fake repo.
+    """
+    global _tiger_repo_instance
+    if _tiger_repo_instance is not None:
+        return _tiger_repo_instance
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        return None
+    _tiger_repo_instance = TimescaleRepo(url, connect_timeout=TIGER_CONNECT_TIMEOUT)
+    return _tiger_repo_instance
+
+
+def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
+    """Last sixty complete minutes for one area, or None when files should answer.
+
+    The first region name with any rows wins, mirroring :func:`_region_dir`: a watched box
+    borrows its listening parent, and counting both would double the parent's traffic.
+    Raises on any database problem; :func:`_area_row` turns that into the file fallback.
+    """
+    if not names or not os.environ.get("DATABASE_URL", "").strip():
+        return None
+
+    key = tuple(names)
+    now = time.monotonic()
+    cached = _tiger_cache.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1], list(cached[2])
+
+    repo = _tiger_repo()
+    if repo is None:
+        return None
+
+    current = datetime.now(UTC).replace(second=0, microsecond=0)
+    last_full = current - timedelta(minutes=1)
+    start = last_full - timedelta(minutes=SPARKLINE_MINUTES - 1)
+    counts = [0] * SPARKLINE_MINUTES
+    try:
+        for name in names:
+            rows = repo.minutely(name, start, current)
+            if not rows:
+                continue
+            for minute, msgs in rows:
+                offset = int((_as_utc(minute) - start).total_seconds() // 60)
+                if 0 <= offset < SPARKLINE_MINUTES:
+                    counts[offset] += int(msgs)
+            break
+    except Exception:
+        _close_tiger_repo()
+        raise
+
+    rate = float(counts[-1])
+    _tiger_cache[key] = (now + TIGER_CACHE_SECONDS, rate, tuple(counts))
+    return rate, counts
+
+
 def _area_row(
     area: dict[str, Any], all_areas: list[dict[str, Any]], snapshot: dict[str, Any]
 ) -> dict[str, Any]:
@@ -273,7 +377,18 @@ def _area_row(
 
     ships_now = _ships_now(ships_list, box) if box is not None else 0
     by_kind = _alerts_12h(alerts_list, str(area_id), anchor) if isinstance(area_id, str) else {}
-    rate, sparkline = _recording_metrics(_region_dir(area, all_areas, data_dir()))
+    names = _region_names(area, all_areas)
+    try:
+        tiger = _tiger_metrics(names)
+    except Exception:
+        # Any Tiger problem (no route, timeout, missing aggregate) falls back to the files.
+        tiger = None
+    if tiger is not None:
+        rate, sparkline = tiger
+        source = "tiger"
+    else:
+        rate, sparkline = _recording_metrics(_region_dir(area, all_areas, data_dir()))
+        source = "files"
 
     return {
         "id": area_id,
@@ -284,6 +399,7 @@ def _area_row(
         "alerts_12h": by_kind,
         "msgs_per_min": rate,
         "sparkline": sparkline,
+        "source": source,
     }
 
 

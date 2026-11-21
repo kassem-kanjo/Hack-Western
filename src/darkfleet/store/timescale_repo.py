@@ -150,6 +150,23 @@ WHERE ts >= %s AND ts <= %s
 ORDER BY ts, mmsi
 """
 
+# The live sink tags each ping with its recorder region. DO NOTHING (not DO UPDATE) is
+# deliberate: replaying a file after a crash must not rewrite rows a concurrent reader saw.
+_REGION_PING_INSERT = """
+INSERT INTO positions (ts, mmsi, lat, lon, sog, cog, heading, nav_status, region)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (ts, mmsi) DO NOTHING
+"""
+
+_AIS_MINUTELY_RANGE = """
+SELECT minute, msgs
+FROM ais_minutely
+WHERE region = %s AND minute >= %s AND minute < %s
+ORDER BY minute
+"""
+
+_AIS_MINUTELY_REFRESH_RANGE = "CALL refresh_continuous_aggregate('ais_minutely', %s, %s)"
+
 _VESSEL_UPSERT = """
 INSERT INTO vessels_static (mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -249,8 +266,16 @@ def _day_after(value: date) -> datetime:
 class TimescaleRepo:
     """TimescaleDB-backed repository for production."""
 
-    def __init__(self, url: str, *, schema: str | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        schema: str | None = None,
+        connect_timeout: int | float | None = None,
+    ) -> None:
         connect_kwargs: dict[str, object] = {"autocommit": True}
+        if connect_timeout is not None:
+            connect_kwargs["connect_timeout"] = connect_timeout
         if schema is not None:
             # Keep public on the path: the Timescale functions (create_hypertable, time_bucket) live there.
             connect_kwargs["options"] = f"-c search_path={schema},public"
@@ -360,6 +385,32 @@ class TimescaleRepo:
         ]
         with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(_PING_UPSERT, params)
+        return len(params)
+
+    def add_region_pings(self, region: str, pings: Sequence[Ping]) -> int:
+        """Insert pings tagged with the recorder region, skipping anything already stored.
+
+        The caller owns batching (the sink sends 5,000 at a time); one call is one
+        transaction. Returns the number of rows submitted, not the number newly inserted:
+        the sink's offsets count pings it has *sent*, and a duplicate is already accounted
+        for by the natural ``(ts, mmsi)`` key.
+        """
+        params = [
+            (
+                _as_utc(ping.t),
+                str(ping.mmsi),
+                ping.lat,
+                ping.lon,
+                ping.sog,
+                ping.cog,
+                ping.heading,
+                ping.nav_status,
+                region,
+            )
+            for ping in pings
+        ]
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.executemany(_REGION_PING_INSERT, params)
         return len(params)
 
     def pings_between(self, start: datetime, end: datetime) -> list[Ping]:
@@ -511,6 +562,19 @@ class TimescaleRepo:
         self._conn.execute(_AIS_HOURLY_REFRESH_RANGE, (window_start, window_end))
         rows = self._conn.execute(_AIS_HOURLY_RANGE, (window_start, window_end)).fetchall()
         return [AisHourBucket(hour=_as_utc(row[0]), msgs=int(row[1])) for row in rows]
+
+    def minutely(self, region: str, start: datetime, end: datetime) -> list[tuple[datetime, int]]:
+        """Per-region message counts for minutes in ``[start, end)``, ordered by minute.
+
+        Materialises the window first (the policy only covers the last three hours and a
+        demo may replay an older recording), then reads ``ais_minutely``. Only minutes with
+        at least one ping appear; callers fill the gaps with zero.
+        """
+        window_start = _as_utc(start)
+        window_end = _as_utc(end)
+        self._conn.execute(_AIS_MINUTELY_REFRESH_RANGE, (window_start, window_end))
+        rows = self._conn.execute(_AIS_MINUTELY_RANGE, (region, window_start, window_end)).fetchall()
+        return [(_as_utc(row[0]), int(row[1])) for row in rows]
 
     def dark_hours_daily(
         self,

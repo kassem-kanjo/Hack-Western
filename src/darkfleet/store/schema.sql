@@ -27,6 +27,11 @@ ALTER TABLE positions ADD COLUMN IF NOT EXISTS cog real;
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS heading integer;
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS nav_status integer;
 
+-- The live AIS sink (scripts/tiger_sink.py) tags every ping with the recorder folder it
+-- came from, so the area strip can ask Tiger for one region's minutes. GFW position rows
+-- and pre-#208 AIS rows keep NULL here.
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS region text;
+
 -- Hourly message counts over every position row: GFW position reports and raw AIS pings
 -- share the table, so this is the recorder's own activity, not a gap series. No DISTINCT
 -- (Timescale continuous aggregates do not allow it); count(*) is already one row per ping.
@@ -45,6 +50,27 @@ SELECT add_continuous_aggregate_policy(
     start_offset => INTERVAL '7 days',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour',
+    if_not_exists => TRUE
+);
+
+-- Per-region message counts at minute resolution: the area strip's sparkline and
+-- messages-per-minute read this instead of re-parsing the recorder's hour files.
+CREATE MATERIALIZED VIEW IF NOT EXISTS ais_minutely
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('1 minute', ts) AS minute,
+       region,
+       count(*) AS msgs
+FROM positions
+GROUP BY time_bucket('1 minute', ts), region
+WITH NO DATA;
+
+SELECT remove_continuous_aggregate_policy('ais_minutely', if_exists => TRUE);
+
+SELECT add_continuous_aggregate_policy(
+    'ais_minutely',
+    start_offset => INTERVAL '3 hours',
+    end_offset => INTERVAL '1 minute',
+    schedule_interval => INTERVAL '1 minute',
     if_not_exists => TRUE
 );
 
