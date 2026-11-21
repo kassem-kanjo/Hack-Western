@@ -10,7 +10,7 @@ from __future__ import annotations
 import gzip
 import json
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -84,8 +84,13 @@ WATCH: dict[str, Any] = {
 
 
 @pytest.fixture(autouse=True)
-def _clear_caches() -> Iterator[None]:
-    """Every test gets its own files; no parsed snapshot or hour may leak between cases."""
+def _clear_caches(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Every test gets its own files; no parsed snapshot or hour may leak between cases.
+
+    ``DATABASE_URL`` is cleared so the default path is the files, never a developer's live
+    Tiger database; the Tiger tests below set it themselves after this fixture runs.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     reset_cache()
     watch.reset_cache()
     areas.reset_cache()
@@ -233,3 +238,88 @@ def test_area_without_a_recording_is_zeroed(snapshot_dir: Path, ais_dir: Path) -
     red_sea = rows["RED_SEA"]
     assert red_sea["msgs_per_min"] == 0.0
     assert red_sea["sparkline"] == [0] * 12
+    assert red_sea["source"] == "files"
+
+
+def _write_baltic_hour(ais_dir: Path) -> None:
+    """Four messages in the newest five minutes, so the file path reports 0.8/min."""
+    _write_hour(
+        ais_dir,
+        "BALTIC_WATCH",
+        "20261121T10",
+        [
+            _position(111111111, _m(10, 4, 0)),
+            _position(111111111, _m(10, 4, 10)),
+            _position(222222222, _m(10, 4, 20)),
+            _position(333333333, _m(10, 0)),
+        ],
+    )
+
+
+def test_unreachable_tiger_falls_back_to_the_files(
+    snapshot_dir: Path, ais_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_baltic_hour(ais_dir)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused@127.0.0.1:1/never")
+
+    def unreachable() -> None:
+        raise ConnectionError("database unreachable")
+
+    monkeypatch.setattr(areas, "_tiger_repo", unreachable)
+
+    with TestClient(app) as client:
+        rows = _by_id(client.get("/api/areas/stats").json())
+
+    baltic = rows["BALTIC_WATCH"]
+    assert baltic["source"] == "files"
+    assert baltic["msgs_per_min"] == 0.8
+    assert baltic["sparkline"] == [0] * 11 + [3]
+
+
+class _FakeTiger:
+    """Minimal repo: one region has minute buckets, the rest are empty."""
+
+    def __init__(self) -> None:
+        self.queries: list[tuple[str, datetime, datetime]] = []
+        self.closed = False
+
+    def minutely(self, region: str, start: datetime, end: datetime) -> list[tuple[datetime, int]]:
+        self.queries.append((region, start, end))
+        if region != "BALTIC_WATCH":
+            return []
+        last_full = end - timedelta(minutes=1)
+        return [(last_full - timedelta(minutes=2), 3), (last_full, 7)]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_tiger_supplies_the_sparkline_and_rate(
+    snapshot_dir: Path, ais_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The files describe a different rate on purpose: the response must come from Tiger.
+    _write_baltic_hour(ais_dir)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused@127.0.0.1:1/never")
+    fake = _FakeTiger()
+    monkeypatch.setattr(areas, "_tiger_repo", lambda: fake)
+
+    with TestClient(app) as client:
+        rows = _by_id(client.get("/api/areas/stats").json())
+        first_queries = len(fake.queries)
+        rows_again = _by_id(client.get("/api/areas/stats").json())
+
+    baltic = rows["BALTIC_WATCH"]
+    assert baltic["source"] == "tiger"
+    assert baltic["msgs_per_min"] == 7.0
+    assert len(baltic["sparkline"]) == 60
+    assert baltic["sparkline"][-1] == 7
+    assert baltic["sparkline"][-3] == 3
+
+    # Empty in Tiger means zero traffic, not a silent fall back to the hour files.
+    assert rows["HORMUZ"]["source"] == "tiger"
+    assert rows["HORMUZ"]["msgs_per_min"] == 0.0
+    assert rows_again["BALTIC_WATCH"]["source"] == "tiger"
+
+    # Readings are cached for 20 s, so the second request adds no queries.
+    assert len(fake.queries) == first_queries
+    assert ("BALTIC_WATCH" in {region for region, _, _ in fake.queries})
