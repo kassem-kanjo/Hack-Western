@@ -20,6 +20,9 @@ edge = [
     "onnxruntime",
     "opencv-python-headless",
 ]
+desktop = [
+    "pywebview>=5.3",
+]
 
 [dependency-groups]
 dev = [

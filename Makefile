@@ -1,4 +1,4 @@
-.PHONY: check lint test web-build dev-api dev-web demo-check snapshot sunday watch
+.PHONY: check lint test web-build dev-api dev-web demo-check snapshot sunday watch app
 
 # The demo gate must run from make's /bin/sh, which may not have uv on PATH.
 UV ?= $(HOME)/.local/bin/uv
@@ -14,6 +14,10 @@ sunday:
 # V3 watch screen (#86): rebuild data/snapshot/watch.json every 5 minutes.
 watch:
 	uv run python scripts/build_watch.py --loop 300
+
+# Native desktop shell (#86): build "Dark Fleet.app" on the Desktop.
+app:
+	bash scripts/make_mac_app.sh
 
 lint:
 	uv run ruff check . && uv run ruff format --check .
