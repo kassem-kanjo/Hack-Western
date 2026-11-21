@@ -24,7 +24,8 @@ import { mountToasts } from "./components/Toasts"; // #184
 import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
 import { renderHormuz } from "./screens/hormuz";
-import { rankCases, renderOverview } from "./screens/overview";
+import { rankCases } from "./screens/overview";
+import { renderEvidence } from "./screens/evidence";
 import { parseLiveRoute, renderLive, type LiveRoute, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
 import { parseWatchRoute, renderWatch, type WatchScreen } from "./screens/watch";
@@ -175,7 +176,7 @@ function route(): void {
 
   const caseId = caseIdFromHash();
   if (caseId === null) {
-    current = renderOverview(app, cases);
+    current = renderEvidence(app, cases);
     return;
   }
 

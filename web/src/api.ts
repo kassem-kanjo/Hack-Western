@@ -86,10 +86,21 @@ export interface ScoreFactor {
   note: string;
 }
 
+/** The matched list entry. The snapshot ships an object; older builds shipped a plain string. */
+export interface SanctionsEntry {
+  caption?: string | null;
+  imo?: string | null;
+  mmsi?: string | null;
+  url?: string | null;
+}
+
 export interface Sanctions {
   match: boolean;
   source: string;
-  entry: string | null;
+  entry: SanctionsEntry | string | null;
+  /** "detained" is a port-detention record, not a sanction. */
+  category?: string | null;
+  note?: string | null;
 }
 
 export interface Source {
@@ -168,6 +179,15 @@ export interface StatsResponse {
   /** Backend that produced the snapshot: Tiger Data (Timescale) or the SQLite cache. */
   source?: "tiger" | "sqlite";
   validation: Validation | null;
+  /** Dates the gap scan covers. */
+  gap_window?: { start: string; end: string };
+  /** Own-track and silence-detector results; keys are absent when the source files are. */
+  own_track?: {
+    hidden_route_inside?: number;
+    hidden_route_total?: number;
+    silence_found_receivers_up?: number;
+    silence_total_receivers_up?: number;
+  };
 }
 
 export type CaseStatusFilter = "candidate" | "ruled_out" | "all";

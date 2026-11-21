@@ -1,0 +1,108 @@
+/* Evidence screen: analyst-console panel (same grammar as Watch): small-caps headers,
+   hairlines, mono numbers, no paragraphs, no pills. Colours and type come from tokens.css. */
+
+.main.ev-main { grid-template-columns: 500px minmax(0, 1fr); }
+.ev-stage { grid-column: 2; }
+
+.ev-panel {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--c-panel);
+  border-right: 1px solid var(--c-line);
+}
+
+.ev-ask {
+  padding: 14px 16px;
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-1);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.ev-block { border-bottom: 1px solid var(--c-line); padding-bottom: 6px; }
+.ev-block h2 {
+  margin: 0;
+  padding: 10px 16px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+.ev-count { color: var(--c-text-3); letter-spacing: 0; text-transform: none; }
+
+/* funnel: big calm numbers, one line each */
+.ev-step {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 16px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ev-step:hover { background: var(--c-panel-raised); }
+.ev-step[aria-pressed="true"] { background: var(--c-panel-raised); border-left-color: var(--c-gap); }
+.ev-step-n {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-1);
+}
+.ev-step-l { font-size: var(--fs-label); color: var(--c-text-2); }
+.ev-dates { color: var(--c-text-3); }
+.ev-step.is-hero .ev-step-n { color: var(--c-gap); }
+.ev-step-pair { display: block; }
+.ev-step.is-sub .ev-step-n { font-size: 18px; color: var(--c-text-2); }
+.ev-step.is-sub { padding-top: 0; }
+
+/* how sure: label | value + one line */
+.ev-fields { display: grid; grid-template-columns: 130px minmax(0, 1fr); margin: 0; padding: 0 16px; }
+.ev-fields dt, .ev-fields dd { margin: 0; padding: 6px 0; border-top: 1px solid var(--c-line); }
+.ev-fields dt:first-of-type, .ev-fields dd:first-of-type { border-top: 0; }
+.ev-fields dt { padding-right: 8px; font-size: 11px; color: var(--c-text-3); }
+.ev-fields dd { font-size: 12px; }
+.ev-val { display: block; font-family: var(--font-mono); font-size: 13px; color: var(--c-text-1); font-variant-numeric: tabular-nums; }
+.ev-note { display: block; color: var(--c-text-3); font-size: 11px; }
+.ev-src { padding: 6px 16px 0; font-family: var(--font-mono); font-size: 10px; color: var(--c-text-3); }
+
+/* case list */
+.ev-list { border-bottom: 0; }
+.ev-cols, .ev-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 44px 64px 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 16px;
+}
+.ev-cols { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c-text-3); border-bottom: 1px solid var(--c-line); }
+.ev-row { border-bottom: 1px solid var(--c-line); font-size: 12px; color: var(--c-text-1); text-decoration: none; }
+.ev-row:hover { background: var(--c-panel-raised); }
+.ev-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-flag { color: var(--c-text-3); font-size: 11px; }
+.ev-num { font-family: var(--font-mono); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.ev-cols .ev-num { font-family: inherit; font-size: inherit; }
+.ev-mark { width: 7px; height: 7px; background: var(--c-gap); }
+.ev-row.is-cleared { color: var(--c-text-3); }
+.ev-row.is-cleared .ev-mark { background: var(--c-text-3); opacity: 0.6; }
+
+/* map overlays */
+.ev-key {
+  position: absolute; left: 12px; top: 12px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; font-size: 11px; color: var(--c-text-2);
+  background: color-mix(in srgb, var(--c-panel) 92%, transparent);
+  border: 1px solid var(--c-line);
+}
+.ev-key-dot { width: 8px; height: 8px; border-radius: 50%; }
+.ev-key-dot.is-open { background: var(--c-gap); }
+.ev-key-dot.is-cleared { background: var(--c-text-3); margin-left: 6px; }
+.ev-key-hint { margin-left: 10px; color: var(--c-text-3); }

@@ -15,8 +15,20 @@ import { isCandidateLive } from "../model/frames";
 import { addDiamondImages } from "./diamonds";
 import { rgba, themeColor } from "./theme";
 
+/** Layer groups the case view can switch on and off. */
+export type CaseLayerGroup = "gap" | "lens" | "likely" | "radar" | "footprint";
+
+const GROUP_LAYERS: Record<CaseLayerGroup, string[]> = {
+  gap: ["track-line", "ends-circle"],
+  lens: ["lens-fill", "lens-line"],
+  likely: ["likely-fill"],
+  radar: ["radar-symbols"],
+  footprint: ["footprint-line"],
+};
+
 export interface CaseMapHandle {
   setFrame(index: number): void;
+  setLayerVisible(group: CaseLayerGroup, visible: boolean): void;
   destroy(): void;
 }
 
@@ -336,8 +348,27 @@ export function mountCaseMap(
 
   setFrame(0);
 
+  const hidden = new Set<CaseLayerGroup>();
+  const applyVisibility = (): void => {
+    if (!ready) return;
+    for (const [group, ids] of Object.entries(GROUP_LAYERS) as [CaseLayerGroup, string[]][]) {
+      for (const id of ids) {
+        map.setLayoutProperty(id, "visibility", hidden.has(group) ? "none" : "visible");
+      }
+    }
+    for (const marker of markers) {
+      marker.getElement().style.display = hidden.has("gap") ? "none" : "";
+    }
+  };
+  map.on("load", applyVisibility);
+
   return {
     setFrame,
+    setLayerVisible(group, visible): void {
+      if (visible) hidden.delete(group);
+      else hidden.add(group);
+      applyVisibility();
+    },
     destroy(): void {
       for (const marker of markers) marker.remove();
       markers.length = 0;

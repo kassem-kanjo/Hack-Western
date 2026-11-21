@@ -1018,3 +1018,30 @@ input.scrubber::-moz-range-thumb {
     animation: none !important;
   }
 }
+
+/* ---------- case map layer panel: switch + one plain line per layer ---------- */
+.layer-panel { max-width: 290px; top: 64px; bottom: auto; right: 12px; }
+.layer-head {
+  padding-bottom: var(--sp-2);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+.layer-row {
+  display: grid;
+  grid-template-columns: 14px 24px 1fr;
+  align-items: start;
+  gap: var(--sp-2);
+  padding: 4px 0;
+  border-top: 1px solid var(--c-line);
+  cursor: pointer;
+}
+.layer-row input { margin: 2px 0 0; accent-color: var(--c-prism-stroke); }
+.layer-row .swatch { margin-top: 4px; }
+.layer-text { display: flex; flex-direction: column; min-width: 0; }
+.layer-name { font-size: var(--fs-label); color: var(--c-text-1); }
+.layer-explain { font-size: var(--fs-caption); color: var(--c-text-3); line-height: 1.35; }
+.swatch.is-footprint { height: 0; border-top: 2px dotted var(--c-prism-stroke); border-radius: 0; }
+.reason-line { font-size: var(--fs-label); color: var(--c-text-1); padding-bottom: var(--sp-2); }
+.reason-n { color: var(--c-gap); }
