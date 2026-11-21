@@ -61,3 +61,12 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     inside minutes when our own recorder heard nothing (start-up and a restart), and the rule refuses to blame a
     ship for our outage. Where receivers were up throughout, it found 55 of 55. Source: docs/validation-tracks.md,
     docs/recall-misses.md (seed 7; the recording grows between runs, so counts differ slightly).
+16. **The strait went darker than its neighbour, and lighter when the guns stopped.** Our own 2-year
+    radar series (Sentinel-1 via Global Fishing Watch, 475 days) puts the share of radar-seen vessels with no
+    matching broadcast in Hormuz at 32% through 2025 and 66% in Mar–Jun 2026, after the 28 Feb 2026 strikes and
+    the strait's closure. The open Gulf of Oman next door, through the same pipeline, went 26% → 46%: the
+    whole region darkened (wartime GPS jamming), but Hormuz rose 14.5 points more (95% CI +2 to +26). At the
+    8 Apr 2026 ceasefire Hormuz fell 63% → 46% while the control rose (DiD −35 points, CI −67 to −2). For 34
+    other dated events a 14-day window is too noisy to say anything, so we claim none of them. Why it matters:
+    a "dark share" alone confounds jamming, traffic collapse and small boats; a control area is what turns
+    a striking chart into evidence. Source: docs/hormuz-validation.md, data/research/hormuz_events.json.
