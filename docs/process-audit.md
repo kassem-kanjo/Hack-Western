@@ -85,3 +85,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 11:** ~90% DeepSeek; Chief: Caddy fix, Tiger date fix, chart fallback + class rename, Devpost Tiger paragraph, loading data into Tiger.
 - **Rule breaks:** none.
 - **Change for next 30 min:** every public claim about a data store gets one live count query before it ships; after any failed make check, rebuild before screenshots. Wave 13 running: demo video script, thought piece #1, demo-check gate.
+
+## Sat 21 Nov, 10:21 ET (audit 13, covers 10:05-10:21)
+- **Went well:** wave 13 merged (#144) with each output used for real: demo-check 8/8 on the demo snapshot, a 62 s video judged from a frame contact sheet, thought piece fact-checked. Issue hygiene: 7 issues closed with evidence after checking the files exist.
+- **Went wrong:** #74 looked done but its report said "No data" (the store was empty when it ran), the same failure as Tiger in audit 12. Re-ran on 268,561 of our own pings: containment 66/72 (91.7%), clean-track false positives 1 in 86.2 vessel-days; the recall test still skipped, and the report printed an absolute local path (username) into a public doc. Not committed; fix lane w14-recall running. One summary query dumped ~1 MB of vessel JSON into my context.
+- **Code share since audit 12:** 100% DeepSeek (Chief: runs, review, issue hygiene).
+- **Rule breaks:** none shipped; the absolute path was caught before commit.
+- **Change for next 30 min:** before closing an issue, open its output and read the result line, not just check the file exists; print summaries with explicit field picks, never whole objects. Lanes: w14-empty (Black Sea empty state), w14-hchart (Hormuz chart on phones), w14-recall.
