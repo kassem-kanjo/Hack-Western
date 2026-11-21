@@ -1,4 +1,4 @@
-# CP1 briefing: Saturday morning (draft 07:35, final numbers at 08:50)
+# CP1 briefing: Saturday morning (final, Sat 21 Nov, 08:50 ET)
 
 ## In one line
 Overnight we turned "dark ships" into a physics-based evidence tool with three theatres, real findings in
@@ -10,14 +10,19 @@ our own data, an honest self-test, and a working console with a presentation mod
    record logs almost none of this inside the strait.
 2. **Live (our own recording since Fri 23:18):** every ship our receivers hear in the Baltic (~4,000 ships),
    Malaysia's EOPL (~800) and the Black Sea, checked by physics:
-   - **GPS spoofing near St Petersburg:** several unrelated ships each jumped tens of km off their route to
-     the same point on land and back (OpenStreetMap-checked).
-   - **Sanctions by IMO:** at least 21 sanctioned/shadow-fleet ships seen in the Baltic in 8 h; off
-     Singapore, shadow-fleet tanker ROCK and sanctioned tanker SHUSHA.
+   - **GPS spoofing near St Petersburg:** 4 unrelated ships each jumped 40-51 km off their route to the same
+     point on land (Vsevolozhsky district, OpenStreetMap-checked) and back. 784 port false alarms and one
+     river-port false alarm were removed by tightening the physics.
+   - **Sanctions by IMO:** at least 21 sanctioned/shadow-fleet ships seen in the Baltic in ~9 h (e.g. tanker
+     GESTIA, listed as "Jaldhara"); off Singapore, shadow-fleet tanker ROCK and sanctioned tanker SHUSHA.
    - Ship-to-ship transfers detected (so far routine refuelling in anchorages; the tool says so).
 3. **Honest self-test:** radar near a dark ship is **no better than chance** (3 pre-registered tests), so we
    never accuse on radar alone; locating a dark ship works (AUC 0.87).
 4. **Patrol unit (QNX-ready):** edge safety core, AI restarts in 0.75 s after being killed.
+
+## What's on screen now
+Hormuz opening view (heat map, 41%), live map (calm markers, vessel cards with sanctions entries),
+event detail with animated physics proof, presentation mode (8 steps, live numbers), README + architecture.
 
 ## How we got here (process)
 ~60 merged PRs, ~30 closed issues, almost all code written by DeepSeek coders and checked by Chief on real

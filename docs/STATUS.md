@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 04:03 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Sat 21 Nov, 08:50 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v3 · briefing: docs/briefings/cp1-sat-morning.md
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
