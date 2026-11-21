@@ -103,16 +103,19 @@ export function timelineFraction(iso: string, window: { start: string; end: stri
 /**
  * The one big figure on each event card, plus its quiet follow-up phrase, so every
  * kind reads at a glance even though its evidence names differ.
+ *
+ * `value` is empty when the evidence does not carry the figure: the caller hides
+ * the block rather than printing a dash that means nothing.
  */
 export function bigNumber(event: LiveEvent): { value: string; tail: string } {
   if (event.kind === "jump") {
     const ratio = num(event.evidence, "ratio");
-    if (ratio === null) return { value: "—", tail: "" };
+    if (ratio === null) return { value: "", tail: "" };
     return { value: `${Math.round(ratio)}×`, tail: "too fast" };
   }
   if (event.kind === "silence") {
     const minutes = num(event.evidence, "minutes");
-    if (minutes === null) return { value: "—", tail: "" };
+    if (minutes === null) return { value: "", tail: "" };
     // Round once to whole minutes first so 239.6 min reads "4 h 0 min", never "3 h 60 min".
     const whole = Math.round(minutes);
     if (whole < 60) return { value: `${whole} min`, tail: "silent" };
@@ -122,25 +125,31 @@ export function bigNumber(event: LiveEvent): { value: string; tail: string } {
   }
   if (event.kind === "clone") {
     const km = num(event.evidence, "separation_km");
-    if (km === null) return { value: "—", tail: "" };
+    if (km === null) return { value: "", tail: "" };
     return { value: `${Math.round(km)} km`, tail: "apart" };
   }
   if (event.kind === "meeting") {
     const minutes = num(event.evidence, "minutes");
-    if (minutes === null) return { value: "—", tail: "" };
+    if (minutes === null) return { value: "", tail: "" };
     return { value: `${Math.round(minutes)} min`, tail: "together" };
   }
+  // Spoof evidence names the ships: n_vessels is authoritative, the list is the fallback.
   const rawVessels = event.evidence["vessels"];
-  const ships = Array.isArray(rawVessels) ? rawVessels.length : num(event.evidence, "count");
-  if (ships === null) return { value: "—", tail: "" };
+  const ships =
+    num(event.evidence, "n_vessels") ??
+    (Array.isArray(rawVessels) ? rawVessels.length : num(event.evidence, "count"));
+  if (ships === null) return { value: "", tail: "" };
   return { value: `${Math.round(ships)} ships`, tail: "one false point" };
 }
 
-/** The name to show for a ship, falling back to its MMSI when the feed has no name. */
+/** What the UI calls a ship the feed has no name for. Never the bare MMSI as a title. */
+export const UNNAMED_VESSEL = "Unnamed vessel";
+
+/** The name to show for a ship, falling back to a described placeholder when the feed has no name. */
 export function vesselName(mmsi: number, vessels: LiveVessel[]): string {
   const vessel = vessels.find((v) => v.mmsi === mmsi);
   const name = vessel?.name?.trim();
-  return name ? name : String(mmsi);
+  return name ? name : UNNAMED_VESSEL;
 }
 
 /**
