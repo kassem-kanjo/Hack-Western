@@ -5,7 +5,9 @@
 The API only ever reads data/snapshot/, so this is the single place where the
 re-ranked case export becomes the frozen v1 shapes. When the re-rank counts table
 is present, its baseline gap count and the case statuses drive the funnel totals;
-without it the builder keeps the old post-rerank totals.
+without it the builder keeps the old post-rerank totals. Every lens frame also gains
+the bridge's k-sigma "likely" contour (clipped to that frame's lens), and stats.json
+gains the validation block read from data/validation/ (nulls when files are missing).
 """
 
 from __future__ import annotations
@@ -16,12 +18,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from shapely.errors import GEOSException
+from shapely.geometry import Polygon
+
+from darkfleet.core.bridge import bridge_ellipse
+from darkfleet.core.geo import Fix
 from darkfleet.core.scoring import score_case
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = ROOT / "data" / "cases" / "cases_v2.json"
 DEFAULT_COUNTS = ROOT / "data" / "cases" / "rerank_counts.json"
+DEFAULT_VALIDATION = ROOT / "data" / "validation"
 DEFAULT_OUT = ROOT / "data" / "snapshot"
+
+# The bridge's fitted drift scale (data/validation/bridge_results.json). The fallback
+# is the value recorded in docs/validation.md, so a missing file degrades the shaded
+# region slightly rather than dropping it.
+DEFAULT_SIGMA_KM_PER_SQRT_H = 21.62
+LIKELY_K = 2.0
+
+VALIDATION_VERDICT = "Radar near dark ships is not better than chance; the bridge locates ships (AUC 0.87)."
+VALIDATION_SOURCE = "docs/validation.md"
 
 
 def _read_cases(path: Path) -> tuple[list[dict[str, Any]], str | None]:
@@ -83,6 +100,144 @@ def _read_counts(path: Path | None) -> dict[str, int] | None:
     return {"baseline_gaps": gaps}
 
 
+def _read_json(path: Path | None) -> dict[str, Any]:
+    """Read one validation JSON; a missing or malformed file is simply an empty block."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _lookup(payload: Any, *keys: str) -> Any:
+    for key in keys:
+        if not isinstance(payload, dict):
+            return None
+        payload = payload.get(key)
+    return payload
+
+
+def _num(payload: Any, *keys: str) -> float | None:
+    """Walk a nested key path and return a plain float, or None if absent/not numeric."""
+    value = _lookup(payload, *keys)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _interval(payload: Any, lo: tuple[str, ...], hi: tuple[str, ...]) -> list[float | None] | None:
+    """A [lo, hi] pair, or None when either end is missing (never a half-interval)."""
+    low, high = _num(payload, *lo), _num(payload, *hi)
+    return [low, high] if low is not None and high is not None else None
+
+
+def read_sigma(directory: Path | None = DEFAULT_VALIDATION) -> float:
+    """Fitted bridge sigma, or the documented default when the validation file is absent."""
+    path = directory / "bridge_results.json" if directory else None
+    value = _num(_read_json(path), "sigma_km_per_sqrt_h")
+    return value if value is not None and value > 0.0 else DEFAULT_SIGMA_KM_PER_SQRT_H
+
+
+def validation_stats(directory: Path | None = DEFAULT_VALIDATION) -> dict[str, Any]:
+    """The stats.json validation block, read from the three pre-registered result files.
+
+    Every number is optional: a missing or half-written result file leaves its fields
+    null instead of failing the snapshot build. The verdict and source are static
+    because they restate docs/validation.md, not a single run.
+    """
+    results = _read_json((directory / "results.json") if directory else None)
+    bridge = _read_json((directory / "bridge_results.json") if directory else None)
+    holdout = _read_json((directory / "holdout_results.json") if directory else None)
+
+    primary = ("null_test", "variants", "primary")
+    holdout_primary = ("primary",)
+    return {
+        "null_ratio": _num(results, *primary, "ratio"),
+        "null_ci": _interval(results, (*primary, "ratio_lo"), (*primary, "ratio_hi")),
+        "null_p": _num(results, *primary, "p_value"),
+        "bridge_auc": _num(bridge, "d_auc", "auc"),
+        "bridge_auc_ci": _interval(bridge, ("d_auc", "lo"), ("d_auc", "hi")),
+        "bridge_radar_ratio": _num(bridge, "c_exceed", "ratio"),
+        "holdout_ratio": _num(holdout, *holdout_primary, "ratio"),
+        "holdout_ci": _interval(holdout, (*holdout_primary, "ratio_lo"), (*holdout_primary, "ratio_hi")),
+        "verdict": VALIDATION_VERDICT,
+        "source": VALIDATION_SOURCE,
+    }
+
+
+def _parse_t(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _position(value: Any) -> tuple[float, float] | None:
+    """A [lon, lat] pair, or None if the value is not a two-number sequence."""
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    lon, lat = value
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (lon, lat)):
+        return None
+    return float(lon), float(lat)
+
+
+def _fixes(case: dict[str, Any]) -> tuple[Fix, Fix] | None:
+    """Rebuild the gap endpoints from the case summary; None when the case is incomplete."""
+    off = case.get("off")
+    on = case.get("on")
+    if not isinstance(off, dict) or not isinstance(on, dict):
+        return None
+    t0, t1 = _parse_t(off.get("t")), _parse_t(on.get("t"))
+    p0, p1 = _position(off.get("pos")), _position(on.get("pos"))
+    if t0 is None or t1 is None or p0 is None or p1 is None:
+        return None
+    return Fix(p0[1], p0[0], t0), Fix(p1[1], p1[0], t1)
+
+
+def _speed_kn(case: dict[str, Any]) -> float | None:
+    value = case.get("speed_cap_kn")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return float(value)
+
+
+def _polygon_json(poly: Polygon) -> dict[str, Any] | None:
+    """GeoJSON Polygon at ~0.1 m precision; None for an empty shape so JSON stays valid."""
+    if poly.is_empty:
+        return None
+    ring = [[round(float(x), 6), round(float(y), 6)] for x, y in poly.exterior.coords]
+    return {"type": "Polygon", "coordinates": [ring]}
+
+
+def _likely(fixes: tuple[Fix, Fix] | None, sigma: float, v_kn: float | None, when: Any) -> Any:
+    """The k-sigma bridge contour for one frame, clipped to the lens when the cap is known."""
+    t = _parse_t(when)
+    if fixes is None or t is None:
+        return None
+    try:
+        poly = bridge_ellipse(*fixes, sigma, t, v_kn=v_kn, k=LIKELY_K)
+    except (ValueError, TypeError, ArithmeticError, GEOSException):
+        return None  # one bad frame must not cost the whole snapshot
+    return _polygon_json(poly)
+
+
+def add_likely_contours(case: dict[str, Any], sigma: float) -> None:
+    """Attach the "most likely" region to every lens frame of one case, in place."""
+    frames = case.get("lens_frames")
+    if not isinstance(frames, list):
+        return
+    fixes = _fixes(case)
+    v_kn = _speed_kn(case)
+    for frame in frames:
+        if isinstance(frame, dict):
+            frame["likely"] = _likely(fixes, sigma, v_kn, frame.get("t"))
+
+
 def compute_totals(
     cases: list[dict[str, Any]],
     gaps_scanned: int,
@@ -129,11 +284,15 @@ def build(
     out: Path,
     gaps_scanned: int,
     counts_path: Path | None = DEFAULT_COUNTS,
+    validation_dir: Path | None = DEFAULT_VALIDATION,
 ) -> dict[str, Any]:
     """Write both snapshot files and return the totals for the caller to print."""
     cases, generated_at = _read_cases(source)
     cases = _score_cases(cases)
     totals = compute_totals(cases, gaps_scanned, _read_counts(counts_path))
+    sigma = read_sigma(validation_dir)
+    for case in cases:
+        add_likely_contours(case, sigma)
     payload = {
         "generated_at": generated_at
         or datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -144,7 +303,7 @@ def build(
     out.mkdir(parents=True, exist_ok=True)
     (out / "cases.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     (out / "stats.json").write_text(
-        json.dumps({"dark_hours_daily": [], "validation": None}, indent=2) + "\n",
+        json.dumps({"dark_hours_daily": [], "validation": validation_stats(validation_dir)}, indent=2) + "\n",
         encoding="utf-8",
     )
     return totals
