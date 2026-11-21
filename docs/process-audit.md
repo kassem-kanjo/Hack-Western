@@ -99,3 +99,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 13:** ~85% DeepSeek; Chief: in-scope recall split (small core change), README words, insight #15.
 - **Rule breaks:** a number written from memory (fixed before anyone saw it).
 - **Change for next 30 min:** numbers in public docs are pasted from the generated file in the same command that edits the doc, never retyped.
+
+## Sat 21 Nov, 11:20 ET (audit 15, covers 10:55-11:20)
+- **Went well:** thought piece #2 drafted by DeepSeek and fact-checked line by line (one wrong count fixed, one slogan line rewritten) before merge; health green all hour; numbers in public docs now come from generated files only.
+- **Went wrong:** nothing shipped wrong. Kassem has not answered the CP1 briefing (sent 08:50), so deploy, Entire, GoDaddy and the QNX Pi are still blocked; the QNX cut-off is 12:00.
+- **Code share since audit 14:** ~95% DeepSeek; Chief: two-line edit to the piece, README figure fix.
+- **Rule breaks:** none.
+- **Change for next 30 min:** w17 builds `make sunday` (rebuild, Tiger refresh, validation, demo-check, generated numbers sheet) so Sunday's numbers are pasted, not retyped. Product scope for V2 is done; remaining lanes are polish or gated on Kassem, so I am spending fewer tokens per cycle until CP3 (15:00).
