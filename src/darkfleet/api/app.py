@@ -21,6 +21,7 @@ from starlette.staticfiles import StaticFiles
 from darkfleet.api.edge import router as edge_router
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
+from darkfleet.api.watch import router as watch_router
 
 # Only these CaseDetail fields belong in a list response; the rest are detail-only.
 CASE_SUMMARY_FIELDS = (
@@ -51,6 +52,7 @@ app.add_middleware(
 app.include_router(live_router)
 app.include_router(hormuz_router)
 app.include_router(edge_router)
+app.include_router(watch_router)
 
 
 def data_dir() -> Path:

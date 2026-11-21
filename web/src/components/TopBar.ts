@@ -7,16 +7,17 @@ export type ConsoleMode = "SNAPSHOT" | "LIVE" | "ERROR";
 export const DEFAULT_LIVE_REGION = "BALTIC_WATCH";
 
 /**
- * Header (01-nav): brand, three places (Global, Live, Patrol unit), Present, and one mode
- * badge in the same slot on every screen. The case file stays reachable by clicking a case
- * rather than as a top-level tab, per design/v2/00-ia.md.
+ * Header: brand, the two places (Watch, Patrol unit), Present, and one mode badge in the
+ * same slot on every screen. The case file stays reachable by clicking a case rather than
+ * as a top-level tab, per design/v2/00-ia.md. Global and Live left the nav with the V3
+ * Watch screen (#86); their routes and files are still there for presentation mode.
  *
  * `caseHref` and `demoHref` are accepted but ignored: old screens still pass them, and
  * removing the props there is outside this change. No header renders a "Case file" tab or
  * a "Start demo" button.
  */
 export function topBar(opts: {
-  active: "overview" | "case" | "live" | "patrol";
+  active: "overview" | "case" | "live" | "patrol" | "watch";
   mode: ConsoleMode;
   generatedAt: string | null;
   caseHref?: string | null;
@@ -26,10 +27,11 @@ export function topBar(opts: {
   const tab = (label: string, href: string, isActive: boolean): HTMLElement =>
     h("a", { class: `tab${isActive ? " is-active" : ""}`, href }, label);
 
-  const liveHref = `#/live/${opts.liveRegion ?? DEFAULT_LIVE_REGION}`;
+  // The overview and the case file are the same place as far as the bar is
+  // concerned: both are under Watch now.
+  const watchActive = opts.active === "watch" || opts.active === "overview" || opts.active === "case";
   const tabs = [
-    tab("Global", "#/", opts.active === "overview" || opts.active === "case"),
-    tab("Live", liveHref, opts.active === "live"),
+    tab("Watch", "#/", watchActive),
     tab("Patrol unit", "#/patrol", opts.active === "patrol"),
   ];
 

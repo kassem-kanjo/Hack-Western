@@ -25,6 +25,7 @@ import { renderHormuz } from "./screens/hormuz";
 import { rankCases, renderOverview } from "./screens/overview";
 import { parseLiveRoute, renderLive, type LiveRoute, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
+import { parseWatchRoute, renderWatch, type WatchScreen } from "./screens/watch";
 import { initPresent } from "./present/present";
 
 // Phone overrides go last on purpose: they must outrank the stylesheets the
@@ -65,6 +66,9 @@ let current: Screen | null = null;
 
 /** The mounted live screen and its region. Event-only hash changes call select() on it, no re-render. */
 let currentLive: { region: string; screen: LiveScreen } | null = null;
+
+/** The mounted watch screen. Alert-only hash changes call select() on it, keeping the map. */
+let currentWatch: WatchScreen | null = null;
 
 // Bumped on every navigation. A case-detail fetch that resolves after the user
 // has moved on must not replace the screen they are looking at now.
@@ -117,7 +121,15 @@ function caseIdFromHash(): string | null {
 }
 
 function route(): void {
-  // Live and patrol do not need the cases snapshot, so they route before the loading gate.
+  // Watch, live and patrol do not need the cases snapshot, so they route before
+  // the loading gate. "#/" is Watch now: the world view of every ship.
+  const watch = parseWatchRoute(location.hash);
+  if (watch !== null && currentWatch !== null) {
+    // Same screen, only the selected alert changed: keep the map and the camera.
+    currentWatch.select(watch.alertId);
+    return;
+  }
+
   const live = liveFromHash();
   if (live !== null && currentLive !== null && currentLive.region === live.region) {
     // Same region, only the selected event changed: keep the map and the list alive.
@@ -131,8 +143,15 @@ function route(): void {
   const previous = current;
   currentLive?.screen.destroy();
   currentLive = null;
+  currentWatch?.destroy();
+  currentWatch = null;
   current = null;
   previous?.destroy();
+
+  if (watch !== null) {
+    currentWatch = renderWatch(app, watch);
+    return;
+  }
 
   if (live !== null) {
     currentLive = { region: live.region, screen: renderLive(app, live) };
