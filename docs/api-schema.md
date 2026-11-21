@@ -33,9 +33,9 @@ check; keep it, the UI shows why), `plain` (no evidence either way).
 ```json
 { "speed_cap_kn": 16.1, "speed_basis": "cargo service speed 14 kn x 1.15 (docs/research.md)",
   "straight_line_kn": 10.8,
-  "footprint": GeoJSON Polygon,
-  "lens_frames": [ { "t": "...Z", "frac": 0.0, "polygon": GeoJSON Polygon,
-                     "likely": GeoJSON Polygon | null }, ... ],   // 24 frames
+  "footprint": GeoJSON Polygon | MultiPolygon,
+  "lens_frames": [ { "t": "...Z", "frac": 0.0, "polygon": GeoJSON Polygon | MultiPolygon,
+                     "likely": GeoJSON Polygon | MultiPolygon | null }, ... ],   // 24 frames
   "candidates": [ { "pos": [-50.83, 4.03], "cell_deg": 0.01, "day": "2026-09-12",
                     "scene_time": "2026-09-12T09:21:00Z" | null, "scene_source": "copernicus-stac" | null,
                     "lens_at_scene": GeoJSON Polygon | null, "inside": true, "slack": 0.42,
@@ -52,6 +52,10 @@ check; keep it, the UI shows why), `plain` (no evidence either way).
 `lens_frames[].likely`: the k=2 (≈95%) Brownian-bridge contour at that frame, clipped to the space-time lens; `null`
 when the contour cannot be drawn (frame outside the gap or bad geometry). It is the "most likely" shade under the
 lens, not a measured track.
+
+`footprint`, `lens_frames[].polygon` and `lens_frames[].likely` are clipped to water against a coarse 50 m
+coastline, so any of them may be a `MultiPolygon` when a zone crosses a headland or island (and `null` when the
+whole zone falls on land). Cases built with clipping also carry the matching caveat.
 
 ## GET /api/stats
 ```json

@@ -1,6 +1,8 @@
 """Build the read-only API snapshot from the case export.
 
-    uv run python scripts/build_snapshot.py [--gaps-scanned 5624] [--counts data/cases/rerank_counts.json]
+    uv run python scripts/build_snapshot.py [--gaps-scanned 5624]
+        [--counts data/cases/rerank_counts.json]
+        [--land web/public/basemap/land.geojson]
 
 The API only ever reads data/snapshot/, so this is the single place where the
 re-ranked case export becomes the frozen v1 shapes. When the re-rank counts table
@@ -8,6 +10,8 @@ is present, its baseline gap count and the case statuses drive the funnel totals
 without it the builder keeps the old post-rerank totals. Every lens frame also gains
 the bridge's k-sigma "likely" contour (clipped to that frame's lens), and stats.json
 gains the validation block read from data/validation/ (nulls when files are missing).
+When a land polygon is available every footprint, lens and likely zone is clipped to
+water, and each case gains the matching caveat.
 """
 
 from __future__ import annotations
@@ -19,17 +23,24 @@ from pathlib import Path
 from typing import Any
 
 from shapely.errors import GEOSException
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, mapping, shape
+from shapely.geometry.base import BaseGeometry
 
 from darkfleet.core.bridge import bridge_ellipse
 from darkfleet.core.geo import Fix
 from darkfleet.core.scoring import score_case
+from darkfleet.core.water import clip_to_water, load_land
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = ROOT / "data" / "cases" / "cases_v2.json"
 DEFAULT_COUNTS = ROOT / "data" / "cases" / "rerank_counts.json"
 DEFAULT_VALIDATION = ROOT / "data" / "validation"
+DEFAULT_LAND = ROOT / "web" / "public" / "basemap" / "land.geojson"
 DEFAULT_OUT = ROOT / "data" / "snapshot"
+
+WATER_CAVEAT = (
+    "Zones are clipped to water using a coarse 50 m coastline; the validation tests used unclipped zones."
+)
 
 # The bridge's fitted drift scale (data/validation/bridge_results.json). The fallback
 # is the value recorded in docs/validation.md, so a missing file degrades the shaded
@@ -238,6 +249,42 @@ def add_likely_contours(case: dict[str, Any], sigma: float) -> None:
             frame["likely"] = _likely(fixes, sigma, v_kn, frame.get("t"))
 
 
+def _clip_geojson(value: Any, land: BaseGeometry) -> dict[str, Any] | None:
+    """Clip one GeoJSON geometry to water; None for an empty or unusable shape."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        geom = shape(value)
+    except (AttributeError, KeyError, TypeError, ValueError, GEOSException):
+        return None
+    clipped = clip_to_water(geom, land)
+    return None if clipped.is_empty else mapping(clipped)
+
+
+def clip_case_to_water(case: dict[str, Any], land: BaseGeometry) -> None:
+    """Clip footprint and every frame's lens/likely zone to water, in place.
+
+    A MultiPolygon is allowed: a lens crossing a headland legitimately becomes two
+    pieces. The caveat is added exactly once per case.
+    """
+    if "footprint" in case:
+        case["footprint"] = _clip_geojson(case.get("footprint"), land)
+    frames = case.get("lens_frames")
+    if isinstance(frames, list):
+        for frame in frames:
+            if not isinstance(frame, dict):
+                continue
+            for key in ("polygon", "likely"):
+                if key in frame:
+                    frame[key] = _clip_geojson(frame.get(key), land)
+    caveats = case.get("caveats")
+    if not isinstance(caveats, list):
+        caveats = []
+        case["caveats"] = caveats
+    if WATER_CAVEAT not in caveats:
+        caveats.append(WATER_CAVEAT)
+
+
 def compute_totals(
     cases: list[dict[str, Any]],
     gaps_scanned: int,
@@ -285,14 +332,22 @@ def build(
     gaps_scanned: int,
     counts_path: Path | None = DEFAULT_COUNTS,
     validation_dir: Path | None = DEFAULT_VALIDATION,
+    land: Path | None = None,
 ) -> dict[str, Any]:
-    """Write both snapshot files and return the totals for the caller to print."""
+    """Write both snapshot files and return the totals for the caller to print.
+
+    `land` is optional so programmatic callers that do not need coastal clipping keep
+    the historical behaviour; the CLI passes the default Natural Earth file.
+    """
     cases, generated_at = _read_cases(source)
     cases = _score_cases(cases)
     totals = compute_totals(cases, gaps_scanned, _read_counts(counts_path))
     sigma = read_sigma(validation_dir)
+    land_geom = load_land(land) if land is not None and Path(land).is_file() else None
     for case in cases:
         add_likely_contours(case, sigma)
+        if land_geom is not None:
+            clip_case_to_water(case, land_geom)
     payload = {
         "generated_at": generated_at
         or datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -316,12 +371,13 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--gaps-scanned", type=int, default=5624)
     parser.add_argument("--counts", type=Path, default=DEFAULT_COUNTS)
+    parser.add_argument("--land", type=Path, default=DEFAULT_LAND)
     args = parser.parse_args()
 
     if not args.source.is_file():
         parser.error(f"missing cases export: {args.source}")
 
-    totals = build(args.source, args.out, args.gaps_scanned, args.counts)
+    totals = build(args.source, args.out, args.gaps_scanned, args.counts, land=args.land)
     used = args.counts if args.counts.is_file() else "none (legacy totals)"
     print(f"wrote {args.out / 'cases.json'} and {args.out / 'stats.json'} from counts {used}: {totals}")
 
