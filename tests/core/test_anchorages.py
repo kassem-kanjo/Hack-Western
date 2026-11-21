@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from darkfleet.core import anchorages
-from darkfleet.core.anchorages import ANCHORAGES, BOUNDARY_NOTE, context_for
+from darkfleet.core.anchorages import (
+    ANCHORAGES,
+    BOUNDARY_NOTE,
+    STS_HOTSPOTS,
+    context_for,
+    sts_hotspot_for,
+)
+
+STS_NOTE = "known ship-to-ship transfer area for sanctioned oil (approximate box)"
 
 
 def test_singapore_eastern_point_is_a_bunkering_anchorage() -> None:
@@ -53,3 +61,35 @@ def test_every_box_is_well_formed() -> None:
         assert min_lat < max_lat
         assert anchorage["kind"] in {"anchorage", "bunkering"}
         assert anchorage["note"] == BOUNDARY_NOTE
+
+
+def test_eopl_is_not_treated_as_a_routine_anchorage() -> None:
+    # The EOPL box used to sit in ANCHORAGES, which discounted meetings there as bunkering.
+    # It is a known sanctioned-oil transfer area, so context_for must not match it.
+    assert context_for(1.35, 104.5) is None
+    assert all(entry["name"] != "Johor/EOPL (Malaysia)" for entry in ANCHORAGES)
+    assert all(entry["bbox"] != [104.30, 1.25, 104.75, 1.45] for entry in ANCHORAGES)
+
+
+def test_eopl_is_a_ship_to_ship_hotspot() -> None:
+    hotspot = sts_hotspot_for(1.35, 104.5)
+
+    assert hotspot is not None
+    assert hotspot["name"] == "EOPL"
+    assert hotspot["bbox"] == [104.30, 1.25, 104.75, 1.45]
+    assert hotspot["kind"] == "sts"
+    assert hotspot["note"] == STS_NOTE
+
+
+def test_sts_hotspot_edges_are_inside_and_open_water_is_not() -> None:
+    assert sts_hotspot_for(1.25, 104.30) is not None
+    assert sts_hotspot_for(58.0, 19.0) is None
+
+
+def test_every_sts_hotspot_is_well_formed() -> None:
+    for hotspot in STS_HOTSPOTS:
+        min_lon, min_lat, max_lon, max_lat = hotspot["bbox"]
+        assert min_lon < max_lon
+        assert min_lat < max_lat
+        assert hotspot["kind"] == "sts"
+        assert hotspot["note"] == STS_NOTE

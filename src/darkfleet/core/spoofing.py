@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from statistics import median
 from typing import Any
@@ -63,6 +64,24 @@ DEFAULT_CAP_KN = max_speed_knots("default")
 against the default cap. The rule is written per vessel so a caller that later learns the class
 only has to replace this one lookup.
 """
+
+
+@dataclass(frozen=True)
+class Teleport:
+    """One qualifying out-and-back visit and the two impossible legs that prove it.
+
+    Keeping the legs with the visit means the evidence for an event is taken from the
+    detour that qualified the vessel, not from whatever fixes happen to sit inside the
+    final disk. The latter can include ordinary reports from a different visit, or the
+    tail of a track with no exit leg at all.
+    """
+
+    segment: tuple[Ping, ...]
+    before: Ping
+    after: Ping
+    jump_in_kn: float
+    jump_out_kn: float
+    offset_km: float
 
 
 def _implied_kn(km: float, seconds: float) -> float:
@@ -115,7 +134,7 @@ def _segments(track: Sequence[Ping], radius_km: float) -> list[list[Ping]]:
     return segments
 
 
-def _teleport_segments(track: Sequence[Ping], radius_km: float) -> list[list[Ping]]:
+def _teleport_segments(track: Sequence[Ping], radius_km: float) -> list[Teleport]:
     """Runs of fixes that a vessel jumped into and back out of impossibly fast.
 
     The two legs are measured from the fix before the visit and to the fix after it. Both must be
@@ -123,11 +142,14 @@ def _teleport_segments(track: Sequence[Ping], radius_km: float) -> list[list[Pin
     impossible leg can be a bad receiver or a track boundary, while an impossible leg in *and* out
     is a detour that never happened. A visit at the start or end of a track has no second leg, so
     it cannot be called out-and-back and is skipped.
+
+    Each result carries the visit together with both legs, so an event can quote the evidence of
+    the qualifying detour rather than recomputing it from unrelated fixes in the finished disk.
     """
     segments = _segments(track, radius_km)
     flat = [ping for segment in segments for ping in segment]
     limit_kn = SPEED_FACTOR * DEFAULT_CAP_KN
-    outliers: list[list[Ping]] = []
+    outliers: list[Teleport] = []
     start = 0
     for segment in segments:
         prev = flat[start - 1] if start > 0 else None
@@ -145,9 +167,20 @@ def _teleport_segments(track: Sequence[Ping], radius_km: float) -> list[list[Pin
         out_s = (nxt.t - last.t).total_seconds()
         if in_s <= 0 or out_s <= 0:
             continue
-        if _implied_kn(in_km, in_s) <= limit_kn or _implied_kn(out_km, out_s) <= limit_kn:
+        jump_in = _implied_kn(in_km, in_s)
+        jump_out = _implied_kn(out_km, out_s)
+        if jump_in <= limit_kn or jump_out <= limit_kn:
             continue
-        outliers.append(segment)
+        outliers.append(
+            Teleport(
+                segment=tuple(segment),
+                before=prev,
+                after=nxt,
+                jump_in_kn=jump_in,
+                jump_out_kn=jump_out,
+                offset_km=_segment_offset_km(track, segment),
+            )
+        )
     return outliers
 
 
@@ -282,59 +315,56 @@ def _severity(n_vessels: int, on_land: bool) -> float:
     return round(min(1.0, sharing + (0.2 if on_land else 0.0)), 3)
 
 
-def _leg_speed(a: Ping, b: Ping) -> float | None:
-    """Implied speed from ``a`` to ``b`` in knots, or None when the two fixes share an instant."""
-    seconds = (b.t - a.t).total_seconds()
-    if seconds <= 0:
-        return None
-    return _implied_kn(distance_km(a.lat, a.lon, b.lat, b.lon), seconds)
-
-
-def _track_neighbours(track: Sequence[Ping], reports: Sequence[Ping]) -> tuple[Ping | None, Ping | None]:
-    """The fixes just before the first visit and just after the last visit in a track."""
-    ordered = sorted(track, key=lambda p: p.t)
-    first, last = reports[0], reports[-1]
-    before = after = None
-    for index, ping in enumerate(ordered):
-        if ping is first or ping == first:
-            before = ordered[index - 1] if index > 0 else None
-            break
-    for index, ping in enumerate(ordered):
-        if ping is last or ping == last:
-            after = ordered[index + 1] if index + 1 < len(ordered) else None
-            break
-    return before, after
-
-
 def _event_from_core(
     core: Sequence[Ping],
     lat: float,
     lon: float,
-    tracks: Mapping[int, Sequence[Ping]],
+    teleports: Sequence[Teleport],
     land: BaseGeometry | None,
     min_inland_km: float,
+    radius_km: float,
 ) -> Event:
-    """Turn one cluster's reports into the single Event the UI shows for that ghost point."""
+    """Turn one cluster's reports into the single Event the UI shows for that ghost point.
+
+    Only vessels with a *qualifying* out-and-back visit inside the disk are listed, and each
+    one quotes the legs and offset of that visit. Ordinary reports that happen to fall within
+    the disk are not spoofing evidence by themselves, and a vessel whose visit was qualified
+    somewhere else in the same component must not inherit a null or plausible leg from here.
+    """
     by_mmsi: dict[int, list[Ping]] = {}
     for ping in core:
         by_mmsi.setdefault(ping.mmsi, []).append(ping)
 
+    visits: dict[int, list[Teleport]] = {}
+    for teleport in teleports:
+        at_point = any(distance_km(lat, lon, ping.lat, ping.lon) <= radius_km for ping in teleport.segment)
+        if at_point:
+            visits.setdefault(teleport.segment[0].mmsi, []).append(teleport)
+
     vessels: list[dict[str, Any]] = []
     for mmsi, reports in by_mmsi.items():
+        options = visits.get(mmsi)
+        if not options:
+            continue
         reports = sorted(reports, key=lambda p: p.t)
-        before, after = _track_neighbours(tracks.get(mmsi, reports), reports)
-        jump_in = _leg_speed(before, reports[0]) if before is not None else None
-        jump_out = _leg_speed(reports[-1], after) if after is not None else None
-        offsets = [distance_km(lat, lon, ping.lat, ping.lon) for ping in (before, after) if ping is not None]
+        # A vessel can be fed the same false position twice; report the visit nearest this
+        # centre, with the earliest one breaking a tie, so the output is deterministic.
+        visit = min(
+            options,
+            key=lambda item: (
+                min(distance_km(lat, lon, ping.lat, ping.lon) for ping in item.segment),
+                item.segment[0].t,
+            ),
+        )
         vessels.append(
             {
                 "mmsi": mmsi,
                 "n_reports": len(reports),
                 "first": reports[0].t,
                 "last": reports[-1].t,
-                "jump_in_kn": round(jump_in, 1) if jump_in is not None else None,
-                "jump_out_kn": round(jump_out, 1) if jump_out is not None else None,
-                "offset_km": round(min(offsets), 1) if offsets else 0.0,
+                "jump_in_kn": round(visit.jump_in_kn, 1),
+                "jump_out_kn": round(visit.jump_out_kn, 1),
+                "offset_km": round(visit.offset_km, 1),
             }
         )
     vessels.sort(key=lambda row: (row["first"], row["mmsi"]))
@@ -404,14 +434,24 @@ def _event_from_core(
 
 
 def _segment_offset_km(track: Sequence[Ping], segment: Sequence[Ping]) -> float:
-    """How far the teleported visit lies from the vessel's real track (the fixes before and after)."""
-    ordered = list(track)
-    i = ordered.index(segment[0])
-    j = ordered.index(segment[-1])
-    ends = [ordered[k] for k in (i - 1, j + 1) if 0 <= k < len(ordered)]
-    if not ends:
-        return 0.0
-    return min(distance_km(segment[0].lat, segment[0].lon, e.lat, e.lon) for e in ends)
+    """How far the teleported visit lies from the vessel's real track (the fixes before and after).
+
+    The offset is the shorter of the two legs that bracket the visit, so a vessel whose real
+    track runs past the point between visits still gets the distance of the detour that was
+    actually measured. Identity, not equality, locates the visit because a track may hold two
+    identical ``Ping`` values at different points in the sequence.
+    """
+    ordered = sorted(track, key=lambda p: p.t)
+    first, last = segment[0], segment[-1]
+    legs: list[float] = []
+    for index, ping in enumerate(ordered):
+        if ping is first and index > 0:
+            before = ordered[index - 1]
+            legs.append(distance_km(before.lat, before.lon, first.lat, first.lon))
+        if ping is last and index + 1 < len(ordered):
+            after = ordered[index + 1]
+            legs.append(distance_km(last.lat, last.lon, after.lat, after.lon))
+    return min(legs) if legs else 0.0
 
 
 def ghost_points(
@@ -438,7 +478,8 @@ def ghost_points(
     holds ``min_vessels`` distinct ships are visited, so cost grows with the number of outlier
     cells rather than with the square of the fleet. A candidate component becomes an event when
     its densest ``radius_m`` disk holds at least ``min_vessels`` distinct MMSIs among the outlier
-    fixes; every report inside that disk then joins the event's vessel list.
+    fixes; every vessel whose qualifying visit touches that disk is listed, and its evidence is
+    taken from that visit rather than from whichever reports happen to sit in the disk.
 
     ``land`` never triggers an event. When supplied, fixes more than ``min_inland_km`` inside the
     coastline are reported as extra evidence (``on_land`` / ``inland_km``) on an event that the
@@ -456,13 +497,14 @@ def ghost_points(
         all_cells.setdefault(_cell(ping.lat, ping.lon), []).append(ping)
 
     radius_km = radius_m / 1000.0
-    outliers = []
+    teleports: list[Teleport] = []
     for track in tracks.values():
-        for segment in _teleport_segments(track, radius_km):
-            if _segment_offset_km(track, segment) >= min_offset_km:
-                outliers.extend(segment)
-    if not outliers:
+        for teleport in _teleport_segments(track, radius_km):
+            if teleport.offset_km >= min_offset_km:
+                teleports.append(teleport)
+    if not teleports:
         return []
+    outliers = [ping for teleport in teleports for ping in teleport.segment]
 
     outlier_cells: dict[tuple[int, int], list[Ping]] = {}
     for ping in outliers:
@@ -503,7 +545,12 @@ def ghost_points(
         nearby = [ping for ping in nearby if ping.mmsi in teleported]
         if len({ping.mmsi for ping in nearby}) < min_vessels:
             continue
-        events.append(_event_from_core(nearby, lat, lon, tracks, land, min_inland_km))
+        event = _event_from_core(nearby, lat, lon, teleports, land, min_inland_km, radius_km)
+        # Evidence is now built from qualifying visits only, which can be fewer than the
+        # vessels that merely have a report in the disk; keep the sharing threshold honest.
+        if int(event.evidence["n_vessels"]) < min_vessels:
+            continue
+        events.append(event)
 
     return sorted(events, key=lambda event: (event.start, event.mmsi, event.lat, event.lon))
 

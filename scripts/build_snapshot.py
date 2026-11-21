@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,18 @@ LIKELY_K = 2.0
 
 VALIDATION_VERDICT = "Radar near dark ships is not better than chance; the bridge locates ships (AUC 0.87)."
 VALIDATION_SOURCE = "docs/validation.md"
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON through a sibling ``.tmp`` file so readers never see a partial snapshot.
+
+    The API reads these files directly, so a crash mid-write would serve truncated JSON.
+    ``os.replace`` swaps the finished file in atomically on the same filesystem.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _read_cases(path: Path) -> tuple[list[dict[str, Any]], str | None]:
@@ -392,11 +405,10 @@ def build(
         "cases": cases,
     }
 
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "cases.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    (out / "stats.json").write_text(
-        json.dumps({"dark_hours_daily": [], "validation": validation_stats(validation_dir)}, indent=2) + "\n",
-        encoding="utf-8",
+    _write_json(out / "cases.json", payload)
+    _write_json(
+        out / "stats.json",
+        {"dark_hours_daily": [], "validation": validation_stats(validation_dir)},
     )
     return totals
 

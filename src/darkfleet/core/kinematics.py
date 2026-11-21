@@ -310,6 +310,14 @@ def silences(
                 f"receivers within {_DEFAULT_LOCAL_RADIUS_KM:.0f} km kept hearing "
                 f"{local_heard} other ships the whole time."
             )
+        explanation = explanation.rstrip(".")
+        explanation += f"; it reappeared {km:.1f} km from where it went quiet"
+        if km < 2.0:
+            # A ship that reappears almost exactly where it went quiet may just have stopped
+            # reporting while berthed; that is weaker evidence of a deliberate switch-off.
+            severity = round(severity * 0.5, 3)
+            explanation += " (it may simply have stopped)"
+        explanation += "."
         evidence: dict[str, Any] = {
             "minutes": round(minutes, 1),
             "last_lat": last.lat,
@@ -317,6 +325,7 @@ def silences(
             "next_lat": nxt.lat,
             "next_lon": nxt.lon,
             "distance_km": round(km, 1),
+            "moved_km": round(km, 1),
             "implied_kn": round(implied_kn, 1),
             "coverage_min_msgs": _coverage_floor(last.t, nxt.t, coverage),
         }
@@ -382,6 +391,12 @@ def jumps(track: Sequence[Ping], cap_kn: float, *, min_km: float = 5.0, factor: 
                     "cap_kn": round(cap_kn, 2),
                     "ratio": round(ratio, 2),
                     "factor": factor,
+                    # Both ends, so a ghost-point filter can drop a jump that leaves a false fix
+                    # as well as one that arrives at it (`lat`/`lon` only holds the arrival).
+                    "last_lat": last.lat,
+                    "last_lon": last.lon,
+                    "next_lat": nxt.lat,
+                    "next_lon": nxt.lon,
                 },
             )
         )

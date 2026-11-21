@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -101,6 +102,18 @@ def _snapshot_files(out_dir: Path) -> list[Path]:
     files.extend(sorted(out_dir.glob("live_*.json")))
     files.extend([out_dir / "hormuz_unseen.json", out_dir / "hormuz_history.json"])
     return [path for path in files if path.is_file()]
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON through a sibling ``.tmp`` file so readers never see a partial manifest.
+
+    Leftover ``.tmp`` files from a crashed run are harmless: the next successful build
+    replaces the target atomically, and the API only ever reads the final name.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _present(path: Path) -> bool:
@@ -298,7 +311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "built_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "datasets": entries,
     }
-    (out_dir / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    _write_json(out_dir / MANIFEST, manifest)
     _print_table(entries)
 
     missing = _missing(out_dir)

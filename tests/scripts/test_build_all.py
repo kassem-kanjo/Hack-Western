@@ -124,6 +124,25 @@ def test_existing_gfw_file_is_kept_when_the_builder_fails(tmp_path: Path, monkey
     assert "kept existing" in capsys.readouterr().err
 
 
+def test_manifest_is_written_through_a_tmp_file_then_replaced(tmp_path: Path, monkeypatch) -> None:
+    data = _prepare(tmp_path, monkeypatch)
+    manifest = data / "snapshot" / "manifest.json"
+    calls: list[tuple[Path, Path]] = []
+    real_replace = build_all.os.replace
+
+    def record(src, dst):
+        calls.append((Path(src), Path(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(build_all.os, "replace", record)
+
+    assert build_all.main(["--data-dir", str(data), "--regions", REGION]) == 0
+
+    assert calls == [(manifest.with_suffix(".tmp"), manifest)]
+    assert not manifest.with_suffix(".tmp").exists()
+    assert json.loads(manifest.read_text(encoding="utf-8"))["datasets"]
+
+
 def test_missing_region_folder_is_skipped(tmp_path: Path, monkeypatch, capsys) -> None:
     data = _prepare(tmp_path, monkeypatch)
 

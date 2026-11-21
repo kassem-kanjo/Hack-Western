@@ -13,10 +13,10 @@
 
 import "./present.css";
 
-import { fetchCases, fetchLiveEvents, fetchLiveSummary, fetchStats } from "../api";
+import { fetchCases, fetchLiveEvents, fetchLiveSummary, fetchLiveVessels, fetchStats } from "../api";
 import { h } from "../components/dom";
-import type { LiveEvent } from "../model/live";
-import { unusualCount } from "../model/liveFacts";
+import type { LiveEvent, LiveVessel, LiveWatchlistEntry } from "../model/live";
+import { unusualCount, vesselName, watchlistAlerts, windowHours } from "../model/liveFacts";
 import { PRESENT_STEPS, type PresentCaption, type PresentStep, type PresentToken } from "./steps";
 
 const TOTAL = PRESENT_STEPS.length;
@@ -34,6 +34,13 @@ const EVENT_COUNT_KEYS = ["silences", "jumps", "clones", "meetings", "spoofs"] a
 type TokenValues = Partial<Record<PresentToken, string>>;
 let tokenValues: TokenValues | null = null;
 let loadingTokens = false;
+
+/**
+ * Values that belong in a route rather than a caption (today: the watchlist
+ * vessel the camera should open). Kept apart so a missing route value falls
+ * back to the beat's safer route instead of breaking the hash.
+ */
+let routeValues: Record<string, string> = {};
 
 let active = false;
 let index = 0;
@@ -103,6 +110,57 @@ function topSpoof(events: LiveEvent[]): LiveEvent | null {
   return best;
 }
 
+/**
+ * The watchlist ALERT vessel the recording heard most recently. Alerts carry
+ * the MMSI or IMO the list matched; the vessels carry the broadcast fixes, so
+ * the pick needs both. A vessel with no last fix cannot be "seen recently" and
+ * is skipped rather than guessed at.
+ */
+function latestAlertVessel(
+  alerts: LiveWatchlistEntry[],
+  vessels: LiveVessel[],
+): { mmsi: number; name: string; at: number } | null {
+  const byMmsi = new Map(vessels.map((vessel) => [vessel.mmsi, vessel]));
+  const byImo = new Map<number, LiveVessel>();
+  for (const vessel of vessels) {
+    if (vessel.imo !== null) byImo.set(vessel.imo, vessel);
+  }
+
+  let best: { mmsi: number; name: string; at: number } | null = null;
+  for (const alert of alerts) {
+    const vessel =
+      (alert.mmsi === null ? undefined : byMmsi.get(alert.mmsi)) ??
+      (alert.imo === null ? undefined : byImo.get(alert.imo));
+    if (vessel === undefined || vessel.last === null) continue;
+
+    const at = Date.parse(vessel.last.t);
+    if (!Number.isFinite(at)) continue;
+    if (best === null || at > best.at) {
+      best = { mmsi: vessel.mmsi, name: vesselName(vessel.mmsi, vessels), at };
+    }
+  }
+  return best;
+}
+
+/** Fill `{route_token}` placeholders; null while any value is still unknown. */
+function fillRoute(template: string): string | null {
+  let missing = false;
+  const route = template.replace(TOKEN, (_match, name: string) => {
+    const value = routeValues[name];
+    if (value === undefined) {
+      missing = true;
+      return "";
+    }
+    return encodeURIComponent(value);
+  });
+  return missing ? null : route;
+}
+
+/** The route for a beat, or its safer fallback while a route value is missing. */
+function routeFor(beat: PresentStep): string {
+  return fillRoute(beat.route) ?? beat.fallbackRoute ?? "#/";
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json" } });
   if (!response.ok) throw new Error(`GET ${path} failed: HTTP ${response.status}`);
@@ -127,10 +185,11 @@ interface HormuzUnseenLite {
  * own numbers; each step then reads its fallback sentence.
  */
 async function loadTokenValues(): Promise<TokenValues> {
-  const [cases, stats, live, events, hormuz] = await Promise.allSettled([
+  const [cases, stats, live, vessels, events, hormuz] = await Promise.allSettled([
     fetchCases({ limit: 200, status: "all" }),
     fetchStats(),
     fetchLiveSummary(BALTIC_REGION),
+    fetchLiveVessels(BALTIC_REGION),
     fetchLiveEvents(BALTIC_REGION),
     getJson<HormuzUnseenLite>(HORMUZ_UNSEEN_URL),
   ]);
@@ -159,7 +218,22 @@ async function loadTokenValues(): Promise<TokenValues> {
   if (live.status === "fulfilled") {
     const counts = live.value.counts ?? {};
     values.baltic_ships = integerToken(finite(counts.vessels));
-    values.alerts = integerToken(finite(counts.watchlist_alerts));
+
+    const alerts = watchlistAlerts(live.value.watchlist);
+    values.alerts_at_least = integerToken(alerts.length);
+
+    // "seen in the last N h" is the only honest wording for a recording, so
+    // the window comes from the same summary as the alerts.
+    const hours = windowHours(live.value.window);
+    if (Number.isFinite(hours) && hours > 0) values.window_h = String(Math.round(hours));
+
+    if (vessels.status === "fulfilled") {
+      const picked = latestAlertVessel(alerts, vessels.value);
+      if (picked !== null) {
+        routeValues.watchlist_mmsi = String(picked.mmsi);
+        values.watchlist_vessel = picked.name;
+      }
+    }
 
     const hasEventCounts = EVENT_COUNT_KEYS.some((key) => finite(counts[key]) !== null);
     if (hasEventCounts) {
@@ -243,7 +317,7 @@ function show(step: number): void {
 
   const text = captionFor(beat);
   index = step;
-  navigate(beat.route);
+  navigate(routeFor(beat));
 
   if (stepLabel !== null) stepLabel.textContent = `${step + 1} / ${TOTAL}`;
   if (proofLabel !== null) proofLabel.textContent = text.proof;
@@ -318,6 +392,7 @@ export function startPresent(): void {
     startHash = location.hash;
     // The recording grows between runs: fetch a fresh set of numbers, once per run.
     tokenValues = null;
+    routeValues = {};
     root = buildOverlay();
     document.body.append(root);
     document.body.classList.add("is-presenting");

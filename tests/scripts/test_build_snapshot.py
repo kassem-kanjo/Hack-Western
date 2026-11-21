@@ -226,3 +226,24 @@ def test_missing_validation_files_give_nulls(tmp_path: Path) -> None:
     # the contours still get drawn at the documented fallback sigma
     payload = json.loads((out / "cases.json").read_text(encoding="utf-8"))
     assert payload["cases"][0]["lens_frames"][1]["likely"]["type"] == "Polygon"
+
+
+def test_snapshot_files_are_written_through_tmp_files(tmp_path: Path, monkeypatch) -> None:
+    source, out, _ = _write_inputs(tmp_path, None)
+    calls: list[tuple[Path, Path]] = []
+    real_replace = build_snapshot.os.replace
+
+    def record(src, dst):
+        calls.append((Path(src), Path(dst)))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(build_snapshot.os, "replace", record)
+
+    build_snapshot.build(source, out, GAPS_SCANNED, None, validation_dir=tmp_path / "absent-validation")
+
+    assert calls == [
+        (out / "cases.tmp", out / "cases.json"),
+        (out / "stats.tmp", out / "stats.json"),
+    ]
+    assert not (out / "cases.tmp").exists()
+    assert not (out / "stats.tmp").exists()

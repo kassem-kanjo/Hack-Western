@@ -18,6 +18,7 @@ import { fetchLiveEvents, fetchLiveRegions, fetchLiveSummary, fetchLiveVessels }
 import { eventDetail } from "../components/EventDetail";
 import { h } from "../components/dom";
 import { topBar } from "../components/TopBar";
+import { vesselCard } from "../components/VesselCard";
 import { fmtUtc } from "../format";
 import { mountLiveMap } from "../map/liveMap";
 import type { EventKind, LiveEvent, LiveRegion, LiveSummary, LiveVessel } from "../model/live";
@@ -32,6 +33,7 @@ import {
   timelineFraction,
   unusualCount,
   vesselName,
+  watchlistForVessel,
   watchlistHit,
   windowHours,
 } from "../model/liveFacts";
@@ -57,10 +59,51 @@ const EVENT_LIMIT = 500;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/**
+ * Everything a live hash can ask for. The three targets are mutually
+ * exclusive; an event index is a position in the severity-sorted list, while
+ * `kind` and `vessel` are resolved here after loading so the route itself never
+ * depends on the order the API happened to return.
+ */
+export interface LiveRoute {
+  region: string;
+  eventIndex: number | null;
+  /** Open the highest-severity finding of this kind. */
+  kind?: string | null;
+  /** Open this vessel's card. */
+  vessel?: number | null;
+}
+
 export interface LiveScreen {
   destroy(): void;
   /** Called by the router when only the event part of the hash changed. Must NOT re-fetch or rebuild the map. */
   select(index: number | null): void;
+  /** Open the highest-severity finding of a kind, without rewriting the route. */
+  selectKind(kind: string): void;
+  /** Open one vessel's card, without rewriting the route. */
+  selectVessel(mmsi: number): void;
+}
+
+/** True only for the five kinds the map and the chips understand. */
+function isEventKind(value: string): value is EventKind {
+  return (EVENT_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Parse one live hash. This mirrors the router's contract and lets a same-region
+ * navigation keep the screen alive when only the kind or the vessel changed.
+ */
+export function parseLiveRoute(hash: string): LiveRoute | null {
+  const path = hash.startsWith("#") ? hash.slice(1) : hash;
+  const match = /^\/live\/([A-Z_]+)(?:\/event\/(\d+)|\/kind\/([a-z_]+)|\/vessel\/(\d+))?$/.exec(path);
+  if (match === null) return null;
+  const [, region, eventIndex, kind, vessel] = match;
+  return {
+    region,
+    eventIndex: eventIndex === undefined ? null : Number(eventIndex),
+    kind: kind ?? null,
+    vessel: vessel === undefined ? null : Number(vessel),
+  };
 }
 
 /** Region ids are uppercase API tokens; the label is what people read. */
@@ -166,10 +209,7 @@ function kindCounts(events: LiveEvent[]): Record<EventKind, number> {
  * and destroy() aborts it, so a quick tab switch cannot paint over the screen
  * that replaced this one.
  */
-export function renderLive(
-  app: HTMLElement,
-  opts: { region: string; eventIndex: number | null },
-): LiveScreen {
+export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
   const region = opts.region;
   const abort = new AbortController();
   let destroyed = false;
@@ -203,6 +243,9 @@ export function renderLive(
   let selectEvent: (index: number | null) => void = (index) => {
     pendingIndex = index;
   };
+  // Same contract for the two route targets that resolve after loading.
+  let selectKindAction: (kind: string) => void = () => {};
+  let selectVesselAction: (mmsi: number) => void = () => {};
   // Tears down the map once it exists; empty while the fetch is in flight.
   let teardown: () => void = () => {};
 
@@ -226,12 +269,42 @@ export function renderLive(
     const recorded = new Set(regions.map((entry) => entry.region));
     const counts = kindCounts(all);
 
+    // A kind route opens its highest-severity event: `all` is already sorted, so
+    // the first match is the top one and nothing depends on the API's index.
+    const hashed = parseLiveRoute(location.hash);
+    const sameHash = hashed !== null && hashed.region === region;
+    const requestedKind =
+      typeof opts.kind === "string"
+        ? opts.kind
+        : sameHash && typeof hashed.kind === "string"
+          ? hashed.kind
+          : null;
+    const requestedVessel: number | null =
+      opts.vessel ?? (sameHash && hashed.vessel !== null ? hashed.vessel : null) ?? null;
+    const kindTop =
+      requestedKind !== null && isEventKind(requestedKind)
+        ? (all.find((event) => event.kind === requestedKind) ?? null)
+        : null;
+    const vesselExists =
+      requestedVessel !== null && vessels.some((vessel) => vessel.mmsi === requestedVessel);
+
     let active = new Set<EventKind>(EVENT_KINDS);
     let filtered = eventsOfKinds(all, active);
-    let selectedIndex = validIndex(pendingIndex, all.length);
+    let selectedVessel: number | null = vesselExists ? requestedVessel : null;
+    let selectedIndex =
+      selectedVessel !== null
+        ? null
+        : kindTop !== null
+          ? (allIndex.get(kindTop) ?? null)
+          : validIndex(pendingIndex, all.length);
 
     const selectedEvent = (): LiveEvent | null =>
       selectedIndex === null ? null : (all[selectedIndex] ?? null);
+
+    const selectedVesselRow = (): LiveVessel | null =>
+      selectedVessel === null
+        ? null
+        : (vessels.find((vessel) => vessel.mmsi === selectedVessel) ?? null);
 
     // ---- stage: map ----
 
@@ -475,6 +548,27 @@ export function renderLive(
     }
 
     function renderRail(): void {
+      const vessel = selectedVesselRow();
+      if (vessel !== null) {
+        listWrap.hidden = true;
+        detailEl.hidden = false;
+        detailEl.replaceChildren(
+          vesselCard({
+            vessel,
+            events: all.filter((event) => event.mmsi === vessel.mmsi),
+            watch: watchlistForVessel(vessel, summary.watchlist),
+            backHref: `#/live/${region}`,
+            regionLabel: label,
+            nowMs,
+            eventHref: (event) => {
+              const index = allIndex.get(event);
+              return index === undefined ? null : `#/live/${region}/event/${index}`;
+            },
+          }),
+        );
+        return;
+      }
+
       const event = selectedEvent();
       if (event === null) {
         listWrap.hidden = false;
@@ -503,9 +597,34 @@ export function renderLive(
       // The first LIST_ROWS markers carry the same 1..7 rank as the rail's rows.
       // A selection whose kind the chips have hidden is not drawn either: the
       // map must show exactly the kind on screen, never a leftover ring.
-      const chosen = selectedEvent();
+      const chosen = selectedVessel === null ? selectedEvent() : null;
       const visibleSelection = chosen !== null && active.has(chosen.kind) ? chosen : null;
       map.setEvents(capped, visibleSelection, LIST_ROWS);
+    }
+
+    /**
+     * Zoom to a vessel's last fix. The map handle only knows how to focus an
+     * event, so a throwaway one-point event carries the camera there; it is
+     * never added to the marker list or the rail.
+     */
+    function focusVessel(vessel: LiveVessel): void {
+      const last = vessel.last;
+      if (last === null) {
+        map.resetView();
+        return;
+      }
+      map.focusEvent({
+        kind: "jump",
+        mmsi: vessel.mmsi,
+        start: last.t,
+        end: last.t,
+        lat: last.lat,
+        lon: last.lon,
+        severity: 0,
+        explanation: "",
+        other_mmsi: null,
+        evidence: {},
+      });
     }
 
     function applyFilter(): void {
@@ -537,7 +656,10 @@ export function renderLive(
     function selectIndex(next: number | null): void {
       if (destroyed) return;
       const resolved = validIndex(next, all.length);
-      if (resolved === selectedIndex) return;
+      // Leaving a vessel card for the same index the list already held still
+      // has to repaint the rail, so a mode change is never a no-op.
+      if (resolved === selectedIndex && selectedVessel === null) return;
+      selectedVessel = null;
       selectedIndex = resolved;
 
       const event = selectedEvent();
@@ -547,6 +669,29 @@ export function renderLive(
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
       if (event !== null) map.focusEvent(event);
       else map.resetView();
+    }
+
+    function selectKind(kind: string): void {
+      if (destroyed || !isEventKind(kind)) return;
+      const top = all.find((event) => event.kind === kind) ?? null;
+      selectIndex(top === null ? null : (allIndex.get(top) ?? null));
+    }
+
+    function selectVessel(mmsi: number): void {
+      if (destroyed) return;
+      const vessel = vessels.find((entry) => entry.mmsi === mmsi) ?? null;
+      if (vessel === null) {
+        selectIndex(null);
+        return;
+      }
+      if (selectedVessel === mmsi) return;
+      selectedVessel = mmsi;
+      selectedIndex = null;
+      renderRail();
+      markCurrentRow();
+      renderTicks();
+      pushMap(filtered.slice(0, MAP_EVENT_CAP));
+      focusVessel(vessel);
     }
 
     // ---- attach, then mount the map ----
@@ -587,8 +732,11 @@ export function renderLive(
     markCurrentRow();
     pushMap(filtered.slice(0, MAP_EVENT_CAP));
 
+    const initialVessel = selectedVesselRow();
     const initial = selectedEvent();
-    if (initial !== null) {
+    if (initialVessel !== null) {
+      focusVessel(initialVessel);
+    } else if (initial !== null) {
       // A deep link opens already focused. The map fits the region on its own
       // load event, so this can be superseded on the very first frame; every
       // selection after that (the normal path) is not.
@@ -596,6 +744,8 @@ export function renderLive(
     }
 
     selectEvent = selectIndex;
+    selectKindAction = selectKind;
+    selectVesselAction = selectVessel;
     teardown = () => {
       map.destroy();
     };
@@ -631,7 +781,26 @@ export function renderLive(
 
   return {
     select(index: number | null): void {
+      // A same-region kind/vessel navigation still reaches this screen as a
+      // select() call, so read the route before trusting the event index.
+      const route = parseLiveRoute(location.hash);
+      if (route !== null && route.region === region) {
+        if (typeof route.vessel === "number") {
+          selectVesselAction(route.vessel);
+          return;
+        }
+        if (typeof route.kind === "string") {
+          selectKindAction(route.kind);
+          return;
+        }
+      }
       selectEvent(index);
+    },
+    selectKind(kind: string): void {
+      selectKindAction(kind);
+    },
+    selectVessel(mmsi: number): void {
+      selectVesselAction(mmsi);
     },
     destroy(): void {
       if (destroyed) return;

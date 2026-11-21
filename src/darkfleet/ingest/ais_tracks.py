@@ -43,6 +43,11 @@ _TIME_RE = re.compile(
 # Heading 511 is the AIS "not available" sentinel; the contract stores it as None.
 _HEADING_UNAVAILABLE = 511
 
+# AIS courses and speeds at or above these values are sentinels, not measurements: SOG 102.3
+# ("not available") and COG 360 mean the receiver should not invent a course or speed from them.
+_SPEED_UNAVAILABLE = 102.2
+_COURSE_UNAVAILABLE = 360.0
+
 _POSITION_TYPES = frozenset({"PositionReport", "StandardClassBPositionReport"})
 
 
@@ -113,13 +118,19 @@ def _ping(meta: dict[str, Any], body: dict[str, Any], t: datetime) -> Ping | Non
     heading = _integer(body.get("TrueHeading"))
     if heading == _HEADING_UNAVAILABLE:
         heading = None
+    sog = _numeric(body.get("Sog"))
+    if sog is not None and sog >= _SPEED_UNAVAILABLE:
+        sog = None
+    cog = _numeric(body.get("Cog"))
+    if cog is not None and cog >= _COURSE_UNAVAILABLE:
+        cog = None
     return Ping(
         mmsi=mmsi,
         t=t,
         lat=lat,
         lon=lon,
-        sog=_numeric(body.get("Sog")),
-        cog=_numeric(body.get("Cog")),
+        sog=sog,
+        cog=cog,
         heading=heading,
         nav_status=_integer(body.get("NavigationalStatus")),
     )

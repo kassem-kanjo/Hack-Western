@@ -109,6 +109,41 @@ def test_class_b_position_report_has_no_nav_status() -> None:
     assert parsed.lon == pytest.approx(10.25)
 
 
+def test_sog_102_3_means_not_available() -> None:
+    # 102.3 kn is the AIS sentinel for "speed not available", not a real 102-knot ship.
+    ping = parse_line(position_report(Sog=102.3))
+    assert isinstance(ping, Ping)
+    assert ping.sog is None
+
+
+@pytest.mark.parametrize("sog", [102.2, 102.3, 150.0])
+def test_sog_at_or_above_the_sentinel_becomes_none(sog: float) -> None:
+    ping = parse_line(position_report(Sog=sog))
+    assert isinstance(ping, Ping)
+    assert ping.sog is None
+
+
+@pytest.mark.parametrize("sog", [0.0, 38.0, 102.1])
+def test_real_sog_below_the_sentinel_is_kept(sog: float) -> None:
+    ping = parse_line(position_report(Sog=sog))
+    assert isinstance(ping, Ping)
+    assert ping.sog == pytest.approx(sog)
+
+
+@pytest.mark.parametrize("cog", [0.0, 359.9])
+def test_real_course_is_kept(cog: float) -> None:
+    ping = parse_line(position_report(Cog=cog))
+    assert isinstance(ping, Ping)
+    assert ping.cog == pytest.approx(cog)
+
+
+@pytest.mark.parametrize("cog", [360.0, 400.0])
+def test_cog_at_or_above_360_means_not_available(cog: float) -> None:
+    ping = parse_line(position_report(Cog=cog))
+    assert isinstance(ping, Ping)
+    assert ping.cog is None
+
+
 def test_ship_static_data_maps_static_fields() -> None:
     info = parse_line(line(3))
     assert isinstance(info, VesselInfo)

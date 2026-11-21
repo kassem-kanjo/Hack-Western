@@ -61,9 +61,11 @@ def test_main_writes_every_contract_key(tmp_path: Path, monkeypatch) -> None:
         "counts",
         "events",
         "watchlist",
+        "watchlist_status",
         "vessels",
     }
     assert payload["region"] == REGION
+    assert payload["watchlist_status"] == "sanctions file missing"
     assert payload["window"]["start"].endswith("Z")
     assert payload["window"]["end"] >= payload["window"]["start"]
     assert set(payload["coverage"]) == {"minutes", "median_msgs_per_min", "holes"}
@@ -87,7 +89,7 @@ def test_main_writes_every_contract_key(tmp_path: Path, monkeypatch) -> None:
     for vessel in payload["vessels"]:
         assert set(vessel) == {"mmsi", "name", "imo", "ship_type", "class", "last"}
         assert set(vessel["last"]) == {"t", "lat", "lon", "sog"}
-        assert vessel["class"] in {"tanker", "cargo", "fishing", "passenger", "default"}
+        assert vessel["class"] in {"tanker", "cargo", "fishing", "passenger", "hsc", "service", "default"}
 
 
 def test_counts_match_the_events_written(tmp_path: Path, monkeypatch) -> None:
@@ -250,8 +252,27 @@ def test_meeting_inside_singapore_anchorage_gets_context_and_half_severity(
         "kind": "bunkering",
         "note": "approximate box drawn by hand, not an official boundary",
     }
-    assert "In a known anchorage (Singapore Eastern anchorage)" in event["explanation"]
-    assert "bunkering" in event["explanation"]
+    assert (
+        "In a routine anchorage (Singapore Eastern anchorage); this could be bunkering "
+        "(refuelling)." in event["explanation"]
+    )
+    assert "likely" not in event["explanation"]
+
+
+def test_meeting_inside_eopl_is_flagged_as_an_sts_area(tmp_path: Path, monkeypatch) -> None:
+    region_dir = _write_recording(tmp_path)
+    monkeypatch.setattr(build_live, "meetings", lambda *args, **kwargs: [_meeting(1.35, 104.5, 0.4)])
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out")
+
+    event = _only_meeting(payload)
+    assert event["severity"] == 0.8
+    assert event["evidence"]["context"] == {
+        "name": "EOPL",
+        "kind": "sts",
+        "note": "known ship-to-ship transfer area for sanctioned oil (approximate box)",
+    }
+    assert "In a known ship-to-ship transfer area (EOPL); worth a closer look." in event["explanation"]
 
 
 def test_meeting_in_open_water_keeps_its_severity_and_no_context(tmp_path: Path, monkeypatch) -> None:
@@ -264,6 +285,45 @@ def test_meeting_in_open_water_keeps_its_severity_and_no_context(tmp_path: Path,
     assert event["severity"] == 0.8
     assert "context" not in event["evidence"]
     assert "known anchorage" not in event["explanation"]
+
+
+def test_missing_sanctions_file_is_loud_and_marked_in_the_payload(tmp_path: Path, capsys) -> None:
+    region_dir = _write_recording(tmp_path)
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out", sanctions=tmp_path / "absent.csv")
+
+    assert payload["watchlist_status"] == "sanctions file missing"
+    assert "WARNING: sanctions file missing" in capsys.readouterr().err
+
+
+def test_present_sanctions_file_marks_the_watchlist_checked(tmp_path: Path, capsys) -> None:
+    region_dir = _write_recording(tmp_path)
+    sanctions = tmp_path / "maritime.csv"
+    sanctions.write_text("", encoding="utf-8")
+
+    payload = build_live.build(REGION, region_dir, tmp_path / "out", sanctions=sanctions)
+
+    assert payload["watchlist_status"] == "ok"
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_snapshot_is_written_through_a_tmp_file_then_replaced(tmp_path: Path, monkeypatch) -> None:
+    region_dir = _write_recording(tmp_path)
+    target = tmp_path / "out" / f"live_{REGION}.json"
+    calls: list[tuple[Path, Path]] = []
+    real_replace = build_live.os.replace
+
+    def record(source, destination):
+        calls.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(build_live.os, "replace", record)
+
+    build_live.build(REGION, region_dir, tmp_path / "out")
+
+    assert calls == [(target.with_suffix(".tmp"), target)]
+    assert not target.with_suffix(".tmp").exists()
+    assert json.loads(target.read_text(encoding="utf-8"))["region"] == REGION
 
 
 def test_meeting_with_a_watchlist_alert_is_floored_at_point_nine(tmp_path: Path, monkeypatch) -> None:
