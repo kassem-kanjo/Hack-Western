@@ -176,3 +176,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** sentinel.sh every 5 min, no tokens, wakes me on state changes (caught Tiger and the Pi on its first run); Tiger sink lane landing (#208); health retries failed tests once (#214).
 - **Code share since audit 24:** builders/lanes ~85%; Chief: sentinel, health retry, cherry-pick integration, merges.
 - **Change for next 30 min:** every data path gets a freshness check in sentinel the day it is built; branch names carry the time; one && chain from commit to merge, never ;.
+
+## Sat 21 Nov, 18:26 ET (audit 26, covers 17:58-18:26)
+- **Went well:** Tiger is now the live store (#216, #218): sink streams the recorder every 30 s, ais_minutely real-time; app rates match the files (Baltic 394 vs 400 msgs/min). GFW spike answered Kassem's "sanctioned tanker went dark in Hormuz" honestly: no such gap for 41 Iran-linked tankers; one real listed ship (SEA 1, 13.1 h, Gulf of Oman, 9 Mar) and a 20-ship simultaneous blackout (outage, not hiding) became #219. QNX reframed with Kassem ("ships have lights") to an AI lookout with deadlines, fail-safe BLIND and evidence (#220).
+- **Went wrong:** after merging #216 the app showed 0 msgs/min everywhere with every route 200; I caught it by reading the live API, not by a check. A first CI run failed on ruff format (I ran check, not format).
+- **Fixes:** sentinel now checks the live value (#221); run `ruff format --check` with `ruff check` before every push.
+- **Code share since audit 25:** builders/lanes ~80%; Chief: Tiger integration fixes, sentinel, spike verification.
+- **Change for next 30 min:** after each merge that changes data, read one live number in the app and compare it with its source.
