@@ -21,14 +21,24 @@ export interface HormuzBlockHandle {
   destroy(): void;
 }
 
-const UNSEEN_URL = "/api/hormuz/unseen";
-const HISTORY_URL = "/api/hormuz/history";
+/** The endpoints both the overview block and the focus view read. */
+export const HORMUZ_UNSEEN_URL = "/api/hormuz/unseen";
+export const HORMUZ_HISTORY_URL = "/api/hormuz/history";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
   if (!response.ok) throw new Error(`GET ${path} failed: HTTP ${response.status}`);
   return (await response.json()) as T;
+}
+
+/**
+ * Fetch one Hormuz snapshot. Exported so the focus view reads the same two
+ * endpoints with the same headers and error wording as this block.
+ */
+export async function fetchHormuz<T>(path: string, signal: AbortSignal): Promise<T> {
+  return getJson<T>(path, signal);
 }
 
 /** "2026-08-15" -> "15 Aug". */
@@ -38,7 +48,8 @@ function dayLabel(day: string): string {
   return `${String(date).padStart(2, "0")} ${MONTHS[month - 1] ?? ""}`.trim();
 }
 
-function periodLabel(
+/** "15 Aug – 06 Nov 2026" plus an optional day count. */
+export function periodLabel(
   period: { start: string; end: string } | undefined,
   days: number | undefined,
 ): string {
@@ -91,7 +102,8 @@ function layerToggle(opts: ToggleOptions): HTMLButtonElement {
   return button;
 }
 
-function caveats(unseen: HormuzUnseen, history: HormuzHistory): HTMLElement {
+/** The one disclosure every Hormuz view ends with: limits, then sources. */
+export function hormuzCaveats(unseen: HormuzUnseen, history: HormuzHistory): HTMLElement {
   const lines = [...new Set([...(unseen.caveats ?? []), ...(history.caveats ?? [])])];
   const sources: HTMLElement[] = [];
   if (unseen.source) {
@@ -120,7 +132,7 @@ function paint(
   const sentence =
     share === null
       ? "This snapshot does not carry a headline dark share."
-      : `On a typical day ${inTenPhrase(share)} ships radar sees here are not broadcasting`;
+      : `On a typical day ${inTenPhrase(share)} vessels radar sees here have no matching location broadcast`;
 
   const period = periodLabel(unseen.period ?? history.period, unseen.summary?.days);
 
@@ -134,7 +146,7 @@ function paint(
       { class: "hormuz-toggles", role: "group", "aria-label": "Hormuz map layers" },
       layerToggle({
         layer: "radar",
-        label: "Radar, not broadcasting",
+        label: "Radar, no matching broadcast",
         enabled: unseen.grid.length > 0,
         act: (on) => layers.setRadar(on),
       }),
@@ -151,7 +163,7 @@ function paint(
       `${unseen.grid.length.toLocaleString("en-US")} radar-only cells \u00b7 ` +
         `${history.hotspots.length.toLocaleString("en-US")} loitering hotspots`,
     ),
-    caveats(unseen, history),
+    hormuzCaveats(unseen, history),
   );
 
   body.replaceChildren(...children);
@@ -171,8 +183,8 @@ export function hormuzBlock(map: maplibregl.Map): HormuzBlockHandle {
   let layers: HormuzLayersHandle | null = null;
 
   Promise.all([
-    getJson<HormuzUnseen>(UNSEEN_URL, abort.signal),
-    getJson<HormuzHistory>(HISTORY_URL, abort.signal),
+    fetchHormuz<HormuzUnseen>(HORMUZ_UNSEEN_URL, abort.signal),
+    fetchHormuz<HormuzHistory>(HORMUZ_HISTORY_URL, abort.signal),
   ])
     .then(([unseen, history]) => {
       if (abort.signal.aborted) return;

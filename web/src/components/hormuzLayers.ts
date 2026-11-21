@@ -24,6 +24,14 @@ export interface HormuzLayersHandle {
   destroy(): void;
 }
 
+export interface HormuzLayerOptions {
+  /**
+   * Fit the map to a layer's own extent when it is switched on (default true).
+   * The focus view starts already framed on the strait, so it turns this off.
+   */
+  zoomOnEnable?: boolean;
+}
+
 const RADAR_SOURCE = "hormuz-radar";
 const RADAR_LAYER = "hormuz-radar-circles";
 const HOTSPOT_SOURCE = "hormuz-hotspots";
@@ -86,7 +94,9 @@ export function hormuzLayers(
   map: maplibregl.Map,
   grid: HormuzGridCell[],
   hotspots: HormuzHotspot[],
+  options: HormuzLayerOptions = {},
 ): HormuzLayersHandle {
+  const zoomOnEnable = options.zoomOnEnable !== false;
   let applied = false;
   let radarOn = false;
   let hotspotsOn = false;
@@ -163,12 +173,12 @@ export function hormuzLayers(
     setRadar(on: boolean): void {
       radarOn = on;
       visibility();
-      if (on) zoomTo(grid);
+      if (on && zoomOnEnable) zoomTo(grid);
     },
     setHotspots(on: boolean): void {
       hotspotsOn = on;
       visibility();
-      if (on) zoomTo(hotspots);
+      if (on && zoomOnEnable) zoomTo(hotspots);
     },
     destroy(): void {
       destroyed = true;

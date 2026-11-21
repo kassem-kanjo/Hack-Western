@@ -1,0 +1,212 @@
+/* Hormuz focus view (#117). Structure and spacing only: every colour, size and
+   weight comes from tokens.css, and the chart/legend marks keep the meaning the
+   overview block gave them (violet radar cells, white rings, amber dark share). */
+
+.stage-hormuz .map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Place name: the offline basemap carries no labels, so the screen names the
+   water it is showing. Neutral, one line, top-left like a map sheet. */
+.hormuz-place {
+  position: absolute;
+  z-index: 2;
+  top: var(--sp-4);
+  left: var(--sp-4);
+  margin: 0;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--c-panel) 85%, transparent);
+  border-radius: var(--r-2);
+  font-size: var(--fs-label);
+  color: var(--c-text-1);
+}
+
+.hormuz-place span {
+  color: var(--c-text-3);
+}
+
+/* ---------- rail: title, hero, chart, record, caveats ---------- */
+
+.hormuz-head {
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.hormuz-eyebrow {
+  margin: 0 0 var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.hormuz-title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-bold);
+  line-height: 1.12;
+  color: var(--c-text-1);
+}
+
+.hormuz-focus-body {
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/* The one number. Amber because it counts ships that went quiet, the same
+   meaning amber carries on the global map. */
+.hormuz-hero {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.hormuz-hero-num {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-num-xl);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  color: var(--c-gap);
+  font-variant-numeric: tabular-nums;
+}
+
+.hormuz-hero-lede {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--fs-h3);
+  line-height: 1.35;
+  color: var(--c-text-1);
+}
+
+.hormuz-chart-block {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-line);
+}
+
+.hormuz-chart-caption {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* At 440 px the chart is the hero's evidence, not a sparkline: the axis and the
+   reference line have to stay readable at 1 m. */
+.hormuz-rail .hormuz-chart .axis {
+  font-size: 11px;
+}
+
+/* Low-coverage days: faint, never joined by the line. Grey says "no reading",
+   not "a low value". */
+.hormuz-chart .excluded {
+  fill: var(--c-text-3);
+  opacity: 0.4;
+}
+
+/* A run of one usable day has no line to carry it; its dot uses the line colour. */
+.hormuz-chart .dot {
+  fill: var(--c-sar);
+}
+
+/* The typical-day reference is the hero number: amber, so the dashed line and
+   the 41% above it read as the same claim. */
+.hormuz-rail .hormuz-chart .ref {
+  stroke: var(--c-gap);
+  stroke-opacity: 0.85;
+}
+
+.hormuz-chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) 6px;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.chart-key {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.chart-key.is-counted {
+  background: var(--c-sar);
+}
+
+.chart-key.is-excluded {
+  background: var(--c-text-3);
+  opacity: 0.45;
+}
+
+/* The two layers are on, not toggled: they read as a key, so they stay flat. */
+.hormuz-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin-top: var(--sp-3);
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.hormuz-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hormuz-key-item .key {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.hormuz-key-item .key.is-radar {
+  background: var(--c-prism-stroke);
+  box-shadow: inset 0 0 0 1.5px var(--c-sar);
+}
+
+.hormuz-key-item .key.is-hotspot {
+  border: 1.5px solid var(--c-text-1);
+}
+
+/* The comparison with the public record is evidence, not decoration: one rule
+   on the left, body size, no box. */
+.hormuz-gfw {
+  margin-top: var(--sp-5);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--c-line-strong);
+}
+
+.hormuz-gfw-label {
+  margin: 0 0 var(--sp-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.hormuz-gfw-line {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--c-text-1);
+}
+
+.hormuz-rail .hormuz-caveats {
+  margin-top: var(--sp-5);
+}
+
+.hormuz-error {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--c-text-3);
+}

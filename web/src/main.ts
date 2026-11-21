@@ -20,6 +20,7 @@ import { fetchCases } from "./api";
 import { h } from "./components/dom";
 import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
+import { renderHormuz } from "./screens/hormuz";
 import { rankCases, renderOverview } from "./screens/overview";
 import { renderLive, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
@@ -140,6 +141,8 @@ function route(): void {
     renderPatrol(app);
     return;
   }
+
+  if (location.hash === "#/hormuz") { current = renderHormuz(app); return; }
 
   if (cases === null) {
     if (loadError !== null) showError(loadError);
