@@ -1,0 +1,477 @@
+/* Event detail: the right-rail panel shown when one live event is selected.
+   Structure and spacing only; every colour, size and radius is a token from
+   tokens.css. No gradients (the amber hatch is an SVG pattern), no shadows,
+   and the one red mark is the sanctions tag. */
+
+.event-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--c-text-2);
+}
+
+/* The identity block (breadcrumb through the sentence) is one unit; the
+   picture, the numbers and the two disclosures are separated by hairlines. */
+.event-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 0 0 var(--sp-4);
+}
+
+.event-detail__block,
+.event-detail__disc {
+  border-top: 1px solid var(--c-line);
+  padding: var(--sp-4) 0;
+}
+
+/* 1. Breadcrumb ---------------------------------------------------------- */
+
+.event-detail__crumbs {
+  font-size: var(--fs-caption);
+  color: var(--c-text-2);
+}
+
+.event-detail__back {
+  color: var(--c-text-2);
+  text-decoration: none;
+}
+
+.event-detail__back:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.event-detail__back:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.event-detail__crumb-sep {
+  color: var(--c-text-3);
+}
+
+/* 2. Kind + age ---------------------------------------------------------- */
+
+.event-detail__kind {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.event-detail__glyph {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+/* Glyph colours mirror the map marks, never the text tiers alone. */
+.event-detail__glyph[data-kind="silence"] {
+  color: var(--c-gap);
+}
+
+.event-detail__glyph[data-kind="jump"],
+.event-detail__glyph[data-kind="clone"],
+.event-detail__glyph[data-kind="spoof"] {
+  color: var(--c-text-1);
+}
+
+.event-detail__glyph[data-kind="meeting"] {
+  color: var(--c-rdv);
+}
+
+/* The second clone square hides the first, as on the map. */
+.event-detail__glyph-panel {
+  fill: var(--c-panel);
+}
+
+.event-detail__ago {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-2);
+  white-space: nowrap;
+}
+
+/* 3. Ship ---------------------------------------------------------------- */
+
+.event-detail__vessel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.event-detail__ship {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-1);
+}
+
+.event-detail__ids {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.event-detail__class {
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+/* The only red in the panel: a described tag, not colour alone. */
+.event-detail__watch {
+  align-self: flex-start;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--c-risk-high);
+  border-radius: var(--r-pill);
+  color: var(--c-risk-high);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-tight);
+}
+
+/* 4. One big number ------------------------------------------------------ */
+
+.event-detail__big {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.event-detail__big-value {
+  font-size: var(--fs-num-l);
+  line-height: var(--lh-tight);
+  color: var(--c-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-detail__big-tail {
+  font-size: var(--fs-h3);
+  color: var(--c-text-2);
+}
+
+/* 5. One sentence -------------------------------------------------------- */
+
+.event-detail__sentence {
+  margin: 0;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-body);
+  color: var(--c-text-1);
+}
+
+/* 6. Proof picture ------------------------------------------------------- */
+
+/* Every picture here is intrinsically small; the clone schematic is the only
+   element with real height, so it alone gets the 180px cap. */
+
+.event-detail__heading {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-2);
+}
+
+.event-detail__missing {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--c-text-3);
+}
+
+/* Bars: shared track, numeric percent fill. */
+.event-detail__bar-row + .event-detail__bar-row {
+  margin-top: var(--sp-3);
+}
+
+.event-detail__bar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.event-detail__bar-label {
+  min-width: 0;
+}
+
+.event-detail__bar-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-1);
+  white-space: nowrap;
+}
+
+.event-detail__bar {
+  height: 6px;
+  background: var(--c-line);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.event-detail__bar-fill {
+  height: 100%;
+  background: var(--c-text-1);
+}
+
+.event-detail__bar-fill.is-muted {
+  background: var(--c-text-3);
+}
+
+.event-detail__caption {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-label);
+  line-height: var(--lh-body);
+  color: var(--c-text-3);
+}
+
+.event-detail__mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-2);
+}
+
+/* Silence: one time axis, two rows. */
+.event-detail__time-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.event-detail__time-name {
+  min-width: 0;
+}
+
+.event-detail__track {
+  position: relative;
+  height: 22px;
+}
+
+/* A dotted rule reads as "was being heard"; no fill, so it cannot be mistaken
+   for a bar. */
+.event-detail__dots {
+  position: absolute;
+  top: 9px;
+  height: 0;
+  border-top: 2px dotted var(--c-ais);
+}
+
+.event-detail__gap {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--c-gap);
+  overflow: hidden;
+}
+
+.event-detail__hatch {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.event-detail__hatch-line {
+  stroke: var(--c-gap);
+  stroke-width: 1;
+  stroke-opacity: 0.55;
+}
+
+.event-detail__gap-label {
+  position: relative;
+  padding: 0 var(--sp-1);
+  background: var(--c-panel);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-gap);
+  white-space: nowrap;
+}
+
+/* Many thin ticks: the other ships kept being heard across the whole axis. */
+.event-detail__tick {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 1px;
+  background: var(--c-text-3);
+  opacity: 0.7;
+}
+
+.event-detail__axis {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--sp-2);
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.event-detail__axis-times {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* Clone schematic. */
+.event-detail__schematic {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 180px;
+}
+
+.event-detail__schema-line {
+  stroke: var(--c-line-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.event-detail__schema-dot {
+  fill: var(--c-text-1);
+}
+
+.event-detail__schema-label {
+  fill: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.event-detail__schema-label.is-strong {
+  fill: var(--c-text-2);
+  stroke: var(--c-panel);
+  stroke-width: 4px;
+  paint-order: stroke;
+}
+
+/* Meeting: two figures side by side. */
+.event-detail__pair {
+  display: flex;
+  gap: var(--sp-3);
+}
+
+.event-detail__stat {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+}
+
+.event-detail__stat-label {
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.event-detail__stat-value {
+  font-size: var(--fs-num-m);
+  line-height: var(--lh-tight);
+  color: var(--c-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.event-detail__stat-note {
+  font-size: var(--fs-caption);
+  color: var(--c-text-2);
+}
+
+/* Spoof: the MMSIs that shared one impossible position. */
+.event-detail__mmsis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-detail__mmsi {
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-1);
+}
+
+/* 7. The numbers --------------------------------------------------------- */
+
+.event-detail__table {
+  margin: 0;
+}
+
+.event-detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 6px 0;
+}
+
+/* A hairline keeps long tables readable; the first row sits on the heading. */
+.event-detail__row + .event-detail__row {
+  border-top: 1px solid var(--c-line);
+}
+
+.event-detail__row dt {
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+}
+
+.event-detail__row dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  color: var(--c-text-1);
+  white-space: nowrap;
+}
+
+/* 8-9. Disclosures ------------------------------------------------------- */
+
+.event-detail__summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  cursor: pointer;
+  font-size: var(--fs-label);
+  color: var(--c-text-2);
+  list-style: none;
+}
+
+.event-detail__summary::-webkit-details-marker {
+  display: none;
+}
+
+.event-detail__summary:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.event-detail__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-3);
+}
+
+.event-detail__list {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-5);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-body);
+  color: var(--c-text-2);
+}

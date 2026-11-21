@@ -3,37 +3,34 @@ import { h } from "./dom";
 
 export type ConsoleMode = "SNAPSHOT" | "LIVE" | "ERROR";
 
+/** Default live region for the Live tab (the one with the most data). */
+export const DEFAULT_LIVE_REGION = "BALTIC_WATCH";
+
 /**
- * Header: brand, the two in-scope tabs, the snapshot region and the mode badge.
- * Tabs outside this issue's scope (rendezvous, live, edge unit) are not drawn.
+ * Header (01-nav): brand, three places (Global, Live, Patrol unit), Present, and one mode
+ * badge in the same slot on every screen. The case file stays reachable as a depth link
+ * (caseHref) rather than a top-level tab, per design/v2/00-ia.md.
  */
 export function topBar(opts: {
-  active: "overview" | "case";
+  active: "overview" | "case" | "live" | "patrol";
   mode: ConsoleMode;
   generatedAt: string | null;
   caseHref: string | null;
   demoHref: string | null;
+  liveRegion?: string;
 }): HTMLElement {
-  const overviewTab = h(
-    "a",
-    {
-      class: `tab${opts.active === "overview" ? " is-active" : ""}`,
-      href: "#/",
-    },
-    "Overview",
-  );
+  const tab = (label: string, href: string, isActive: boolean): HTMLElement =>
+    h("a", { class: `tab${isActive ? " is-active" : ""}`, href }, label);
 
-  const caseTab =
-    opts.caseHref !== null
-      ? h(
-          "a",
-          {
-            class: `tab${opts.active === "case" ? " is-active" : ""}`,
-            href: opts.caseHref,
-          },
-          "Case file",
-        )
-      : h("span", { class: "tab is-disabled" }, "Case file");
+  const liveHref = `#/live/${opts.liveRegion ?? DEFAULT_LIVE_REGION}`;
+  const tabs = [
+    tab("Global", "#/", opts.active === "overview" || opts.active === "case"),
+    tab("Live", liveHref, opts.active === "live"),
+    tab("Patrol unit", "#/patrol", opts.active === "patrol"),
+  ];
+  if (opts.caseHref !== null) {
+    tabs.push(tab("Case file", opts.caseHref, opts.active === "case"));
+  }
 
   const modeClass = opts.mode.toLowerCase();
   const modeText =
@@ -51,19 +48,29 @@ export function topBar(opts: {
       ? h("a", { class: "demo-link", href: opts.demoHref }, "Start demo")
       : null;
 
+  // Present is a V2 feature (presentation mode). It is drawn now so the bar matches the
+  // approved design, and disabled so nobody mistakes it for a working control.
+  const present = h(
+    "button",
+    {
+      class: "present-btn",
+      type: "button",
+      disabled: true,
+      title: "Coming in V2",
+      "aria-label": "Present (coming in V2)",
+    },
+    "Present",
+    h("kbd", { class: "kbd" }, "P"),
+  );
+
   return h(
     "header",
     { class: "topbar" },
     h("span", { class: "brand" }, "Dark Fleet"),
-    h("nav", { class: "tabs" }, overviewTab, caseTab),
+    h("nav", { class: "tabs" }, ...tabs),
     demoLink,
     h("span", { class: "topbar-spacer" }),
-    h(
-      "span",
-      { class: "chip-pill" },
-      h("span", { class: "k" }, "region"),
-      " Global snapshot",
-    ),
+    present,
     h(
       "span",
       { class: `mode-badge is-${modeClass}` },

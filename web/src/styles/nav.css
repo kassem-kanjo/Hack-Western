@@ -1,0 +1,36 @@
+/* Top bar extras for the three places (design/v2/01-nav.png). Colours and type come from
+   tokens.css; this file only lays out the Present control and its key hint. */
+
+.present-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-text-1);
+  font: inherit;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.present-btn:disabled {
+  color: var(--c-text-3);
+  border-color: var(--c-line);
+  cursor: not-allowed;
+}
+
+.kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-2);
+  text-align: center;
+}

@@ -7,6 +7,10 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./styles/tokens.css";
 import "./styles/console.css";
 import "./styles/screens.css";
+import "./styles/nav.css";
+import "./styles/live.css";
+import "./styles/event.css";
+import "./styles/patrol.css";
 
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -17,6 +21,8 @@ import { h } from "./components/dom";
 import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
 import { rankCases, renderOverview } from "./screens/overview";
+import { renderLive, type LiveScreen } from "./screens/live";
+import { renderPatrol } from "./screens/patrol";
 
 // MapLibre's worker is a sibling file in the package: point it at the copy Vite
 // emits so it is served locally (offline, no CDN).
@@ -50,6 +56,9 @@ let casesRequest: Promise<CasesResponse> | null = null;
 /** The mounted screen, so a hash change can tear its maps and timers down. */
 let current: Screen | null = null;
 
+/** The mounted live screen and its region. Event-only hash changes call select() on it, no re-render. */
+let currentLive: { region: string; screen: LiveScreen } | null = null;
+
 // Bumped on every navigation. A case-detail fetch that resolves after the user
 // has moved on must not replace the screen they are looking at now.
 let renderToken = 0;
@@ -75,6 +84,18 @@ function showError(message: string): void {
   );
 }
 
+/**
+ * "#/live/<REGION>" or "#/live/<REGION>/event/<index>" -> region and event index (null when no
+ * event is selected). Any other hash returns null. The region must be the snapshot alphabet.
+ */
+function liveFromHash(): { region: string; eventIndex: number | null } | null {
+  const path = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
+  const match = /^\/live\/([A-Z_]+)(?:\/event\/(\d+))?$/.exec(path);
+  if (match === null) return null;
+  const [, region, index] = match;
+  return { region, eventIndex: index === undefined ? null : Number(index) };
+}
+
 /** "#/case/<id>" -> id; "#/", "", or anything unrecognised -> overview. */
 function caseIdFromHash(): string | null {
   const path = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
@@ -92,12 +113,32 @@ function caseIdFromHash(): string | null {
 }
 
 function route(): void {
+  // Live and patrol do not need the cases snapshot, so they route before the loading gate.
+  const live = liveFromHash();
+  if (live !== null && currentLive !== null && currentLive.region === live.region) {
+    // Same region, only the selected event changed: keep the map and the list alive.
+    currentLive.screen.select(live.eventIndex);
+    return;
+  }
+
   renderToken += 1;
   const token = renderToken;
 
   const previous = current;
+  currentLive?.screen.destroy();
+  currentLive = null;
   current = null;
   previous?.destroy();
+
+  if (live !== null) {
+    currentLive = { region: live.region, screen: renderLive(app, live) };
+    return;
+  }
+
+  if (location.hash === "#/patrol") {
+    renderPatrol(app);
+    return;
+  }
 
   if (cases === null) {
     if (loadError !== null) showError(loadError);
