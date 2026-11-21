@@ -4,7 +4,7 @@
  * frozen API response, not from local maths.
  */
 
-import type { CaseStatus, CaseSummary, CasesResponse } from "../api";
+import type { CaseSummary, CasesResponse } from "../api";
 import { attribution } from "../components/Attribution";
 import { caseList } from "../components/CaseList";
 import { h } from "../components/dom";
@@ -15,28 +15,25 @@ import { topBar } from "../components/TopBar";
 import { fmtInt } from "../format";
 import { mountOverviewMap } from "../map/overviewMap";
 
-const STATUS_RANK: Record<CaseStatus, number> = {
-  candidate: 0,
-  ruled_out: 1,
-  plain: 2,
-};
-
 /**
- * Analyst order: cases that are still unexplained first, then the ones physics
- * ruled out, then everything with no evidence. Within a status the case with
- * the most radar passes wins, then the longest gap.
+ * Analyst order: highest risk score first, cases with no score last, and the
+ * longest gap as the tie-breaker.
+ *
+ * The API already sorts, but the rail must not change order just because a
+ * server build does: the client sorts the same way every time.
  *
  * `sort` is stable in ES2019+, so full ties keep the order the API returned.
  * The input array is copied because sorting in place would mutate the cached
  * response shared by both screens.
  */
 export function rankCases(cases: CaseSummary[]): CaseSummary[] {
-  return [...cases].sort(
-    (a, b) =>
-      STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
-      b.n_candidates - a.n_candidates ||
-      b.hours - a.hours,
-  );
+  return [...cases].sort((a, b) => {
+    // Null means "not scored", which is not the same as zero: it ranks last.
+    if (a.score === null && b.score === null) return b.hours - a.hours;
+    if (a.score === null) return 1;
+    if (b.score === null) return -1;
+    return b.score - a.score || b.hours - a.hours;
+  });
 }
 
 /**
