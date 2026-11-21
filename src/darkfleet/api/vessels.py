@@ -26,7 +26,6 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +39,7 @@ from darkfleet.ingest.ais_tracks import iter_files
 router = APIRouter(tags=["vessel"])
 
 TRACK_HOURS = 12
+RECORDING_WINDOW = timedelta(hours=24)
 """The dossier's window: the same one the watch screen's default filter shows."""
 
 TRACK_MAX_POINTS = 200
@@ -222,71 +222,80 @@ def recordings_root() -> Path:
 
 def reset_cache() -> None:
     """Drop parsed recordings; tests change DARKFLEET_AIS_DIR between cases."""
-    _read_recording.cache_clear()
+    _FILE_INDEX.clear()
 
 
 def _recording_files(root: Path) -> tuple[Path, ...]:
-    """Every hour file under every region folder, in name order.
+    """Recent hour files under every region folder, in name order.
 
-    The recorder writes one folder per region and one file per hour, so filename order is
-    time order; ``iter_files`` still merges the files by timestamp in case a folder was
-    copied around.
+    The recorder writes one folder per region and one file per hour. Files untouched for
+    longer than ``RECORDING_WINDOW`` are skipped: the dossier shows a 12 h track, and reading
+    the whole night's recording on every open was the 5 s first-click delay.
     """
     try:
         directories = sorted(path for path in root.iterdir() if path.is_dir())
     except OSError:
         return ()
+    cutoff = datetime.now(UTC).timestamp() - RECORDING_WINDOW.total_seconds()
     files: list[Path] = []
     for directory in directories:
         try:
-            files.extend(sorted(directory.glob("*.jsonl.gz")))
+            files.extend(p for p in sorted(directory.glob("*.jsonl.gz")) if p.stat().st_mtime >= cutoff)
         except OSError:
             continue
     return tuple(files)
 
 
-def _signature(files: Sequence[Path]) -> str:
-    """A cache key that changes when a file is appended to, added or removed."""
-    parts: list[str] = []
-    for path in files:
-        try:
-            parts.append(f"{path.name}:{path.stat().st_mtime_ns}")
-        except OSError:
-            continue
-    return "|".join(parts)
+# One parsed index per hour file, keyed by (mtime, size). Closed hours never change, so they
+# are parsed once; only the file the recorder is appending to is re-read when it grows.
+_FileIndex = dict[int, tuple[list[Ping], VesselInfo | None]]
+_FILE_INDEX: dict[Path, tuple[tuple[int, int], _FileIndex]] = {}
 
 
-def _recording(mmsi: int) -> _Recording:
-    """The recorded fixes and static data for one MMSI, or an empty record."""
-    root = recordings_root()
-    files = _recording_files(root)
-    if not files:
-        return _Recording()
-    try:
-        return _read_recording(str(root), _signature(files), len(files), mmsi)
-    except OSError:
-        return _Recording()
-
-
-@lru_cache(maxsize=16)
-def _read_recording(root: str, signature: str, file_count: int, mmsi: int) -> _Recording:
-    """Parse the recordings once per (recorder state, MMSI).
-
-    ``signature`` and ``file_count`` are cache-key material only: they make a new hour, an
-    append or a deletion re-read without the caller tracking the recorder itself.
-    """
-    del signature, file_count
-    pings: list[Ping] = []
-    info: VesselInfo | None = None
-    for obj in iter_files(_recording_files(Path(root))):
-        if obj.mmsi != mmsi:
-            continue
+def _file_index(path: Path) -> _FileIndex:
+    stat = path.stat()
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _FILE_INDEX.get(path)
+    if cached and cached[0] == key:
+        return cached[1]
+    index: _FileIndex = {}
+    for obj in iter_files([path]):
+        pings, info = index.get(obj.mmsi, ([], None))
         if isinstance(obj, Ping):
             pings.append(obj)
         else:
             info = _merge_info(info, obj)
+        index[obj.mmsi] = (pings, info)
+    _FILE_INDEX[path] = (key, index)
+    return index
+
+
+def _recording(mmsi: int) -> _Recording:
+    """The recorded fixes and static data for one MMSI, or an empty record."""
+    files = _recording_files(recordings_root())
+    for stale in set(_FILE_INDEX) - set(files):
+        del _FILE_INDEX[stale]
+    pings: list[Ping] = []
+    info: VesselInfo | None = None
+    for path in files:
+        try:
+            file_pings, file_info = _file_index(path).get(mmsi, ([], None))
+        except OSError:
+            continue
+        pings.extend(file_pings)
+        if file_info is not None:
+            info = _merge_info(info, file_info)
     pings.sort(key=lambda ping: ping.t)
     return _Recording(pings=tuple(pings), info=info)
+
+
+def warm_cache() -> None:
+    """Parse the recent recording once, so the first dossier opens instantly."""
+    for path in _recording_files(recordings_root()):
+        try:
+            _file_index(path)
+        except OSError:
+            continue
 
 
 def _merge_info(current: VesselInfo | None, incoming: VesselInfo) -> VesselInfo:
