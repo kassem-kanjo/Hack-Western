@@ -265,7 +265,8 @@ def parse_sar_report(payload: dict) -> list[SarCellRow]:
     rows: list[SarCellRow] = []
     for group in payload.get("entries", []):
         for dataset_rows in group.values():
-            for row in dataset_rows:
+            # A day with no detections comes back as null, not an empty list.
+            for row in dataset_rows or []:
                 rows.append(
                     SarCellRow(
                         day=date.fromisoformat(row["date"]),

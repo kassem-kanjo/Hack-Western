@@ -1,10 +1,15 @@
 /**
- * Presentation mode (UI V2, design/v2/04-present.png).
+ * Presentation mode (design/v2/04-present.png).
  *
- * A fixed overlay over the live app: one caption bottom-left, a thin progress
- * bar across the top and the keyboard hints bottom-right. Steps are data (see
- * steps.ts); stepping only assigns location.hash, so the router keeps owning
- * the screens and the view behind the caption is the real one.
+ * A fixed overlay over the live app: one bottom-centre caption, a thin progress
+ * bar across the top and the keyboard hints under the caption. Steps are data
+ * (see steps.ts); stepping only assigns location.hash, so the router keeps
+ * owning the screens and the view behind the caption is the real one.
+ *
+ * Every number on every beat is fetched once when the tour starts and cached
+ * for the whole run, so the radar share, the live counts and the spoof offsets
+ * cannot disagree between screens. The Hormuz-trend beat only exists when the
+ * validation file proves the 2026-02-28 event; otherwise it is not in the list.
  *
  * The overlay itself is pointer-events: none: only the app's own controls and
  * the topbar stay clickable. Keys: -> / Space next, <- back, Esc exits and
@@ -13,18 +18,33 @@
 
 import "./present.css";
 
-import { fetchCases, fetchLiveEvents, fetchLiveSummary, fetchLiveVessels, fetchStats } from "../api";
+import type { WatchAlert } from "../api";
+import { fetchEdgeStatus, fetchStats, fetchWatch } from "../api";
 import { h } from "../components/dom";
-import type { LiveEvent, LiveVessel, LiveWatchlistEntry } from "../model/live";
-import { unusualCount, vesselName, watchlistAlerts, windowHours } from "../model/liveFacts";
-import { PRESENT_STEPS, type PresentCaption, type PresentStep, type PresentToken } from "./steps";
+import {
+  PRESENT_ROUTES,
+  PRESENT_STEPS,
+  watchAlertRoute,
+  type PresentCaption,
+  type PresentStep,
+  type PresentToken,
+} from "./steps";
 
-const TOTAL = PRESENT_STEPS.length;
-const BALTIC_REGION = "BALTIC_WATCH";
 const HORMUZ_UNSEEN_URL = "/api/hormuz/unseen";
+/**
+ * The validation written from data/snapshot/hormuz_validation.json. A 404 (or
+ * an older API that has no route yet) means "not proved", and the trend beat is
+ * skipped: the tour never claims a trend we have not tested.
+ */
+const HORMUZ_VALIDATION_URL = "/api/hormuz/validation";
+const HORMUZ_EVENT = "2026-02-28";
+const HORMUZ_VERDICT = "moves with event";
+/** Matches the CSS breakpoint: the tour is desktop-only. */
+const PHONE_QUERY = "(max-width: 1000px)";
+
 const TOKEN = /\{([a-z_]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
-const EVENT_COUNT_KEYS = ["silences", "jumps", "clones", "meetings", "spoofs"] as const;
+const EVENT_KEYS = ["event", "event_date", "date", "day", "t", "start"] as const;
 
 /**
  * Live values for the caption tokens. A missing key means "no number from the
@@ -32,29 +52,43 @@ const EVENT_COUNT_KEYS = ["silences", "jumps", "clones", "meetings", "spoofs"] a
  * fetch has not answered yet.
  */
 type TokenValues = Partial<Record<PresentToken, string>>;
-let tokenValues: TokenValues | null = null;
-let loadingTokens = false;
 
-/**
- * Values that belong in a route rather than a caption (today: the watchlist
- * vessel the camera should open). Kept apart so a missing route value falls
- * back to the beat's safer route instead of breaking the hash.
- */
-let routeValues: Record<string, string> = {};
+interface TourValues {
+  tokens: TokenValues;
+  /** True only when the validation file names the 2026-02-28 event as proved. */
+  trend: boolean;
+}
+
+let tokenValues: TokenValues | null = null;
+let trendValidated = false;
+
+/** Route values (today: the spoof alert id); missing means the beat's fallback route. */
+const routeValues: Record<string, string> = {};
+
+/** The beats visible for this run: all of them, minus any unproved conditional beat. */
+let steps: readonly PresentStep[] = visibleSteps(false);
 
 let active = false;
 let index = 0;
+/** Id of the beat on screen, so a list change keeps the presenter on that beat. */
+let currentId: string | null = null;
+/** Bumped on start/exit so a fetch from an earlier run cannot repaint this one. */
+let run = 0;
 /** The hash that was on screen before presentation started; restored on exit. */
 let startHash = "";
 
 let root: HTMLElement | null = null;
 let caption: HTMLElement | null = null;
 let stepLabel: HTMLElement | null = null;
-let proofLabel: HTMLElement | null = null;
 let headline: HTMLElement | null = null;
 let line: HTMLElement | null = null;
 let progress: HTMLElement | null = null;
 let progressFill: HTMLElement | null = null;
+
+/** The tour list after the run's one validation fetch answers. */
+function visibleSteps(showTrend: boolean): readonly PresentStep[] {
+  return PRESENT_STEPS.filter((beat) => beat.requires !== "hormuz_event" || showTrend);
+}
 
 /** Hash navigation is the router's contract; never touch the screen directly. */
 function navigate(route: string): void {
@@ -78,18 +112,24 @@ function restore(hash: string): void {
 }
 
 function setProgress(step: number): void {
+  const count = steps.length;
   if (progress !== null) {
+    progress.setAttribute("aria-valuemax", String(count));
     progress.setAttribute("aria-valuenow", String(step + 1));
-    progress.setAttribute("aria-valuetext", `Step ${step + 1} of ${TOTAL}`);
+    progress.setAttribute("aria-valuetext", `Step ${step + 1} of ${count}`);
   }
   if (progressFill !== null) {
-    progressFill.style.width = `${((step + 1) / TOTAL) * 100}%`;
+    progressFill.style.width = `${((step + 1) / count) * 100}%`;
   }
 }
 
 /** A finite number or null; one guard for every optional field on the wire. */
 function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function integerToken(value: number | null): string | undefined {
@@ -100,65 +140,106 @@ function ratioToken(value: number | null): string | undefined {
   return value === null ? undefined : value.toFixed(2);
 }
 
+/** "148 ms"; undefined leaves the beat's number-free fallback sentence. */
+function recoveryToken(value: number | null): string | undefined {
+  return value === null || value < 0 ? undefined : `${Math.round(value)} ms`;
+}
+
 /** The spoof event the "physics" beat is about: highest severity, as the API sorts. */
-function topSpoof(events: LiveEvent[]): LiveEvent | null {
-  let best: LiveEvent | null = null;
-  for (const event of events) {
-    if (event.kind !== "spoof") continue;
-    if (best === null || event.severity > best.severity) best = event;
+function topSpoof(alerts: readonly WatchAlert[]): WatchAlert | null {
+  let best: WatchAlert | null = null;
+  for (const alert of alerts) {
+    if (alert.kind !== "spoof") continue;
+    if (best === null || alert.severity > best.severity) best = alert;
   }
   return best;
+}
+
+interface SpoofFacts {
+  ships: number | null;
+  minKm: number | null;
+  maxKm: number | null;
 }
 
 /**
- * The watchlist ALERT vessel the recording heard most recently. Alerts carry
- * the MMSI or IMO the list matched; the vessels carry the broadcast fixes, so
- * the pick needs both. A vessel with no last fix cannot be "seen recently" and
- * is skipped rather than guessed at.
+ * The ghost point's own numbers. Current snapshots write `evidence.vessels[]`
+ * with one `offset_km` each; older ones also carry a flat `offsets_km`. Both
+ * are read without trusting unknown JSON.
  */
-function latestAlertVessel(
-  alerts: LiveWatchlistEntry[],
-  vessels: LiveVessel[],
-): { mmsi: number; name: string; at: number } | null {
-  const byMmsi = new Map(vessels.map((vessel) => [vessel.mmsi, vessel]));
-  const byImo = new Map<number, LiveVessel>();
-  for (const vessel of vessels) {
-    if (vessel.imo !== null) byImo.set(vessel.imo, vessel);
+function spoofFacts(alert: WatchAlert): SpoofFacts {
+  const evidence = alert.evidence ?? {};
+  const rows = Array.isArray(evidence["vessels"]) ? evidence["vessels"] : [];
+  const offsets: number[] = [];
+  let rowCount = 0;
+
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    rowCount += 1;
+    const km = finite(row["offset_km"]);
+    if (km !== null && km > 0) offsets.push(km);
   }
 
-  let best: { mmsi: number; name: string; at: number } | null = null;
-  for (const alert of alerts) {
-    const vessel =
-      (alert.mmsi === null ? undefined : byMmsi.get(alert.mmsi)) ??
-      (alert.imo === null ? undefined : byImo.get(alert.imo));
-    if (vessel === undefined || vessel.last === null) continue;
-
-    const at = Date.parse(vessel.last.t);
-    if (!Number.isFinite(at)) continue;
-    if (best === null || at > best.at) {
-      best = { mmsi: vessel.mmsi, name: vesselName(vessel.mmsi, vessels), at };
+  if (offsets.length === 0) {
+    const flat = evidence["offsets_km"];
+    if (Array.isArray(flat)) {
+      for (const value of flat) {
+        const km = finite(value);
+        if (km !== null && km > 0) offsets.push(km);
+      }
     }
   }
-  return best;
+
+  const declared = finite(evidence["n_vessels"]);
+  const ships =
+    declared ?? (rowCount > 0 ? rowCount : offsets.length > 0 ? offsets.length : null);
+
+  if (offsets.length === 0) return { ships, minKm: null, maxKm: null };
+  return { ships, minKm: Math.min(...offsets), maxKm: Math.max(...offsets) };
 }
 
-/** Fill `{route_token}` placeholders; null while any value is still unknown. */
-function fillRoute(template: string): string | null {
-  let missing = false;
-  const route = template.replace(TOKEN, (_match, name: string) => {
-    const value = routeValues[name];
-    if (value === undefined) {
-      missing = true;
-      return "";
-    }
-    return encodeURIComponent(value);
+/** Does any string under this key mention the event date? */
+function mentionsEvent(value: unknown): boolean {
+  if (typeof value === "string") return value.includes(HORMUZ_EVENT);
+  if (Array.isArray(value)) return value.some(mentionsEvent);
+  if (isRecord(value)) return Object.values(value).some(mentionsEvent);
+  return false;
+}
+
+function normalVerdict(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** The event date sits in this object under one of the usual keys, or as a key. */
+function eventHere(node: Record<string, unknown>): boolean {
+  return Object.entries(node).some(([key, value]) => {
+    if (key.includes(HORMUZ_EVENT)) return true;
+    return (EVENT_KEYS as readonly string[]).includes(key) && mentionsEvent(value);
   });
-  return missing ? null : route;
 }
 
-/** The route for a beat, or its safer fallback while a route value is missing. */
-function routeFor(beat: PresentStep): string {
-  return fillRoute(beat.route) ?? beat.fallbackRoute ?? "#/";
+function isPositiveVerdict(node: Record<string, unknown>): boolean {
+  if (node["moves_with_event"] === true) return true;
+  const verdict = node["verdict"];
+  if (typeof verdict === "string" && normalVerdict(verdict) === HORMUZ_VERDICT) return true;
+  // A compact file may key the result by the event date itself.
+  return Object.entries(node).some(
+    ([key, value]) =>
+      key.includes(HORMUZ_EVENT) && typeof value === "string" && normalVerdict(value) === HORMUZ_VERDICT,
+  );
+}
+
+/**
+ * Walk the validation document looking for one object that both names the
+ * 2026-02-28 event and carries the positive verdict. Pairing them in the same
+ * scope is what makes a stray verdict elsewhere in the file harmless.
+ */
+function provesEvent(node: unknown, inScope: boolean): boolean {
+  if (Array.isArray(node)) return node.some((child) => provesEvent(child, inScope));
+  if (!isRecord(node)) return false;
+
+  const scope = inScope || eventHere(node);
+  if (scope && isPositiveVerdict(node)) return true;
+  return Object.values(node).some((child) => provesEvent(child, scope));
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -169,110 +250,98 @@ async function getJson<T>(path: string): Promise<T> {
 
 /** Hormuz's snapshot is local to its block; presentation needs only these fields. */
 interface HormuzSummaryLite {
-  days?: number;
   dark_share_mean?: number | null;
   headline_share?: number | null;
-  n_days_used?: number;
 }
 
 interface HormuzUnseenLite {
   summary?: HormuzSummaryLite;
 }
 
+async function loadHormuzTrendValidated(): Promise<boolean> {
+  try {
+    return provesEvent(await getJson<unknown>(HORMUZ_VALIDATION_URL), false);
+  } catch {
+    // No file, no route, or unreadable JSON: the trend beat is not proved.
+    return false;
+  }
+}
+
 /**
- * Fetch every number the captions may print, once per presentation run. The
- * calls are independent (`allSettled`) so one dead endpoint only removes its
- * own numbers; each step then reads its fallback sentence.
+ * Fetch every number the captions may print, once per tour run. The calls are
+ * independent (`allSettled`) so one dead endpoint only removes its own numbers;
+ * each beat then reads its fallback sentence. `validation` resolves to a bool
+ * rather than rejecting, so "missing" and "not proved" take the same path.
  */
-async function loadTokenValues(): Promise<TokenValues> {
-  const [cases, stats, live, vessels, events, hormuz] = await Promise.allSettled([
-    fetchCases({ limit: 200, status: "all" }),
-    fetchStats(),
-    fetchLiveSummary(BALTIC_REGION),
-    fetchLiveVessels(BALTIC_REGION),
-    fetchLiveEvents(BALTIC_REGION),
+async function loadTourValues(): Promise<TourValues> {
+  const [watch, unseen, stats, edge, validation] = await Promise.allSettled([
+    fetchWatch(),
     getJson<HormuzUnseenLite>(HORMUZ_UNSEEN_URL),
+    fetchStats(),
+    fetchEdgeStatus(),
+    loadHormuzTrendValidated(),
   ]);
 
   const values: TokenValues = {};
 
-  if (cases.status === "fulfilled") {
-    const { totals, cases: rows } = cases.value;
-    // candidates_final is optional on older snapshots; the listed cases are the fallback.
-    const final = finite((totals as { candidates_final?: unknown }).candidates_final);
-    const unexplained =
-      final ?? (rows.length > 0 ? rows.filter((row) => row.status === "candidate").length : null);
+  if (watch.status === "fulfilled") {
+    const data = watch.value;
+    const counts = (data.counts ?? {}) as { ships?: unknown; alerts?: unknown };
+    const ships = Array.isArray(data.ships) ? data.ships : [];
+    const alerts = Array.isArray(data.alerts) ? data.alerts : [];
+    const areas = Array.isArray(data.areas) ? data.areas : [];
 
-    values.gaps_scanned = integerToken(finite(totals.gaps_scanned));
-    values.radar_nearby = integerToken(finite(totals.with_candidates));
-    values.cleared = integerToken(finite(totals.ruled_out));
-    values.unexplained = integerToken(unexplained);
+    values.ships_now = integerToken(finite(counts.ships) ?? ships.length);
+    values.alerts = integerToken(finite(counts.alerts) ?? alerts.length);
+
+    // "across N areas" means the receivers we run, not every watched box.
+    const listening = areas.filter((area) => area.kind === "listening").length;
+    const areaCount = listening > 0 ? listening : areas.length;
+    if (areaCount > 0) values.areas = integerToken(areaCount);
+
+    const spoof = topSpoof(alerts);
+    if (spoof !== null) {
+      routeValues["spoof_id"] = spoof.id;
+      const facts = spoofFacts(spoof);
+      values.spoof_ships = integerToken(facts.ships);
+      values.offset_min = integerToken(facts.minKm);
+      values.offset_max = integerToken(facts.maxKm);
+    }
+  }
+
+  if (unseen.status === "fulfilled") {
+    const summary = unseen.value.summary;
+    const share = finite(summary?.headline_share) ?? finite(summary?.dark_share_mean);
+    if (share !== null) values.hormuz_share_pct = String(Math.round(share * 100));
   }
 
   if (stats.status === "fulfilled") {
-    const validation = stats.value.validation;
-    values.null_ratio = ratioToken(finite(validation?.null_ratio));
-    values.bridge_auc = ratioToken(finite(validation?.bridge_auc));
+    values.null_ratio = ratioToken(finite(stats.value.validation?.null_ratio));
   }
 
-  if (live.status === "fulfilled") {
-    const counts = live.value.counts ?? {};
-    values.baltic_ships = integerToken(finite(counts.vessels));
-
-    const alerts = watchlistAlerts(live.value.watchlist);
-    values.alerts_at_least = integerToken(alerts.length);
-
-    // "seen in the last N h" is the only honest wording for a recording, so
-    // the window comes from the same summary as the alerts.
-    const hours = windowHours(live.value.window);
-    if (Number.isFinite(hours) && hours > 0) values.window_h = String(Math.round(hours));
-
-    if (vessels.status === "fulfilled") {
-      const picked = latestAlertVessel(alerts, vessels.value);
-      if (picked !== null) {
-        routeValues.watchlist_mmsi = String(picked.mmsi);
-        values.watchlist_vessel = picked.name;
-      }
-    }
-
-    const hasEventCounts = EVENT_COUNT_KEYS.some((key) => finite(counts[key]) !== null);
-    if (hasEventCounts) {
-      values.baltic_events = integerToken(unusualCount(counts));
-    }
+  if (edge.status === "fulfilled") {
+    values.recovery = recoveryToken(finite(edge.value.last_recovery_ms));
   }
 
-  if (events.status === "fulfilled") {
-    const spoof = topSpoof(events.value);
-    if (spoof !== null) {
-      const listed = Array.isArray(spoof.evidence["vessels"]) ? spoof.evidence["vessels"].length : null;
-      values.spoof_ships = integerToken(finite(spoof.evidence["n_vessels"]) ?? listed);
-    }
-  }
-
-  if (hormuz.status === "fulfilled") {
-    const summary = hormuz.value.summary;
-    const share = finite(summary?.headline_share) ?? finite(summary?.dark_share_mean);
-    if (share !== null) values.hormuz_share_pct = String(Math.round(share * 100));
-    values.hormuz_days_used = integerToken(finite(summary?.n_days_used) ?? finite(summary?.days));
-  }
-
-  return values;
+  return {
+    tokens: values,
+    trend: validation.status === "fulfilled" && validation.value,
+  };
 }
 
-function ensureTokenValues(): void {
-  if (loadingTokens) return;
-  loadingTokens = true;
-  void loadTokenValues()
-    .then((values) => {
-      tokenValues = values;
-      // Repaint the beat the presenter is on; navigation is a no-op for the same route.
-      if (active) show(index);
+function ensureTourValues(myRun: number): void {
+  void loadTourValues()
+    .then((loaded) => {
+      if (myRun !== run) return;
+      tokenValues = loaded.tokens;
+      trendValidated = loaded.trend;
+      steps = visibleSteps(trendValidated);
+      // The conditional beat may have just joined (or stayed absent): keep the
+      // same beat on screen and only refresh its label, text and progress.
+      repaint();
     })
     .catch(() => {
       // Keep the fallbacks; a failed fetch must never put "undefined" on screen.
-    })
-    .finally(() => {
-      loadingTokens = false;
     });
 }
 
@@ -306,21 +375,29 @@ function captionFor(beat: PresentStep): PresentCaption {
   return {
     headline: fill(beat.headline, tokenValues) ?? beat.fallback?.headline ?? stripTokens(beat.headline),
     line: fill(beat.line, tokenValues) ?? beat.fallback?.line ?? stripTokens(beat.line),
-    proof: fill(beat.proof, tokenValues) ?? beat.fallback?.proof ?? stripTokens(beat.proof),
   };
+}
+
+/** The route for a beat, or the world view while the spoof id is unknown. */
+function routeFor(beat: PresentStep): string {
+  if (beat.alert === "spoof") {
+    const id = routeValues["spoof_id"];
+    return id === undefined || id === "" ? PRESENT_ROUTES.watch : watchAlertRoute(id);
+  }
+  return PRESENT_ROUTES[beat.route];
 }
 
 /** Swap the caption to one step and replay its 200 ms fade-in. */
 function show(step: number): void {
-  const beat = PRESENT_STEPS[step];
+  const beat = steps[step];
   if (beat === undefined || root === null) return;
 
   const text = captionFor(beat);
   index = step;
+  currentId = beat.id;
   navigate(routeFor(beat));
 
-  if (stepLabel !== null) stepLabel.textContent = `${step + 1} / ${TOTAL}`;
-  if (proofLabel !== null) proofLabel.textContent = text.proof;
+  if (stepLabel !== null) stepLabel.textContent = `${step + 1} / ${steps.length}`;
   if (headline !== null) headline.textContent = text.headline;
   if (line !== null) line.textContent = text.line;
   setProgress(step);
@@ -332,6 +409,13 @@ function show(step: number): void {
     void caption.offsetWidth;
     caption.classList.add("is-in");
   }
+}
+
+/** Re-render the current beat after the step list or its values changed. */
+function repaint(): void {
+  if (!active) return;
+  const at = currentId === null ? -1 : steps.findIndex((beat) => beat.id === currentId);
+  show(at >= 0 ? at : 0);
 }
 
 function hint(key: string, label: string): HTMLElement {
@@ -347,21 +431,20 @@ function buildOverlay(): HTMLElement {
       role: "progressbar",
       "aria-label": "Presentation progress",
       "aria-valuemin": 1,
-      "aria-valuemax": TOTAL,
+      "aria-valuemax": steps.length,
       "aria-valuenow": 1,
-      "aria-valuetext": `Step 1 of ${TOTAL}`,
+      "aria-valuetext": `Step 1 of ${steps.length}`,
     },
     progressFill,
   );
 
   stepLabel = h("span", { class: "present-step" });
-  proofLabel = h("span", { class: "present-proof" });
   headline = h("h1", { class: "present-headline" });
   line = h("p", { class: "present-line" });
   caption = h(
     "div",
     { class: "present-caption", role: "status", "aria-live": "polite" },
-    h("div", { class: "present-meta" }, stepLabel, proofLabel),
+    h("div", { class: "present-meta" }, stepLabel),
     headline,
     line,
   );
@@ -386,18 +469,29 @@ function buildOverlay(): HTMLElement {
   );
 }
 
+function tourUnsupported(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(PHONE_QUERY).matches;
+}
+
 /** Start at step 1. Calling it while active restarts from the first beat. */
 export function startPresent(): void {
+  // The tour needs the width of a laptop: on a phone the overlay is not drawn.
+  if (tourUnsupported()) return;
+
   if (!active) {
     startHash = location.hash;
-    // The recording grows between runs: fetch a fresh set of numbers, once per run.
+    // Each run gets fresh numbers; they are cached until the run ends.
+    run += 1;
     tokenValues = null;
-    routeValues = {};
+    trendValidated = false;
+    steps = visibleSteps(false);
+    for (const key of Object.keys(routeValues)) delete routeValues[key];
+    currentId = null;
     root = buildOverlay();
     document.body.append(root);
     document.body.classList.add("is-presenting");
     active = true;
-    ensureTokenValues();
+    ensureTourValues(run);
   }
   show(0);
 }
@@ -406,16 +500,17 @@ export function startPresent(): void {
 export function exitPresent(): void {
   if (!active) return;
   active = false;
+  run += 1; // invalidate a fetch that is still in flight
   document.body.classList.remove("is-presenting");
   root?.remove();
   root = null;
   caption = null;
   stepLabel = null;
-  proofLabel = null;
   headline = null;
   line = null;
   progress = null;
   progressFill = null;
+  currentId = null;
   restore(startHash);
   startHash = "";
 }
@@ -447,7 +542,7 @@ function onKeyDown(event: KeyboardEvent): void {
   if (event.key === "ArrowRight" || event.key === " " || event.code === "Space") {
     event.preventDefault();
     if (event.repeat) return;
-    show(Math.min(index + 1, TOTAL - 1));
+    show(Math.min(index + 1, steps.length - 1));
     return;
   }
 
@@ -485,4 +580,9 @@ export function initPresent(): void {
   // Capture so the presentation keys win over any focused control or map handler.
   window.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("click", onClick);
+  // A window narrowed to phone width drops the tour rather than leaving an
+  // invisible overlay owning Escape.
+  window.addEventListener("resize", () => {
+    if (active && tourUnsupported()) exitPresent();
+  });
 }

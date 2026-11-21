@@ -1,136 +1,128 @@
 /**
- * The eight beats of the 3:00 demo, as data.
+ * The six beats of the tour, as data.
  *
- * One record per beat from docs/demo-script.md. `route` is the hash route the
- * app should be showing; `headline` and `line` are what the room reads; `proof`
- * is the tiny presenter-facing label that names what the screen is proving.
- * Reordering the story is an edit to this array, not a rebuild of the overlay.
+ * `route` is a *name* from PRESENT_ROUTES, never a literal hash: if another
+ * screen is renamed, the tour is fixed in one place at the top of this file.
+ * `headline` and `line` are what the room reads; the line carries `{token}`
+ * placeholders that present.ts fills once, from the live APIs, when the tour
+ * starts. `fallback` is a complete sentence without the number, so a missing
+ * endpoint never puts "undefined" or a stale figure on screen.
  *
- * A caption never hardcodes a number that comes from the recording: the text
- * carries `{token}` placeholders and present.ts fills them from the live API
- * when presentation starts. `fallback` is a complete sentence without the
- * number, used when an endpoint is missing or slow, so the room never reads
- * "undefined" or a stale figure.
+ * Beat 2 is conditional: it exists only when the API says the Hormuz trend was
+ * validated against the 2026-02-28 event. Without that proof the tour skips it
+ * entirely rather than claim a number we have not tested.
  */
+
+/** Every screen the tour can visit, by name. Renamed routes change here only. */
+export const PRESENT_ROUTES = {
+  hormuz: "#/hormuz",
+  watch: "#/watch",
+  patrol: "#/patrol",
+  /** There is no #/evidence route yet; the watch screen carries the evidence. */
+  evidence: "#/watch",
+} as const;
+
+export type PresentRouteName = keyof typeof PRESENT_ROUTES;
+
+/** "#/watch/alert/<id>": the focus view for one alert. */
+export function watchAlertRoute(alertId: string): string {
+  return `${PRESENT_ROUTES.watch}/alert/${encodeURIComponent(alertId)}`;
+}
 
 /** Numbers present.ts can fill into a caption. */
 export type PresentToken =
-  | "spoof_ships"
   | "hormuz_share_pct"
-  | "hormuz_days_used"
-  | "baltic_ships"
-  | "baltic_events"
-  | "alerts_at_least"
-  | "window_h"
-  | "watchlist_vessel"
-  | "gaps_scanned"
-  | "radar_nearby"
-  | "cleared"
-  | "unexplained"
-  | "null_ratio"
-  | "bridge_auc";
+  | "ships_now"
+  | "areas"
+  | "alerts"
+  | "spoof_ships"
+  | "offset_min"
+  | "offset_max"
+  | "recovery"
+  | "null_ratio";
 
-/** The three lines the overlay shows for one beat. */
+/** The two lines the overlay shows for one beat. */
 export interface PresentCaption {
   headline: string;
   line: string;
-  proof: string;
 }
 
 export interface PresentStep {
-  /** Stable key, used only for markup ids and debugging. */
+  /** Stable key, used for markup ids and to keep the presenter on the same beat. */
   id: string;
+  /** Which screen the beat shows, resolved through PRESENT_ROUTES. */
+  route: PresentRouteName;
   /**
-   * Hash route to show for this beat. It may carry a route token such as
-   * `{watchlist_mmsi}`; present.ts fills those at run time and uses
-   * `fallbackRoute` when the value is not known yet.
+   * Open one alert on the watch screen. The id is filled from the tour's one
+   * /api/watch fetch; when it is missing the beat stays on the world view.
    */
-  route: string;
-  /** Route for a beat whose route token has no live value; omit when fixed. */
-  fallbackRoute?: string;
-  /** One sentence the room reads (<= 9 words). */
+  alert?: "spoof";
+  /**
+   * Show this beat only when a condition was proved at tour start. The lone
+   * condition is the Hormuz event validation; unproved means the beat is gone.
+   */
+  requires?: "hormuz_event";
+  /** One sentence the room reads (<= 12 words). */
   headline: string;
-  /** One supporting line under it (<= 22 words). */
+  /** One supporting line under it (<= 18 words). */
   line: string;
-  /** Short label naming the evidence already on screen. */
-  proof: string;
-  /** Replaces any field whose token has no live value; omit the fields with no token. */
+  /** Replaces a field whose token has no live value; omit the fields with no token. */
   fallback?: Partial<PresentCaption>;
 }
 
 export const PRESENT_STEPS: readonly PresentStep[] = [
   {
-    id: "hormuz",
-    route: "#/hormuz",
-    headline: "The fleet nobody declares",
-    line: "Around Hormuz, on a typical day about {hormuz_share_pct}% of vessels radar sees have no matching broadcast. Some are small boats; many are not.",
-    proof: "{hormuz_share_pct}% · {hormuz_days_used} well-covered days, Aug–Nov",
+    id: "radar",
+    route: "hormuz",
+    headline: "Radar sees ships the transponders don't",
+    line: "On a typical day {hormuz_share_pct}% of radar-seen vessels here aren't broadcasting.",
     fallback: {
-      line: "Around Hormuz, many vessels radar sees each day have no matching broadcast. Some are small boats; many are not.",
-      proof: "radar vs broadcasts · Aug–Nov",
+      line: "On a typical day, many radar-seen vessels here aren't broadcasting.",
     },
   },
   {
-    id: "hormuz-rule",
-    route: "#/hormuz",
-    headline: "The public record barely sees it",
-    line: "Global Fishing Watch logged one dark gap inside the strait from May to November: its rule only counts ships far offshore.",
-    proof: "1 GFW gap event · separate query",
+    id: "trend",
+    route: "hormuz",
+    requires: "hormuz_event",
+    headline: "Since the strait closed, dark ships doubled",
+    line: "We checked the date: the share moves with the event, not our receivers.",
   },
   {
     id: "live",
-    route: "#/live/BALTIC_WATCH",
-    headline: "So we record it ourselves",
-    line: "Since Friday night we've captured every ship our receivers hear in three hotspots. The Baltic: {baltic_ships} ships in {window_h} hours.",
-    proof: "live map · coverage line",
+    route: "watch",
+    headline: "Our own receivers, live",
+    line: "{ships_now} ships heard right now across {areas} areas; {alerts} alerts pass our physics checks.",
     fallback: {
-      line: "Since Friday night we've captured every ship our receivers hear in three hotspots, starting with the Baltic.",
+      line: "Ships are being heard right now across our listening areas; every alert passed our physics checks.",
     },
   },
   {
     id: "spoof",
-    route: "#/live/BALTIC_WATCH/kind/spoof",
-    headline: "Physics catches what statements can't",
-    line: "{spoof_ships} unrelated ships each jumped tens of kilometres to one point on land near St Petersburg, and back. Their positions were falsified, or a shared device is wrong.",
-    proof: "{spoof_ships} ships · one point on land",
+    route: "watch",
+    alert: "spoof",
+    headline: "{spoof_ships} ships at one point on land",
+    line: "Ships can't jump {offset_min}-{offset_max} km and back. Their positions were faked.",
     fallback: {
-      line: "Several unrelated ships each jumped tens of kilometres to one point on land near St Petersburg, and back.",
-      proof: "several ships · one point on land",
+      headline: "Several ships at one point on land",
+      line: "Ships can't jump across the sea and back in minutes. Their positions were faked.",
     },
   },
   {
-    id: "self-check",
-    route: "#/live/BALTIC_WATCH/kind/spoof",
-    headline: "And we check ourselves",
-    line: "An early version flagged a river port in St Petersburg. We tightened the physics and it disappeared. Every alert says why.",
-    proof: "per-ship jump in and out",
-  },
-  {
-    id: "watchlist",
-    route: "#/live/BALTIC_WATCH/vessel/{watchlist_mmsi}",
-    fallbackRoute: "#/live/BALTIC_WATCH",
-    headline: "At least {alerts_at_least} listed ships in {window_h} hours",
-    line: "Every broadcast IMO number is checked against sanctions lists: at least {alerts_at_least} sanctioned or shadow-fleet ships seen here in the last {window_h} hours.",
-    proof: "vessel card · {watchlist_vessel}",
+    id: "patrol",
+    route: "patrol",
+    headline: "AI is a sensor, not a judge",
+    line: "Kill the detector: the safety core stays up and recovers in {recovery}.",
     fallback: {
-      headline: "Sanctioned ships, seen in our recording",
-      line: "Every broadcast IMO number is checked against sanctions lists; the red tag marks sanctioned or shadow-fleet ships we heard.",
-      proof: "red watchlist tag · vessel card",
+      line: "Kill the detector: the safety core stays up and keeps checking.",
     },
-  },
-  {
-    id: "validation",
-    route: "#/",
-    headline: "We never accuse on radar alone",
-    line: "We tested our own method: radar near a dark ship was no better than chance. Physics is what we trust.",
-    proof: "evidence panel · {null_ratio}× chance",
-    fallback: { proof: "evidence panel" },
   },
   {
     id: "close",
-    route: "#/live/BALTIC_WATCH",
-    headline: "What physics proves, apart from what looks suspicious",
-    line: "For compliance teams and coast guards. Ask me about any dot on the map.",
-    proof: "back to the live map",
+    route: "evidence",
+    headline: "We tested ourselves",
+    line: "Radar near a dark ship was {null_ratio}x chance, so we never accuse on radar alone.",
+    fallback: {
+      line: "Radar near a dark ship was no better than chance, so we never accuse on radar alone.",
+    },
   },
 ];
