@@ -1,0 +1,9 @@
+{
+ "generated_at": "2026-11-21T08:56:17+00:00",
+ "seed": 7,
+ "source": "positions in the darkfleet store",
+ "pings": 0,
+ "tracks": 0,
+ "status": "no data",
+ "reason": "the store has no AIS positions (and no usable --jsonl-dir was given)"
+}
