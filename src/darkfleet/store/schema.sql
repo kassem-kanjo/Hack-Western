@@ -6,15 +6,45 @@
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
+-- ``positions`` holds both GFW position rows and raw AIS pings (issue #72). The AIS-only
+-- columns stay nullable so the older GFW ingest keeps writing the same five columns.
 CREATE TABLE IF NOT EXISTS positions (
     ts timestamptz NOT NULL,
     mmsi text NOT NULL,
     lat double precision NOT NULL,
     lon double precision NOT NULL,
     sog real,
+    cog real,
+    heading integer,
+    nav_status integer,
     PRIMARY KEY (ts, mmsi)
 );
 SELECT create_hypertable('positions', 'ts', if_not_exists => TRUE);
+
+-- Databases created before #72 lack the AIS columns; add them in place so a deployed
+-- instance upgrades on the next startup without losing pings.
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS cog real;
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS heading integer;
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS nav_status integer;
+
+-- Latest static/voyage data per vessel (AIS messages 5 and 24). One row per MMSI.
+CREATE TABLE IF NOT EXISTS vessels_static (
+    mmsi text PRIMARY KEY,
+    imo integer,
+    name text,
+    callsign text,
+    ship_type integer,
+    length_m double precision,
+    destination text,
+    last_seen timestamptz
+);
+
+-- Recorder presence per UTC minute: the difference between a vessel going dark and our
+-- receiver going dark. Not a hypertable: it is one row per minute and read whole.
+CREATE TABLE IF NOT EXISTS coverage_minutes (
+    minute timestamptz PRIMARY KEY,
+    n_msgs integer NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS gap_events (
     id text NOT NULL,

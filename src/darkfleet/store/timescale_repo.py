@@ -13,6 +13,7 @@ from importlib.resources import files
 
 import psycopg
 
+from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
 from darkfleet.store.repository import DarkHoursBucket, DarkHoursDay, PositionRow
 
@@ -112,6 +113,57 @@ ON CONFLICT (ts, mmsi) DO UPDATE SET
     lat = EXCLUDED.lat,
     lon = EXCLUDED.lon,
     sog = EXCLUDED.sog
+"""
+
+_PING_UPSERT = """
+INSERT INTO positions (ts, mmsi, lat, lon, sog, cog, heading, nav_status)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (ts, mmsi) DO UPDATE SET
+    lat = EXCLUDED.lat,
+    lon = EXCLUDED.lon,
+    sog = EXCLUDED.sog,
+    cog = EXCLUDED.cog,
+    heading = EXCLUDED.heading,
+    nav_status = EXCLUDED.nav_status
+"""
+
+_PING_SELECT = """
+SELECT mmsi, ts, lat, lon, sog, cog, heading, nav_status
+FROM positions
+WHERE ts >= %s AND ts <= %s
+ORDER BY ts, mmsi
+"""
+
+_VESSEL_UPSERT = """
+INSERT INTO vessels_static (mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (mmsi) DO UPDATE SET
+    imo = EXCLUDED.imo,
+    name = EXCLUDED.name,
+    callsign = EXCLUDED.callsign,
+    ship_type = EXCLUDED.ship_type,
+    length_m = EXCLUDED.length_m,
+    destination = EXCLUDED.destination,
+    last_seen = EXCLUDED.last_seen
+"""
+
+_VESSEL_SELECT = """
+SELECT mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen
+FROM vessels_static
+ORDER BY mmsi
+"""
+
+_COVERAGE_UPSERT = """
+INSERT INTO coverage_minutes (minute, n_msgs)
+VALUES (%s, %s)
+ON CONFLICT (minute) DO UPDATE SET n_msgs = EXCLUDED.n_msgs
+"""
+
+_COVERAGE_SELECT = """
+SELECT minute, n_msgs
+FROM coverage_minutes
+WHERE minute >= %s AND minute <= %s
+ORDER BY minute
 """
 
 _DARK_HOURS_BY_REGION = """
@@ -242,6 +294,84 @@ class TimescaleRepo:
         with self._conn.transaction(), self._conn.cursor() as cur:
             cur.executemany(_POSITION_UPSERT, params)
         return len(params)
+
+    def add_pings(self, pings: Sequence[Ping]) -> int:
+        params = [
+            (
+                _as_utc(ping.t),
+                str(ping.mmsi),
+                ping.lat,
+                ping.lon,
+                ping.sog,
+                ping.cog,
+                ping.heading,
+                ping.nav_status,
+            )
+            for ping in pings
+        ]
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.executemany(_PING_UPSERT, params)
+        return len(params)
+
+    def pings_between(self, start: datetime, end: datetime) -> list[Ping]:
+        rows = self._conn.execute(_PING_SELECT, (_as_utc(start), _as_utc(end))).fetchall()
+        return [
+            Ping(
+                mmsi=int(row[0]),
+                t=_as_utc(row[1]),
+                lat=row[2],
+                lon=row[3],
+                sog=row[4],
+                cog=row[5],
+                heading=row[6],
+                nav_status=row[7],
+            )
+            for row in rows
+        ]
+
+    def upsert_vessels(self, vessels: Sequence[VesselInfo]) -> int:
+        params = [
+            (
+                str(vessel.mmsi),
+                vessel.imo,
+                vessel.name,
+                vessel.callsign,
+                vessel.ship_type,
+                vessel.length_m,
+                vessel.destination,
+                None if vessel.last_seen is None else _as_utc(vessel.last_seen),
+            )
+            for vessel in vessels
+        ]
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.executemany(_VESSEL_UPSERT, params)
+        return len(params)
+
+    def vessels(self) -> list[VesselInfo]:
+        rows = self._conn.execute(_VESSEL_SELECT).fetchall()
+        return [
+            VesselInfo(
+                mmsi=int(row[0]),
+                imo=row[1],
+                name=row[2],
+                callsign=row[3],
+                ship_type=row[4],
+                length_m=row[5],
+                destination=row[6],
+                last_seen=None if row[7] is None else _as_utc(row[7]),
+            )
+            for row in rows
+        ]
+
+    def set_coverage(self, minutes: Sequence[CoverageMinute]) -> int:
+        params = [(_as_utc(item.minute), item.n_msgs) for item in minutes]
+        with self._conn.transaction(), self._conn.cursor() as cur:
+            cur.executemany(_COVERAGE_UPSERT, params)
+        return len(params)
+
+    def coverage_between(self, start: datetime, end: datetime) -> list[CoverageMinute]:
+        rows = self._conn.execute(_COVERAGE_SELECT, (_as_utc(start), _as_utc(end))).fetchall()
+        return [CoverageMinute(minute=_as_utc(row[0]), n_msgs=int(row[1])) for row in rows]
 
     def gaps_in(self, region: str, start: date, end: date) -> list[GapEvent]:
         rows = self._conn.execute(_GAP_SELECT, (region, _start_of(start), _day_after(end))).fetchall()

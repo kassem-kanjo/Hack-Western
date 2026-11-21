@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol, TypedDict, overload
 
+from darkfleet.core.tracks import CoverageMinute, Ping, VesselInfo
 from darkfleet.ingest.gfw import EncounterEvent, GapEvent, SarCellRow
 
 __all__ = [
@@ -67,6 +68,38 @@ class Repository(Protocol):
 
     def upsert_positions(self, positions: Sequence[PositionRow]) -> int:
         """Upsert positions by (mmsi, ts). Returns the number of rows submitted."""
+        ...
+
+    def add_pings(self, pings: Sequence[Ping]) -> int:
+        """Upsert raw AIS pings by (mmsi, ts). Returns the number of rows submitted.
+
+        The caller owns batching: one call is one transaction, so a loader sends chunks of a
+        few thousand pings rather than the whole recording.
+        """
+        ...
+
+    def pings_between(self, start: datetime, end: datetime) -> list[Ping]:
+        """AIS pings with ``start <= t <= end`` (both inclusive), ordered by ``(t, mmsi)``."""
+        ...
+
+    def upsert_vessels(self, vessels: Sequence[VesselInfo]) -> int:
+        """Upsert static data by MMSI, keeping the row's supplied ``last_seen``.
+
+        Returns the number of rows submitted. ``last_seen`` is trusted from the caller: a
+        loader reading an old recording must not stamp old vessels as seen today.
+        """
+        ...
+
+    def vessels(self) -> list[VesselInfo]:
+        """Every known vessel, ordered by MMSI."""
+        ...
+
+    def set_coverage(self, minutes: Sequence[CoverageMinute]) -> int:
+        """Upsert recorder coverage by minute. Returns the number of rows submitted."""
+        ...
+
+    def coverage_between(self, start: datetime, end: datetime) -> list[CoverageMinute]:
+        """Coverage rows with ``start <= minute <= end``, ordered by minute."""
         ...
 
     def gaps_in(self, region: str, start: date, end: date) -> list[GapEvent]:
