@@ -34,7 +34,8 @@ check; keep it, the UI shows why), `plain` (no evidence either way).
 { "speed_cap_kn": 16.1, "speed_basis": "cargo service speed 14 kn x 1.15 (docs/research.md)",
   "straight_line_kn": 10.8,
   "footprint": GeoJSON Polygon,
-  "lens_frames": [ { "t": "...Z", "frac": 0.0, "polygon": GeoJSON Polygon }, ... ],   // 24 frames
+  "lens_frames": [ { "t": "...Z", "frac": 0.0, "polygon": GeoJSON Polygon,
+                     "likely": GeoJSON Polygon | null }, ... ],   // 24 frames
   "candidates": [ { "pos": [-50.83, 4.03], "cell_deg": 0.01, "day": "2026-09-12",
                     "scene_time": "2026-09-12T09:21:00Z" | null, "scene_source": "copernicus-stac" | null,
                     "lens_at_scene": GeoJSON Polygon | null, "inside": true, "slack": 0.42,
@@ -48,13 +49,26 @@ check; keep it, the UI shows why), `plain` (no evidence either way).
                  "accessed": "2026-11-21" } ],
   "caveats": [ "Speed cap is a class default, not measured.", "Radar misses vessels under ~25 m." ] }
 ```
+`lens_frames[].likely`: the k=2 (≈95%) Brownian-bridge contour at that frame, clipped to the space-time lens; `null`
+when the contour cannot be drawn (frame outside the gap or bad geometry). It is the "most likely" shade under the
+lens, not a measured track.
 
 ## GET /api/stats
 ```json
 { "dark_hours_daily": [ { "day": "2026-09-01", "hours": 1234.5, "gaps": 61 } ],
-  "validation": { "null_ratio": 3.1, "null_ci": [2.4, 3.9], "recall": 0.62, "n_recall": 120 } }
+  "validation": { "null_ratio": 1.07, "null_ci": [0.91, 1.25], "null_p": 0.235,
+                  "bridge_auc": 0.87, "bridge_auc_ci": [0.844, 0.896],
+                  "bridge_radar_ratio": 1.16, "holdout_ratio": 0.70, "holdout_ci": [0.15, 1.37],
+                  "verdict": "Radar near dark ships is not better than chance; the bridge locates ships (AUC 0.87).",
+                  "source": "docs/validation.md" } }
 ```
-`validation` is filled by #27; until then `null`.
+`validation` is built from `data/validation/{results,bridge_results,holdout_results}.json`, falls back to `null`
+per field if a file is missing, and is `null` as a whole in the API fallback.
+- `null_ratio` / `null_ci` / `null_p`: primary null-test variant (real radar-in-prism count vs day-shifted count, 95% CI, permutation p).
+- `bridge_auc` / `bridge_auc_ci`: paired AUC of true cells over displaced cells for the bridge score, and its 95% bootstrap CI.
+- `bridge_radar_ratio`: real-vs-shuffled ratio for cells above the bridge's 95th-percentile threshold (`c_exceed`).
+- `holdout_ratio` / `holdout_ci`: primary held-out (outside Brazil) null-test ratio and 95% CI.
+- `verdict` / `source`: one-line plain-English reading and the document it restates (`docs/validation.md`).
 
 ## GET /api/live/silences (optional, Baltic)  ·  GET /api/edge/status (optional, QNX)
 Shapes defined in their issues (#19, #14) if those survive the cut.
