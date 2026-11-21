@@ -213,7 +213,7 @@ interface HormuzUnseenLite {
 /** The trend's regime block: the only fields the tour prints or gates on. */
 interface HormuzTrendLite {
   regime?: {
-    treated?: { baseline?: number | null; current?: number | null };
+    treated?: { baseline?: { dark_share?: number | null }; current?: { dark_share?: number | null } };
     did?: number | null;
     verdict?: string | null;
   };
@@ -239,8 +239,8 @@ async function loadHormuzTrend(): Promise<{ proved: boolean; tokens: TokenValues
     const regime = (await getJson<HormuzTrendLite>(HORMUZ_TREND_URL)).regime;
     const proved = normalVerdict(regime?.verdict ?? "") === HORMUZ_VERDICT;
     const tokens: TokenValues = {};
-    const before = percentToken(regime?.treated?.baseline);
-    const after = percentToken(regime?.treated?.current);
+    const before = percentToken(regime?.treated?.baseline?.dark_share);
+    const after = percentToken(regime?.treated?.current?.dark_share);
     const did = percentToken(regime?.did);
     if (before !== undefined) tokens.hormuz_before = before;
     if (after !== undefined) tokens.hormuz_after = after;

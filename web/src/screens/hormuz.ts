@@ -1,15 +1,12 @@
 /**
- * Hormuz focus view (#117): the story opens here.
+ * Hormuz view (#200 V3, demo beat): three things, top to bottom.
  *
- * Full screen, one question: how much of the fleet in the strait is invisible to
- * AIS? The map answers where, the rail answers how much: one hero number, the
- * 84-day daily series with its low-coverage days drawn faint, one comparison with
- * the public record, and the caveats one click down.
+ *   1. The headline: how many ships here hide from tracking, since the war began,
+ *      against the Gulf of Oman control. Figures from /api/hormuz/trend regime.
+ *   2. One chart: weekly share not broadcasting, two years, Hormuz against control.
+ *   3. Today's satellite pass: the radar detections on the map and as chips.
  *
- * The two layers start ON, because on this screen they are the argument rather
- * than an extra: violet cells are radar contacts that matched no broadcast, white
- * rings are where ships loiter. Attribution stays on the map; every number comes
- * from the frozen snapshot, never from local maths.
+ * Every number comes from the API; the map shows the detections as dots only.
  */
 
 import * as maplibregl from "maplibre-gl";
@@ -17,21 +14,8 @@ import * as maplibregl from "maplibre-gl";
 import { offlineStyle } from "../basemap";
 import { attribution } from "../components/Attribution";
 import { h } from "../components/dom";
-import {
-  HORMUZ_HISTORY_URL,
-  HORMUZ_UNSEEN_URL,
-  fetchHormuz,
-  hormuzCaveats,
-  periodLabel,
-} from "../components/hormuz";
-import { hormuzChart } from "../components/hormuzChart";
-import { hormuzLayers, type HormuzLayersHandle } from "../components/hormuzLayers";
-import {
-  excludedDays,
-  headlinePercent,
-  type HormuzHistory,
-  type HormuzUnseen,
-} from "../components/hormuzTypes";
+import { fetchHormuz } from "../components/hormuz";
+import { trendChart, trendHeadline, type HormuzTrend } from "../components/hormuzTrend";
 import { topBar } from "../components/TopBar";
 import "./hormuz.css";
 
@@ -39,154 +23,103 @@ export interface HormuzScreen {
   destroy(): void;
 }
 
-const TITLE = "The Strait of Hormuz: the fleet nobody declares";
+const TREND_URL = "/api/hormuz/trend";
+const SAR_URL = "/api/sar/scan";
+const DETECTIONS = "sar-detections";
+const DOTS = "sar-dots";
 
-/** The one sentence under the hero number. */
-const LEDE =
-  "of vessels radar sees on a typical day have no matching location broadcast. Some are small boats that don't have to broadcast; many are not.";
-
-/** The comparison with the best public source. Static by decision (demo beat 2). */
-const GFW_SENTENCE =
-  "Global Fishing Watch logged 1 'dark' gap event inside the strait from May to November (separate query): its rule only counts ships far offshore.";
-
-/** The strait and the Gulf of Oman: the frame this screen always opens on. */
+/** The frame the screen always opens on: the strait, zoomed in. */
 const STRAIT: [[number, number], [number, number]] = [
-  [54, 22],
-  [60.5, 27.5],
+  [55.6, 25.6],
+  [57.2, 27.1],
 ];
 
-/** The window and how many of its days carried enough radar to count. */
-function chartCaption(unseen: HormuzUnseen, history: HormuzHistory): string {
-  const days = unseen.summary?.days ?? unseen.daily.length;
-  const left = excludedDays(unseen.summary).length;
-  const used = unseen.summary?.n_days_used ?? Math.max(0, days - left);
-  const window = periodLabel(unseen.period ?? history.period, undefined);
-  const coverage = days > 0 && used > 0 ? `${used} of ${days} days well covered` : "";
-  return [window, coverage].filter((part) => part !== "").join(" \u00b7 ");
+/** Said plainly under the chips: the receivers were off during this pass. */
+const AIS_NOTE = "Our AIS receivers did not cover this pass, so we can't say which of these are dark.";
+
+interface SarDetection {
+  lat: number;
+  lon: number;
+  chip?: string;
+  optical_chip?: string;
+  optical_scene?: { time?: string } | null;
 }
 
-/** The two layers are already on; this is their key, not a control. */
-function layerKey(): HTMLElement {
-  return h(
-    "div",
-    { class: "hormuz-keys", role: "group", "aria-label": "Map layers shown" },
-    h(
-      "span",
-      { class: "hormuz-key-item" },
-      h("span", { class: "key is-radar", "aria-hidden": "true" }),
-      "Radar, no matching broadcast",
-    ),
-    h(
-      "span",
-      { class: "hormuz-key-item" },
-      h("span", { class: "key is-hotspot", "aria-hidden": "true" }),
-      "Loitering hotspots",
-    ),
-  );
+interface SarScan {
+  time?: string;
+  counts?: { detected?: number };
+  detections?: SarDetection[];
 }
 
-function hero(unseen: HormuzUnseen): HTMLElement {
-  const percent = headlinePercent(unseen.summary);
-  const number = percent === null ? "\u2014" : `${percent}%`;
-  return h(
-    "div",
-    { class: "hormuz-hero" },
-    h("p", { class: "hormuz-hero-num" }, number),
-    h("p", { class: "hormuz-hero-lede" }, LEDE),
-  );
+/** Chip files are named without their extension; the API serves them by that name. */
+const chipUrl = (file: string): string => `/api/sar/chip/${file.replace(/\.png$/, "")}.png`;
+
+/** "21 Nov 02:06 UTC" from the scan's ISO time. */
+function passLabel(iso: string | undefined): string {
+  const t = iso ? new Date(iso) : null;
+  if (t === null || Number.isNaN(t.getTime())) return "";
+  const day = t.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  const hm = t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC", hour12: false });
+  return `${day} ${hm} UTC`;
 }
 
-function chartBlock(unseen: HormuzUnseen, history: HormuzHistory): HTMLElement {
-  const excluded = excludedDays(unseen.summary);
-  const children: (Node | string)[] = [
-    h("p", { class: "hormuz-chart-caption" }, chartCaption(unseen, history)),
-    hormuzChart(unseen.daily, unseen.summary, { excludedDays: excluded, height: 170 }),
-  ];
-
-  if (excluded.length > 0) {
-    children.push(
-      h(
-        "p",
-        { class: "hormuz-chart-key" },
-        h("span", { class: "chart-key is-counted", "aria-hidden": "true" }),
-        "counted day",
-        h("span", { class: "chart-key is-excluded", "aria-hidden": "true" }),
-        "low-coverage day, left out of the headline",
-      ),
-    );
+function headlineBlock(trend: HormuzTrend): HTMLElement {
+  const figures = trend.regime ? trendHeadline(trend.regime) : null;
+  if (figures === null) {
+    return h("div", { class: "hz-head" }, h("h1", { class: "hz-sentence" }, "The Hormuz trend is not in the snapshot yet."));
   }
-
   return h(
-    "section",
-    { class: "hormuz-chart-block", "aria-label": "Daily dark share" },
-    ...children,
-    layerKey(),
+    "div",
+    { class: "hz-head" },
+    h("h1", { class: "hz-sentence" }, figures.sentence),
+    h(
+      "div",
+      { class: "hz-figure" },
+      h("span", { class: "hz-big" }, figures.big),
+      h("span", { class: "hz-before" }, figures.before),
+    ),
+    h("p", { class: "hz-small" }, figures.control, " ", figures.difference),
   );
 }
 
-function gfwNote(): HTMLElement {
+function chartBlock(trend: HormuzTrend): HTMLElement {
   return h(
     "section",
-    { class: "hormuz-gfw" },
-    h("p", { class: "hormuz-gfw-label" }, "On the public record"),
-    h("p", { class: "hormuz-gfw-line" }, GFW_SENTENCE),
+    { class: "hz-section" },
+    h("h2", { class: "hz-label" }, "Share not broadcasting, by week"),
+    trendChart(trend),
+    h(
+      "p",
+      { class: "hz-legend" },
+      h("span", { class: "hz-key is-treated" }, "Strait of Hormuz"),
+      h("span", { class: "hz-key is-control" }, "Gulf of Oman (control)"),
+    ),
   );
 }
 
-function focusBody(unseen: HormuzUnseen, history: HormuzHistory): HTMLElement[] {
-  return [hero(unseen), chartBlock(unseen, history), gfwNote(), hormuzCaveats(unseen, history)];
-}
-
-/** Paint the focus view into `app`; the router owns the returned handle. */
 export function renderHormuz(app: HTMLElement): HormuzScreen {
   const abort = new AbortController();
   let destroyed = false;
-  let layers: HormuzLayersHandle | null = null;
+  let sar: SarScan | null = null;
+  let selected = 0;
 
   const mapDiv = h("div", { class: "map hormuz-map" });
   const stage = h(
     "section",
     { class: "stage stage-hormuz", "aria-label": "The Strait of Hormuz" },
     mapDiv,
-    h(
-      "p",
-      { class: "hormuz-place" },
-      "Strait of Hormuz",
-      h("span", null, " \u00b7 Gulf of Oman"),
-    ),
+    h("p", { class: "hormuz-place" }, "Strait of Hormuz", h("span", null, " · Gulf of Oman")),
     attribution(),
   );
 
-  const body = h(
-    "div",
-    { class: "hormuz-focus-body" },
-    h("p", { class: "hormuz-error" }, "Loading the strait..."),
-  );
-  const rail = h(
-    "aside",
-    { class: "rail hormuz-rail", "aria-label": "The strait in numbers" },
-    h(
-      "header",
-      { class: "hormuz-head" },
-      h("p", { class: "hormuz-eyebrow" }, "Global \u00b7 satellite radar"),
-      h("h1", { class: "hormuz-title" }, TITLE),
-    ),
-    body,
-  );
+  const body = h("div", { class: "hz-body" }, h("p", { class: "hz-small" }, "Loading the strait..."));
+  const rail = h("aside", { class: "rail hormuz-rail", "aria-label": "The strait" }, body);
 
   app.replaceChildren(
-    topBar({
-      active: "hormuz",
-      mode: "SNAPSHOT",
-      generatedAt: null,
-      caseHref: null,
-      demoHref: null,
-    }),
+    topBar({ active: "hormuz", mode: "SNAPSHOT", generatedAt: null, caseHref: null, demoHref: null }),
     h("main", { class: "main hormuz-main" }, stage, rail),
   );
 
-  // The container is attached and sized before MapLibre measures it. `bounds`
-  // frames the strait at construction, so the map never paints the world first.
   const map = new maplibregl.Map({
     container: mapDiv,
     style: offlineStyle(),
@@ -196,27 +129,120 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     interactive: true,
   });
 
-  Promise.all([
-    fetchHormuz<HormuzUnseen>(HORMUZ_UNSEEN_URL, abort.signal),
-    fetchHormuz<HormuzHistory>(HORMUZ_HISTORY_URL, abort.signal),
-  ])
-    .then(([unseen, history]) => {
+  const detections = (): GeoJSON.FeatureCollection<GeoJSON.Point, { i: number }> => ({
+    type: "FeatureCollection",
+    features: (sar?.detections ?? []).map((d, i) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [d.lon, d.lat] },
+      properties: { i },
+    })),
+  });
+
+  let mapReady = false;
+  map.on("load", () => {
+    if (destroyed) return;
+    map.addSource(DETECTIONS, { type: "geojson", data: detections() });
+    map.addLayer({
+      id: DOTS,
+      type: "circle",
+      source: DETECTIONS,
+      paint: {
+        "circle-radius": ["case", ["==", ["get", "i"], selected], 6, 4],
+        "circle-color": "#56B3EA",
+        "circle-stroke-color": "#0C1218",
+        "circle-stroke-width": 1,
+      },
+    });
+    map.on("click", DOTS, (event) => {
+      const i = Number(event.features?.[0]?.properties?.["i"]);
+      if (Number.isFinite(i)) select(i);
+    });
+    map.on("mouseenter", DOTS, () => (map.getCanvas().style.cursor = "pointer"));
+    map.on("mouseleave", DOTS, () => (map.getCanvas().style.cursor = ""));
+    mapReady = true;
+  });
+
+  /** Show one detection: bigger chip, its older optical context, and the dot highlighted. */
+  function select(index: number): void {
+    selected = index;
+    if (mapReady) {
+      map.setPaintProperty(DOTS, "circle-radius", ["case", ["==", ["get", "i"], index], 6, 4]);
+    }
+    renderSarDetail();
+    for (const chip of document.querySelectorAll<HTMLButtonElement>(".hz-chip")) {
+      chip.setAttribute("aria-pressed", chip.dataset.index === String(index) ? "true" : "false");
+    }
+  }
+
+  const sarBox = h("div", { class: "hz-sar-detail" });
+
+  function renderSarDetail(): void {
+    const d = sar?.detections?.[selected];
+    if (!d || !d.chip) {
+      sarBox.replaceChildren();
+      return;
+    }
+    const optical = d.optical_chip
+      ? h(
+          "figure",
+          { class: "hz-optical" },
+          h("img", { src: chipUrl(d.optical_chip), alt: "Optical image of the same area, older" }),
+          h(
+            "figcaption",
+            { class: "hz-small" },
+            `Optical context, older: ${d.optical_scene?.time?.slice(0, 10) ?? "earlier scene"}. Ships move, so this is the sea and coast, not proof.`,
+          ),
+        )
+      : null;
+    const radar = h(
+      "figure",
+      { class: "hz-radar" },
+      h("img", { src: chipUrl(d.chip), alt: "Radar detection" }),
+      h("figcaption", { class: "hz-small" }, `Radar detection ${selected + 1} of ${sar?.detections?.length ?? 0}`),
+    );
+    sarBox.replaceChildren(...(optical ? [radar, optical] : [radar]));
+  }
+
+  function satellitePass(scan: SarScan): HTMLElement {
+    const count = scan.counts?.detected ?? scan.detections?.length ?? 0;
+    const chips = (scan.detections ?? []).map((d, i) => {
+      const button = h(
+        "button",
+        { class: "hz-chip", type: "button", "data-index": String(i), "aria-pressed": i === selected ? "true" : "false" },
+        h("img", { src: d.chip ? chipUrl(d.chip) : "", alt: `Radar detection ${i + 1}`, loading: "lazy" }),
+      );
+      button.addEventListener("click", () => select(i));
+      return button;
+    });
+    return h(
+      "section",
+      { class: "hz-section" },
+      h("h2", { class: "hz-label" }, "Today's satellite pass"),
+      h("p", { class: "hz-figure-line" }, `${count} ships seen by radar · ${passLabel(scan.time)}`),
+      h("div", { class: "hz-chips" }, ...chips),
+      sarBox,
+      h("p", { class: "hz-small" }, AIS_NOTE),
+    );
+  }
+
+  Promise.all([fetchHormuz<HormuzTrend>(TREND_URL, abort.signal), fetchHormuz<SarScan>(SAR_URL, abort.signal).catch(() => null)])
+    .then(([trend, scan]) => {
       if (destroyed || abort.signal.aborted) return;
-
-      layers = hormuzLayers(map, unseen.grid, history.hotspots, { zoomOnEnable: false });
-      layers.setRadar(true);
-      layers.setHotspots(true);
-
-      body.replaceChildren(...focusBody(unseen, history));
+      sar = scan;
+      const parts: HTMLElement[] = [headlineBlock(trend), chartBlock(trend)];
+      if (scan) parts.push(satellitePass(scan));
+      body.replaceChildren(...parts);
+      renderSarDetail();
+      if (mapReady) map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections());
+      else map.once("load", () => map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections()));
     })
     .catch(() => {
       if (destroyed || abort.signal.aborted) return;
       body.replaceChildren(
         h(
           "p",
-          { class: "hormuz-error" },
-          "The Hormuz snapshot is not loaded. Start the API with DARKFLEET_DATA=data/snapshot " +
-            "uv run uvicorn darkfleet.api.app:app --port 8000.",
+          { class: "hz-small" },
+          "The Hormuz trend is not loaded. Start the API with DARKFLEET_DATA=data/snapshot uv run uvicorn darkfleet.api.app:app --port 8000.",
         ),
       );
     });
@@ -226,8 +252,6 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       if (destroyed) return;
       destroyed = true;
       abort.abort();
-      layers?.destroy();
-      layers = null;
       map.remove();
     },
   };
