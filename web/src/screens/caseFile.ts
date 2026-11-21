@@ -11,7 +11,7 @@ import { fetchCase } from "../api";
 import { attribution } from "../components/Attribution";
 import { caseRail } from "../components/CaseRail";
 import { h } from "../components/dom";
-import { legend } from "../components/Legend";
+import { caseLayerPanel } from "../components/Legend";
 import { timeline, type TimelineHandle } from "../components/Timeline";
 import { topBar } from "../components/TopBar";
 import { fmtHours, fmtInt, vesselLabel } from "../format";
@@ -103,12 +103,13 @@ export async function renderCaseFile(
     )
     .sort((a, b) => a.at - b.at)[0]?.candidate;
 
+  let caseMap: CaseMapHandle | null = null;
   const mapDiv = h("div", { id: "map", class: "map" });
   const mapArea = h(
     "div",
     { class: "map-area" },
     mapDiv,
-    legend("case"),
+    caseLayerPanel((group, visible) => caseMap?.setLayerVisible(group, visible)),
     attribution(),
   );
 
@@ -119,15 +120,24 @@ export async function renderCaseFile(
       h("a", { class: "chip-pill", href: "#/evidence" }, "Cases"),
       h("span", { class: "chip-pill" }, vesselLabel(detail.vessel)),
       h("span", { class: "chip-pill is-gap" }, `Gap ${fmtHours(detail.hours)}`),
-      h("span", { class: "chip-pill" }, `${fmtInt(candidateSightings)} candidate sightings`),
+      h(
+        "span",
+        { class: "chip-pill" },
+        `${fmtInt(candidateSightings)} of ${fmtInt(detail.candidates.length)} radar detections could be this ship`,
+      ),
     ),
     mapArea,
   );
-  rail.append(caseRail(detail));
+  try {
+    rail.append(caseRail(detail));
+  } catch (error) {
+    // A malformed field must not take the map down with it (the sanctions-entry bug did).
+    console.error("case rail failed", error);
+    rail.append(h("div", { class: "banner is-error" }, "Part of this case file could not be drawn."));
+  }
 
   // The timeline is built before the map mounts, but it only notifies on user
   // input, so the explicit setFrame(0) below is the first frame the map sees.
-  let caseMap: CaseMapHandle | null = null;
   const tl: TimelineHandle = timeline(detail, {
     onFrame(index) {
       caseMap?.setFrame(index);

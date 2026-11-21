@@ -12,8 +12,8 @@ import { riskChip } from "./RiskChip";
 
 /** "candidate" and "ruled_out" get their own heading; anything else is neutral. */
 function reasonHeading(status: string): string {
-  if (status === "candidate") return "Why it was flagged";
-  if (status === "ruled_out") return "Why it was ruled out";
+  if (status === "candidate") return "Why it's unexplained";
+  if (status === "ruled_out") return "Why it was cleared";
   return "What we checked";
 }
 
@@ -53,17 +53,26 @@ function scoreSection(detail: CaseDetail): HTMLElement {
   return h("div", { class: "rail-section" }, row);
 }
 
+/** Entry is an object in the current snapshot and a string in older ones: never call string methods on it blind. */
+function sanctionsEntryName(entry: Sanctions["entry"]): string {
+  if (typeof entry === "string") return entry.trim() || "Name match";
+  const caption = typeof entry?.caption === "string" ? entry.caption.trim() : "";
+  const imo = typeof entry?.imo === "string" && entry.imo !== "" ? ` (IMO ${entry.imo})` : "";
+  return caption !== "" ? `${caption}${imo}` : "Name match";
+}
+
 function sanctionsBanner(sanctions: Sanctions): HTMLElement {
-  const entry = sanctions.entry?.trim() || "Name match";
+  const detained = sanctions.category === "detained";
+  const note = sanctions.note?.trim() || "needs analyst confirmation";
 
   return h(
     "div",
     { class: "rail-section" },
     h(
       "div",
-      { class: "banner is-error" },
-      h("strong", null, "Possible sanctions list match"),
-      h("div", null, `${entry} \u00b7 needs analyst confirmation`),
+      { class: detained ? "banner" : "banner is-error" },
+      h("strong", null, detained ? "Port-detention record, name match" : "Possible sanctions list match"),
+      h("div", null, `${sanctionsEntryName(sanctions.entry)} \u00b7 ${note}`),
       h("div", { class: "sub" }, `Source: ${sanctions.source}`),
     ),
   );
@@ -130,8 +139,38 @@ function detectionLine(group: CandidateGroup): HTMLElement {
   );
 }
 
+/** Plain wording for the engine's reason strings; unknown ones are shown as they are. */
+const REASON_PLAIN: Record<string, string> = {
+  "inside lens at scene time": "radar saw something where the ship could have been",
+  "outside lens at scene time": "the radar detection was too far away for the ship to reach",
+  "scene time outside the gap": "the satellite passed when the ship was still broadcasting",
+  "stationary: off and on within 5 km, not a case": "the ship barely moved: it reappeared within 5 km",
+};
+
+/** One line from the cases' own reason field: the most common reason among the verdict that decided the status. */
+function reasonLine(detail: CaseDetail): HTMLElement | null {
+  const decisive = detail.status === "candidate" ? "candidate" : "ruled_out";
+  const pool = detail.candidates.filter((c) => c.verdict === decisive);
+  const counts = new Map<string, number>();
+  for (const c of pool) counts.set(c.reason, (counts.get(c.reason) ?? 0) + 1);
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (top === undefined) return null;
+  const [reason, n] = top;
+  const plain = REASON_PLAIN[reason] ?? reason;
+  const tail =
+    detail.status === "candidate" ? "nothing in the data explains the gap" : "so the gap is cleared";
+  return h(
+    "div",
+    { class: "reason-line" },
+    h("span", { class: "reason-n mono" }, fmtInt(n)),
+    ` ${pool.length === 1 ? "radar detection" : "radar detections"}: ${plain}; ${tail}.`,
+  );
+}
+
 function whySection(detail: CaseDetail): HTMLElement {
   const body = h("div", { class: "rail-section" }, h("h3", null, reasonHeading(detail.status)));
+  const line = reasonLine(detail);
+  if (line !== null) body.append(line);
 
   if (detail.score_factors.length > 0) {
     body.append(...detail.score_factors.map(factorRow));

@@ -38,6 +38,10 @@ CASE_SUMMARY_FIELDS = (
     "region_label",
 )
 
+# The Global Fishing Watch query window the snapshot was built from (docs/feasibility-dark-fleet.md F3,
+# docs/api-schema.md). A configuration constant of the build, not a measured result.
+GAP_WINDOW = {"start": "2026-08-15", "end": "2026-11-15"}
+
 STATS_FALLBACK: dict[str, Any] = {"dark_hours_daily": [], "validation": None}
 
 app = FastAPI(title="Dark Fleet API", version="1.0.0")
@@ -84,10 +88,60 @@ def _load_stats(directory: str) -> dict[str, Any]:
     return payload
 
 
+def _own_track_block(directory: str) -> dict[str, Any]:
+    """Own-track and silence-detector results, read from the generated validation files.
+
+    ``data/validation/tracks_results.json`` gives the hidden-route test; the silence
+    detector's "where receivers were up" count comes from the table in
+    ``docs/recall-misses.md`` (found / in-scope, minus the misses explained by our own
+    recorder outages). Missing files simply omit the keys: the UI hides those rows.
+    """
+    import re
+
+    root = Path(os.path.abspath(directory)).parent.parent
+    block: dict[str, Any] = {}
+
+    tracks = root / "data" / "validation" / "tracks_results.json"
+    if tracks.is_file():
+        try:
+            containment = json.loads(tracks.read_text(encoding="utf-8")).get("containment") or {}
+            if "inside_lens_at_truth_time" in containment and "n" in containment:
+                block["hidden_route_inside"] = containment["inside_lens_at_truth_time"]
+                block["hidden_route_total"] = containment["n"]
+        except (ValueError, OSError):
+            pass
+
+    recall = root / "docs" / "recall-misses.md"
+    if recall.is_file():
+        text = recall.read_text(encoding="utf-8")
+        counts = re.search(r"In-scope gaps: (\d+); found: (\d+); missed: (\d+)", text)
+        coverage = re.search(r"\| Receiver coverage below floor \| (\d+) \|", text)
+        if counts and coverage:
+            in_scope, found, missed = (int(counts.group(i)) for i in (1, 2, 3))
+            outage_misses = int(coverage.group(1))
+            up_total = in_scope - outage_misses
+            # Only a clean "found all where receivers were up" claim if every miss is an outage.
+            if missed == outage_misses and found <= up_total:
+                block["silence_found_receivers_up"] = found
+                block["silence_total_receivers_up"] = up_total
+    return block
+
+
+@lru_cache(maxsize=8)
+def _load_stats_full(directory: str) -> dict[str, Any]:
+    stats = dict(_load_stats(directory))
+    stats["gap_window"] = GAP_WINDOW
+    own_track = _own_track_block(directory)
+    if own_track:
+        stats["own_track"] = own_track
+    return stats
+
+
 def reset_cache() -> None:
     """Drop loaded snapshots; tests change DARKFLEET_DATA between cases."""
     _load_cases.cache_clear()
     _load_stats.cache_clear()
+    _load_stats_full.cache_clear()
 
 
 def _case_summary(case: dict[str, Any]) -> dict[str, Any]:
@@ -138,7 +192,7 @@ def get_case(case_id: str) -> dict[str, Any]:
 @app.get("/api/stats")
 def get_stats() -> dict[str, Any]:
     """Return chart data, falling back to an empty chart rather than a broken page."""
-    return _load_stats(str(data_dir()))
+    return _load_stats_full(str(data_dir()))
 
 
 @app.get("/api/health")

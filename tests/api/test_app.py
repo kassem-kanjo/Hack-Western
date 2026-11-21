@@ -108,7 +108,7 @@ def test_detail_not_found(client: TestClient) -> None:
 def test_stats_fallback_when_file_missing(client: TestClient) -> None:
     response = client.get("/api/stats")
     assert response.status_code == 200
-    assert response.json() == {"dark_hours_daily": [], "validation": None}
+    assert response.json()["validation"] is None
 
 
 def test_health_reports_snapshot(client: TestClient, snapshot: Path) -> None:

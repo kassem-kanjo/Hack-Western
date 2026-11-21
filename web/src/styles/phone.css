@@ -489,3 +489,9 @@
     font-size: var(--fs-h2);
   }
 }
+
+@media (max-width: 760px) {
+  .main.ev-main { grid-template-columns: minmax(0, 1fr); }
+  .ev-panel { grid-column: 1; grid-row: auto; overflow: visible; border-right: 0; }
+  .main > .stage.ev-stage { grid-column: 1; height: 55vh; min-height: 320px; }
+}
