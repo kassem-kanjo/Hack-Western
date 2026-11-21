@@ -47,6 +47,19 @@ run_checks() {
   done
   if [ -z "$bad" ]; then check api OK "6 routes 200"; else check api RED "failing:$bad"; fi
 
+  # 3b. Live numbers: the Baltic rate the app shows is non-zero while the recorder writes.
+  #     (Tiger once served 0 msgs/min for every area with every route answering 200.)
+  local rate
+  rate=$(curl -s --max-time 8 "$API/api/areas/stats" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+a=next((a for a in d.get('areas',[]) if a.get('id')=='BALTIC_WATCH'),{})
+print(a.get('msgs_per_min',0), a.get('source','?'))" 2>/dev/null)
+  case "$rate" in
+    ""|0|0.0*) check live-rate RED "Baltic msgs/min reads 0 in the app (${rate:-no answer})";;
+    *) check live-rate OK "Baltic ${rate% *} msgs/min from ${rate#* }";;
+  esac
+
   # 4. App build: web/dist is newer than the newest web source on this checkout.
   local src dist
   src=$(find web/src -type f -newer web/dist/index.html 2>/dev/null | head -1)
