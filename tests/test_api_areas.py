@@ -322,4 +322,4 @@ def test_tiger_supplies_the_sparkline_and_rate(
 
     # Readings are cached for 20 s, so the second request adds no queries.
     assert len(fake.queries) == first_queries
-    assert ("BALTIC_WATCH" in {region for region, _, _ in fake.queries})
+    assert "BALTIC_WATCH" in {region for region, _, _ in fake.queries}

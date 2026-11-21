@@ -573,9 +573,7 @@ class TimescaleRepo:
         window_start = _as_utc(start)
         window_end = _as_utc(end)
         self._conn.execute(_AIS_MINUTELY_REFRESH_RANGE, (window_start, window_end))
-        rows = self._conn.execute(
-            _AIS_MINUTELY_RANGE, (region, window_start, window_end)
-        ).fetchall()
+        rows = self._conn.execute(_AIS_MINUTELY_RANGE, (region, window_start, window_end)).fetchall()
         return [(_as_utc(row[0]), int(row[1])) for row in rows]
 
     def dark_hours_daily(

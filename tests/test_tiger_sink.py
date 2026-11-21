@@ -124,9 +124,7 @@ def test_only_pings_after_the_offset_are_sent_when_a_file_grows(tmp_path: Path) 
     assert [ping.mmsi for ping in repo.calls[-1][1]] == [333333333]
 
 
-def test_unchanged_files_are_not_re_read(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unchanged_files_are_not_re_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "ais"
     offsets_path = tmp_path / "offsets.json"
     _write_hour(root, "BALTIC_WATCH", "20261121T09", [_position(111111111, T0)])
@@ -166,9 +164,7 @@ def test_pings_are_batched_per_region(tmp_path: Path, monkeypatch: pytest.Monkey
     assert [len(pings) for _, pings in repo.calls] == [2, 2, 1, 2, 2, 1]
 
 
-def test_missing_database_url_exits_non_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_database_url_exits_non_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     root = tmp_path / "ais"
     root.mkdir()
@@ -178,9 +174,7 @@ def test_missing_database_url_exits_non_zero(
     assert result != 0
 
 
-def test_main_runs_one_pass_with_an_injected_repo(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_main_runs_one_pass_with_an_injected_repo(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "ais"
     offsets_path = tmp_path / "offsets.json"
     _write_hour(
