@@ -14,6 +14,14 @@ from typing import Any
 
 SCORE_NOTE = "Ranks cases for analyst attention. It is not evidence of wrongdoing."
 
+# Only a real sanctions listing or the shadow-fleet dataset earns the sanctions factor.
+# A port-state detention is a maintenance/inspection record, not a sanction.
+SANCTION_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
+DETENTION_NOTE = "port detention record, not a sanction"
+NAME_MATCH_NOTE = "name match only, needs analyst confirmation"
+STRONG_NAME_NOTE = "name match with hull number or flag, needs analyst confirmation"
+WEAK_NAME_NOTE = "common name only; probably a different ship"
+
 
 def _band(score: int) -> str:
     """Map a 0-100 score to the UI band (low < 40 <= medium < 70 <= high)."""
@@ -84,16 +92,27 @@ def score_case(case: dict[str, Any]) -> dict[str, Any]:
         )
 
     sanctions = case.get("sanctions")
-    if sanctions and sanctions.get("match"):
-        factors.append(
-            _factor(
-                "sanctions",
-                "Sanctions match",
-                "possible match",
-                40,
-                "possible list match, needs analyst confirmation",
-            )
-        )
+    if isinstance(sanctions, dict) and sanctions.get("match"):
+        category = sanctions.get("category")
+        if category in SANCTION_CATEGORIES:
+            value = "on sanctions list" if category == "sanctioned" else "shadow-fleet list"
+            strength = sanctions.get("strength")
+            if strength == "weak_name":
+                # A generic name (LISBOA, MARIA) is usually a different ship.
+                factors.append(_factor("sanctions", "Sanctions match", value, 5, WEAK_NAME_NOTE))
+            elif strength == "strong_name":
+                factors.append(_factor("sanctions", "Sanctions match", value, 40, STRONG_NAME_NOTE))
+            else:
+                # MMSI hits, and older results without a strength, keep the full factor.
+                note = (
+                    NAME_MATCH_NOTE
+                    if strength is None and sanctions.get("method") == "name"
+                    else "possible list match, needs analyst confirmation"
+                )
+                factors.append(_factor("sanctions", "Sanctions match", value, 40, note))
+        else:
+            # Detained or other: shown so the analyst sees the hit, but worth no points.
+            factors.append(_factor("sanctions", "Sanctions record", "port detention", 0, DETENTION_NOTE))
 
     if case.get("intentional_disabling") is True:
         factors.append(

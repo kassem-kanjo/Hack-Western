@@ -63,7 +63,7 @@ def test_sanctions_match_adds_40_points() -> None:
     base = {"hours": 10, "candidates": []}
 
     without = score_case(base)
-    with_match = score_case({**base, "sanctions": {"match": True}})
+    with_match = score_case({**base, "sanctions": {"match": True, "category": "sanctioned"}})
 
     assert with_match["score"] == without["score"] + 40
     sanctions = next(factor for factor in with_match["score_factors"] if factor["key"] == "sanctions")
@@ -71,19 +71,95 @@ def test_sanctions_match_adds_40_points() -> None:
     assert "needs analyst confirmation" in sanctions["note"]
 
 
+def test_shadow_fleet_match_also_adds_40_points() -> None:
+    result = score_case({"sanctions": {"match": True, "category": "shadow_fleet"}})
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 40
+
+
+def test_detained_record_is_not_a_sanction() -> None:
+    base = {"hours": 10, "candidates": []}
+
+    without = score_case(base)
+    detained = score_case({**base, "sanctions": {"match": True, "category": "detained"}})
+
+    assert detained["score"] == without["score"]
+    sanctions = next(factor for factor in detained["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 0
+    assert sanctions["note"] == "port detention record, not a sanction"
+
+
+def test_name_only_match_says_it_needs_confirmation() -> None:
+    result = score_case({"sanctions": {"match": True, "category": "sanctioned", "method": "name"}})
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["note"] == "name match only, needs analyst confirmation"
+
+
+def test_mmsi_match_adds_40_points() -> None:
+    result = score_case(
+        {"sanctions": {"match": True, "category": "sanctioned", "method": "mmsi", "strength": "mmsi"}}
+    )
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 40
+
+
+def test_strong_name_match_adds_40_points() -> None:
+    result = score_case(
+        {"sanctions": {"match": True, "category": "sanctioned", "method": "name", "strength": "strong_name"}}
+    )
+
+    sanctions = next(factor for factor in result["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 40
+    assert sanctions["note"] == "name match with hull number or flag, needs analyst confirmation"
+
+
+def test_weak_generic_name_adds_only_5_points() -> None:
+    base = {"hours": 10, "candidates": []}
+
+    without = score_case(base)
+    # LISBOA is a city, not a hull number: a name hit on it is usually a different ship.
+    weak = score_case(
+        {
+            **base,
+            "sanctions": {"match": True, "category": "sanctioned", "method": "name", "strength": "weak_name"},
+        }
+    )
+
+    assert weak["score"] == without["score"] + 5
+    sanctions = next(factor for factor in weak["score_factors"] if factor["key"] == "sanctions")
+    assert sanctions["points"] == 5
+    assert sanctions["note"] == "common name only; probably a different ship"
+
+
 def test_band_thresholds_at_39_40_69_70() -> None:
     cases = [
         # 20 (hours) + 9 (implied speed) + 10 (intentional) = 39
         ({"hours": 96, "straight_line_kn": 10, "speed_cap_kn": 18, "intentional_disabling": True}, 39, "low"),
-        ({"sanctions": {"match": True}}, 40, "medium"),
+        ({"sanctions": {"match": True, "category": "sanctioned"}}, 40, "medium"),
         # 20 (hours) + 9 (implied speed) + 40 (sanctions) = 69
         (
-            {"hours": 96, "straight_line_kn": 10, "speed_cap_kn": 18, "sanctions": {"match": True}},
+            {
+                "hours": 96,
+                "straight_line_kn": 10,
+                "speed_cap_kn": 18,
+                "sanctions": {"match": True, "category": "sanctioned"},
+            },
             69,
             "medium",
         ),
         # 20 (hours) + 40 (sanctions) + 10 (intentional) = 70
-        ({"hours": 96, "sanctions": {"match": True}, "intentional_disabling": True}, 70, "high"),
+        (
+            {
+                "hours": 96,
+                "sanctions": {"match": True, "category": "sanctioned"},
+                "intentional_disabling": True,
+            },
+            70,
+            "high",
+        ),
     ]
 
     for case, expected_score, expected_band in cases:
