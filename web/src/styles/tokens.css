@@ -26,6 +26,7 @@
   --c-dark:           var(--c-gap);
   --c-prism-stroke:   #A78BFA;   /* space-time prism (lens) */
   --c-prism-fill:     rgba(167, 139, 250, 0.16);
+  --c-prism-likely:   rgba(167, 139, 250, 0.35);   /* brighter k=2 bridge contour inside the lens */
   --c-sar:            #5BB8FF;   /* radar detection: diamond */
   --c-candidate:      #F4FAFF;   /* SAR diamond inside a lens: white fill + sar ring + glow */
   --c-candidate-ring: var(--c-sar);

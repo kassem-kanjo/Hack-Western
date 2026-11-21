@@ -21,6 +21,7 @@ export function legend(kind: "overview" | "case"): HTMLElement {
   } else {
     rows.push(
       legendRow("is-lens", "Where it could have been (lens)"),
+      legendRow("is-likely", "Most likely position (Brownian bridge, 2σ)"),
       legendRow("is-diamond", "Radar detection (SAR)"),
       legendRow("is-candidate", "Detection inside the lens: candidate"),
       legendRow("is-ruled-diamond", "Detection outside the lens: ruled out"),
