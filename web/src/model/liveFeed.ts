@@ -24,7 +24,8 @@ export interface LiveFeed {
   close(): void;
 }
 
-export const LIVE_REGIONS = ["BALTIC_WATCH", "MALAYSIA_EOPL", "BLACK_SEA", "HORMUZ"] as const;
+// Hormuz has no live stream: our receivers hear almost nothing there, so radar covers it instead.
+export const LIVE_REGIONS = ["BALTIC_WATCH", "MALAYSIA_EOPL", "BLACK_SEA"] as const;
 
 const WINDOW_MS = 60_000;
 
