@@ -78,3 +78,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 10:** 100% DeepSeek (Chief: briefs only).
 - **Rule breaks:** none.
 - **Change for next 30 min:** wait loops run under `bash -c` (no zsh glob errors); Devpost draft gets a Comms-style fact pass by Chief before merge (numbers only from README/docs).
+
+## Sat 21 Nov, 09:50 ET (audit 12, covers 09:20-09:50)
+- **Went well:** 6 lanes landed in 2 PRs (#141, #142), each gated in Chrome on desktop and 390 px phone; review caught 3 bugs tests could not: Caddy would have skipped HTTPS (stock unit reads no env file), sar_weekly refresh crashed on real Tiger (date vs timestamptz; tests run on SQLite), chart bars drawn as dots (global .bar CSS overrides SVG height).
+- **Went wrong:** Tiger Data held 0 positions and 0 gaps while README/Devpost implied it powered our views; found only because I checked the claim against the live store. A lint failure in make check skipped the web build, so one screenshot showed a stale bundle.
+- **Code share since audit 11:** ~90% DeepSeek; Chief: Caddy fix, Tiger date fix, chart fallback + class rename, Devpost Tiger paragraph, loading data into Tiger.
+- **Rule breaks:** none.
+- **Change for next 30 min:** every public claim about a data store gets one live count query before it ships; after any failed make check, rebuild before screenshots. Wave 13 running: demo video script, thought piece #1, demo-check gate.
