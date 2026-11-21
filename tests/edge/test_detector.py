@@ -205,7 +205,9 @@ def test_detector_heartbeats_while_waiting_for_frames(
     """No frame ever arrives (a net source with no bridge): the detector must still be
     alive, heartbeating at least twice a second with state "waiting for frames"."""
     monkeypatch.setattr(
-        detector, "OnnxDetector", lambda _path: type("Model", (), {"detect": lambda *_: []})()
+        detector,
+        "OnnxDetector",
+        lambda *_a: type("Model", (), {"detect": lambda *_: [], "warm_up": lambda *_: None})(),
     )
     model_file = tmp_path / "model.onnx"
     model_file.write_bytes(b"not really a model, never loaded")
@@ -231,6 +233,8 @@ def test_detector_heartbeats_while_waiting_for_frames(
             once=False,
             nice=0,
             score_min=0.3,
+            input_size=416,
+            standby=False,
         )
         thread = threading.Thread(target=detector.run, args=(args,), daemon=True)
         thread.start()

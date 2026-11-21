@@ -1,23 +1,29 @@
-/* Patrol unit tab (#36): is the unit still safe when its AI fails?
-   Left 60% the annotated camera frame; right the states, numbers, six events
-   and the one action. Structure only: colour, type and space from tokens.css.
-   The stage is dark and neutral so the JPEG, not the chrome, is the picture. */
+/* Patrol unit tab (#36): what did the patrol unit just see, and what did it decide?
+   Analyst conventions: 13 px system text, mono for every number and id, flat
+   panels, 1 px hairlines, no pills, glows, gradients or rounded cards. The frame
+   is 62 %, the decision 38 %. Colour means something: green a running step,
+   amber a step coming back or under load, red the alert. */
 
 .main.patrol-main {
-  grid-template-columns: minmax(0, 3fr) minmax(380px, 2fr);
+  grid-template-columns: minmax(0, 62fr) minmax(360px, 38fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-2);
 }
 
-/* ---------- stage: the frame ---------- */
+/* ---------- stage: the frame, then one mono caption ---------- */
 
 .patrol-stage {
   grid-column: 1;
   grid-row: 1;
-  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -25,14 +31,18 @@
 }
 
 .patrol-frame {
-  position: absolute;
-  inset: 0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .patrol-frame-img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -45,8 +55,8 @@
 
 .patrol-frame-empty {
   padding: var(--sp-5);
+  font-size: var(--fs-body);
   color: var(--c-text-3);
-  font-size: var(--fs-h3);
   text-align: center;
 }
 
@@ -54,224 +64,263 @@
   display: none;
 }
 
-/* ---------- rail ---------- */
+/* Frame 1234 · 21 Nov 20:41:07Z · qnxcam:5 · AI 172 ms */
+.patrol-caption {
+  min-width: 0;
+  padding: 7px 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--c-line);
+  background: var(--c-panel);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--c-text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
-.patrol-rail {
+/* ---------- rail: the decision, its evidence, the numbers ---------- */
+
+.patrol-side {
   grid-column: 2;
   grid-row: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-6);
+  padding: var(--sp-5) var(--sp-5) var(--sp-5) var(--sp-4);
   overflow-y: auto;
   background: var(--c-panel);
   border-left: 1px solid var(--c-line);
 }
 
-.patrol-title {
-  margin: 0 0 var(--sp-5);
-  font-size: var(--fs-h2);
-  font-weight: var(--fw-bold);
-  line-height: var(--lh-tight);
-  color: var(--c-text-1);
-}
+/* ---------- the three-step chain ---------- */
 
-/* ---------- the two state lines ---------- */
-
-.patrol-states {
+.patrol-chain {
   display: grid;
-  gap: var(--sp-2);
-  padding-bottom: var(--sp-5);
-  border-bottom: 1px solid var(--c-line);
-}
-
-.patrol-state {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--sp-2);
-}
-
-.patrol-state-name {
-  font-size: var(--fs-body);
-  color: var(--c-text-2);
-}
-
-/* Running is neutral: the safety core and a healthy detector are the quiet
-   baseline. Amber means "coming back"; red means the AI is down. */
-.patrol-state-value {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: var(--fs-h1);
-  font-weight: var(--fw-medium);
-  line-height: 1.1;
-  color: var(--c-text-1);
-  font-variant-numeric: tabular-nums;
+  padding: 0;
+  list-style: none;
 }
 
-.patrol-state-value.is-restarting {
-  color: var(--c-degraded);
-}
-
-.patrol-state-value.is-down {
-  color: var(--c-error);
-}
-
-/* ---------- numbers ---------- */
-
-.patrol-metrics {
+.patrol-step {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3) var(--sp-4);
-  margin: var(--sp-5) 0;
+  grid-template-columns: 7px minmax(0, 1fr);
+  column-gap: 12px;
+  padding: 0 0 16px;
 }
 
-.patrol-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+/* The hairline down the squares makes the order a chain, not three facts. */
+.patrol-step::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--c-line);
 }
 
-.patrol-metric-label {
-  font-size: var(--fs-caption);
-  color: var(--c-text-3);
+.patrol-step:last-child {
+  padding-bottom: 0;
 }
 
-.patrol-metric-value {
-  font-family: var(--font-mono);
-  font-size: var(--fs-h2);
-  font-weight: var(--fw-medium);
-  line-height: 1.1;
-  color: var(--c-text-1);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* ---------- real-time detail: one line per fact, no prose ---------- */
-
-.patrol-detail {
-  display: grid;
-  gap: 2px;
-  padding-bottom: var(--sp-4);
-  border-bottom: 1px solid var(--c-line);
-}
-
-.patrol-line {
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  line-height: var(--lh-body);
-  color: var(--c-text-2);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Amber, never red: load is a demo condition, not a failure. */
-.patrol-line.is-amber {
-  color: var(--c-degraded);
-}
-
-.patrol-line[hidden] {
+.patrol-step:last-child::before {
   display: none;
 }
 
-/* ---------- events ---------- */
-.patrol-h {
-  margin: var(--sp-2) 0 var(--sp-2);
-  font-size: var(--fs-label);
-  font-weight: var(--fw-medium);
-  letter-spacing: 0.06em;
+.patrol-step-square {
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  background: var(--c-text-3);
+}
+
+.patrol-step.is-ok .patrol-step-square {
+  background: var(--c-live);
+}
+
+.patrol-step.is-warn .patrol-step-square {
+  background: var(--c-degraded);
+}
+
+.patrol-step.is-bad .patrol-step-square {
+  background: var(--c-error);
+}
+
+.patrol-step.is-idle .patrol-step-square {
+  background: var(--c-text-3);
+}
+
+.patrol-step-body {
+  min-width: 0;
+}
+
+.patrol-step-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--c-text-3);
 }
 
-.patrol-events {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--c-line);
+.patrol-step-note {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
-.patrol-event {
+.patrol-step-value {
+  display: block;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--c-text-1);
+}
+
+/* ---------- the verdict: the one line that answers the screen ---------- */
+
+.patrol-verdict {
+  margin: var(--sp-5) 0 0;
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-bold);
+  line-height: 1.3;
+  color: var(--c-text-1);
+}
+
+/* Red only for an alert. "ok" is the neutral readout; "idle" is muted. */
+.patrol-verdict.is-alert {
+  color: var(--c-error);
+}
+
+.patrol-verdict.is-ok {
+  color: var(--c-text-1);
+}
+
+.patrol-verdict.is-idle {
+  font-weight: var(--fw-medium);
+  color: var(--c-text-3);
+}
+
+/* 150 ms, on change only (the script adds the class once per new decision). */
+@keyframes patrol-verdict-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.patrol-verdict.is-fading {
+  animation: patrol-verdict-in 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patrol-verdict.is-fading {
+    animation: none;
+  }
+}
+
+.patrol-position {
+  margin: var(--sp-2) 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--c-text-3);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- reliability: a field table, label left, mono value right ---------- */
+
+.patrol-h {
+  margin: var(--sp-5) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-line);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+}
+
+.patrol-fields {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
-  gap: var(--sp-3);
-  padding: var(--sp-2) 0;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
   border-bottom: 1px solid var(--c-line);
-  font-size: var(--fs-label);
-  line-height: var(--lh-body);
 }
 
-.patrol-event-time {
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  color: var(--c-text-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.patrol-event-text {
+.patrol-fields dt,
+.patrol-fields dd {
   min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--c-text-2);
+  margin: 0;
+  padding: 6px 0;
+  border-top: 1px solid var(--c-line);
 }
 
-.patrol-events-empty {
-  margin: 0;
-  padding: var(--sp-3) 0;
-  border-top: 1px solid var(--c-line);
-  font-size: var(--fs-label);
+.patrol-fields dt:nth-of-type(1),
+.patrol-fields dd:nth-of-type(1) {
+  border-top: 0;
+}
+
+.patrol-fields dt {
+  padding-right: 8px;
+  font-size: 12px;
   color: var(--c-text-3);
 }
 
-.patrol-events-empty[hidden] {
+.patrol-fields dd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--c-text-1);
+  overflow-wrap: anywhere;
+}
+
+/* Load is a demo condition, not a failure: amber, never red. */
+.patrol-load {
+  margin: var(--sp-3) 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-degraded);
+}
+
+.patrol-load[hidden] {
   display: none;
 }
 
-/* ---------- the one action, its sentence, the footer ---------- */
-
-/* Pinned to the bottom of the rail, below the events, so the action never
-   competes with the numbers for the first glance. */
-.patrol-foot {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  margin-top: auto;
-  padding-top: var(--sp-5);
-}
-
-/* One filled, light button: the primary action, not an alert. Red stays for
-   the detector being down. */
-.patrol-kill {
-  padding: 8px 16px;
-  border-color: var(--c-text-1);
-  background: var(--c-text-1);
-  color: var(--c-bg);
-  font-size: var(--fs-body);
-  font-weight: var(--fw-medium);
-}
+/* ---------- the two demo actions ---------- */
 
 .patrol-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
+  margin-top: var(--sp-5);
 }
 
-/* Outlined, beside the filled kill: a second demo action, not a second alert. */
+.patrol-kill,
 .patrol-stress {
-  padding: 8px 16px;
-  font-size: var(--fs-body);
-  font-weight: var(--fw-medium);
+  padding: 7px 12px;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
 }
 
-.patrol-stress[hidden] {
-  display: none;
-}
-
-.patrol-stress:disabled {
-  opacity: 0.65;
-  cursor: default;
+/* One filled, light button: the primary demo action. */
+.patrol-kill {
+  border: 1px solid var(--c-text-1);
+  background: var(--c-text-1);
+  color: var(--c-bg);
 }
 
 .patrol-kill:hover {
@@ -279,68 +328,63 @@
   background: var(--c-text-2);
 }
 
-.patrol-kill:disabled {
+/* Outlined, beside the filled kill: the second demo action, not a second alert. */
+.patrol-stress {
+  border: 1px solid var(--c-line-strong);
+  background: transparent;
+  color: var(--c-text-2);
+}
+
+.patrol-stress:hover {
+  border-color: var(--c-text-2);
+  color: var(--c-text-1);
+}
+
+.patrol-kill:disabled,
+.patrol-stress:disabled {
   opacity: 0.65;
   cursor: default;
 }
 
-.patrol-kill[hidden] {
-  display: none;
-}
-
-.patrol-hint {
-  margin: 0;
-  font-size: var(--fs-caption);
-  color: var(--c-error);
-}
-
+.patrol-kill[hidden],
+.patrol-stress[hidden],
 .patrol-hint[hidden] {
   display: none;
 }
 
-.patrol-note {
-  max-width: 44ch;
-  margin: 0;
-  font-size: var(--fs-label);
-  line-height: var(--lh-body);
-  color: var(--c-text-2);
+.patrol-kill:focus-visible,
+.patrol-stress:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: 2px;
 }
 
-.patrol-source {
+.patrol-hint {
   margin: var(--sp-2) 0 0;
-  font-size: var(--fs-caption);
-  color: var(--c-text-3);
+  font-size: 11px;
+  color: var(--c-error);
 }
 
-/* ---------- offline ---------- */
+/* ---------- offline: one calm line ---------- */
 
 .patrol-main > .patrol-offline {
   grid-column: 1 / -1;
   grid-row: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
   min-width: 0;
   padding: var(--sp-6);
-  text-align: center;
-}
-
-.patrol-offline h2 {
-  margin: 0;
-  font-size: var(--fs-h1);
-  font-weight: var(--fw-bold);
-  color: var(--c-text-1);
 }
 
 .patrol-offline p {
   margin: 0;
-  font-size: var(--fs-body);
+  font-family: var(--font-mono);
+  font-size: 13px;
   color: var(--c-text-3);
+  text-align: center;
 }
 
-/* ---------- phone: one column, frame first ---------- */
+/* ---------- phone: frame first, decision below ---------- */
 
 @media (max-width: 760px) {
   .main.patrol-main {
@@ -353,11 +397,15 @@
   .patrol-stage {
     grid-column: 1;
     grid-row: 1;
+    grid-template-rows: auto auto;
+  }
+
+  .patrol-frame {
     height: 46vh;
     min-height: 240px;
   }
 
-  .patrol-rail {
+  .patrol-side {
     grid-column: 1;
     grid-row: 2;
     padding: var(--sp-5) var(--sp-4);
@@ -366,26 +414,13 @@
     border-top: 1px solid var(--c-line);
   }
 
-  .patrol-state-value {
-    font-size: var(--fs-h2);
-  }
-
-  .patrol-foot {
-    margin-top: var(--sp-5);
-  }
-
-  .patrol-kill {
-    width: 100%;
-    justify-content: center;
-    min-height: 44px;
-  }
-
   .patrol-actions {
     width: 100%;
   }
 
+  .patrol-kill,
   .patrol-stress {
-    width: 100%;
+    flex: 1;
     justify-content: center;
     min-height: 44px;
   }

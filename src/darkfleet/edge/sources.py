@@ -6,10 +6,13 @@ decoded BGR ``numpy`` image or the encoded JPEG bytes that arrived over the
 network; :func:`decode_frame` imports OpenCV only when it actually has to decode
 one, so this module still imports on a QNX board without OpenCV.
 
-``--source`` accepts ``dir:<path>``, ``camera:<index>`` and ``net:<port>``. A
-plain path means a directory, which keeps the original detector command line
-working. A ``net:`` listener binds loopback unless the detector is given
-``--net-bind``, and optionally requires ``EDGE_NET_TOKEN`` as the first frame.
+``--source`` accepts ``dir:<path>``, ``camera:<index>``, ``net:<port>`` and
+``qnxfile:<path>[:flip]``. A plain path means a directory, which keeps the
+original detector command line working. A ``net:`` listener binds loopback
+unless the detector is given ``--net-bind``, and optionally requires
+``EDGE_NET_TOKEN`` as the first frame. A ``qnxfile:`` source polls the newest
+frame that the ``qnxcam`` helper wrote (a 48-byte header followed by raw
+pixels) and only returns it once, when its timestamp changes.
 """
 
 from __future__ import annotations
@@ -44,6 +47,21 @@ _ACCEPT_TIMEOUT_S = 0.2
 _RECV_TIMEOUT_S = 1.0
 _RECV_CHUNK = 1 << 16
 
+# qnxcam's file layout (see edge/qnxcam/qnxcam.c and qnxcam_read.py): six little-endian
+# u32 fields, then int64 uv_offset, int64 timestamp_us and uint64 nbytes, then raw pixels.
+QNX_MAGIC = 0x4D414351  # the bytes "QCAM" read as a little-endian u32
+QNX_HEADER = struct.Struct("<6IqqQ")
+QNX_HEADER_SIZE = QNX_HEADER.size  # 48
+QNX_POLL_S = 0.02
+# A quiet file must not hold the detector for longer than this in one call: the supervisor
+# kills a detector that stops heartbeating, and the detector heartbeats between waits.
+QNX_WAIT_S = 0.5
+FRAMETYPE_NV12 = 1
+FRAMETYPE_RGB8888 = 2
+FRAMETYPE_UYVY = 8
+FRAMETYPE_YUYV = 14
+_QNX_BYTES_PER_PIXEL = {FRAMETYPE_YUYV: 2, FRAMETYPE_UYVY: 2, FRAMETYPE_RGB8888: 4}
+
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _JPEG_SOI = b"\xff\xd8"
 # Start-Of-Frame markers carry the true dimensions; C4/C8/CC are not SOF markers.
@@ -51,7 +69,7 @@ _SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 
 
 FrameData = np.ndarray | bytes
 Frame = tuple[float, FrameData]
-SourceKind = Literal["dir", "camera", "net"]
+SourceKind = Literal["dir", "camera", "net", "qnxfile"]
 
 
 def list_images(root: Path) -> list[Path]:
@@ -291,17 +309,138 @@ class NetSource:
         self._sock.close()
 
 
+class QnxFileSource:
+    """The newest frame the ``qnxcam`` helper wrote to a file, read without a camera SDK.
+
+    ``qnxcam`` replaces the file atomically (``rename``) and stamps each frame with the
+    camera's own microsecond timestamp. This source polls every 20 ms and returns a frame
+    only when that stamp changes, so a slow detector still sees every frame once and a
+    still camera never repeats one. It blocks at most 0.5 s per call by default, which lets
+    the detector send a heartbeat while the camera is quiet.
+    """
+
+    def __init__(self, path: str | Path, *, flip: bool = False, poll_s: float = QNX_POLL_S) -> None:
+        if poll_s <= 0:
+            raise ValueError("poll_s must be positive")
+        self.path = Path(path)
+        self.flip = flip
+        self._poll_s = poll_s
+        self._last_timestamp: int | None = None
+
+    def read(self, wait_s: float | None = None) -> Frame | None:
+        budget = QNX_WAIT_S if wait_s is None else max(0.0, wait_s)
+        deadline = time.monotonic() + budget
+        while True:
+            frame = self._poll()
+            if frame is not None:
+                return time.monotonic(), frame
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            time.sleep(min(self._poll_s, left))
+
+    def _poll(self) -> np.ndarray | None:
+        try:
+            with open(self.path, "rb") as fh:
+                header = fh.read(QNX_HEADER_SIZE)
+                if len(header) < QNX_HEADER_SIZE:
+                    return None
+                fields = QNX_HEADER.unpack(header)
+                magic, _frametype, _height, _width, _stride, _reserved, _uv, timestamp, nbytes = fields
+                if magic != QNX_MAGIC or nbytes > MAX_FRAME_BYTES:
+                    return None
+                if self._last_timestamp is not None and int(timestamp) == self._last_timestamp:
+                    return None
+                fh.seek(0)
+                data = fh.read(QNX_HEADER_SIZE + int(nbytes))
+        except OSError:
+            return None
+        if len(data) < QNX_HEADER_SIZE + int(nbytes):
+            return None  # a half-written file; the next poll gets the whole one
+        try:
+            img = decode_qnx_frame(data, flip=self.flip)
+        except ValueError:
+            return None
+        self._last_timestamp = int(timestamp)
+        return img
+
+    def restart(self) -> None:
+        """Keep the newest frame: rewinding a live camera would only replay it."""
+
+    def close(self) -> None:
+        pass
+
+
+def decode_qnx_frame(data: bytes, *, flip: bool = False) -> np.ndarray:
+    """Decode one ``qnxcam`` file image (header plus pixels) into BGR.
+
+    Raises ValueError for a truncated file, an unknown frametype or an implausible size,
+    so a corrupt or hostile file cannot make OpenCV allocate an enormous bitmap.
+    """
+    if len(data) < QNX_HEADER_SIZE:
+        raise ValueError("qnxcam file is shorter than its header")
+    magic, frametype, height, width, stride, _reserved, uv_offset, _timestamp, nbytes = (
+        QNX_HEADER.unpack_from(data, 0)
+    )
+    if magic != QNX_MAGIC:
+        raise ValueError("not a qnxcam file (bad magic)")
+    if width <= 0 or height <= 0 or width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+        raise ValueError(f"invalid qnxcam dimensions {width}x{height}")
+    if nbytes > MAX_FRAME_BYTES:
+        raise ValueError(f"qnxcam frame of {nbytes} bytes exceeds {MAX_FRAME_BYTES}")
+    body = data[QNX_HEADER_SIZE : QNX_HEADER_SIZE + int(nbytes)]
+    if len(body) != nbytes:
+        raise ValueError("truncated qnxcam frame")
+    img = _qnx_to_bgr(frametype, width, height, stride, uv_offset, body)
+    if flip:
+        import cv2
+
+        img = cv2.rotate(img, cv2.ROTATE_180)
+    return img
+
+
+def _qnx_to_bgr(
+    frametype: int, width: int, height: int, stride: int, uv_offset: int, body: bytes
+) -> np.ndarray:
+    import cv2
+
+    raw = np.frombuffer(body, dtype=np.uint8)
+    bpp = _QNX_BYTES_PER_PIXEL.get(frametype)
+    if frametype == FRAMETYPE_NV12:
+        if stride < width:
+            raise ValueError(f"NV12 stride {stride} is narrower than {width}")
+        if uv_offset < 0 or uv_offset + (height // 2) * stride > len(raw):
+            raise ValueError("NV12 UV plane is outside the frame")
+        y = raw[: height * stride].reshape(height, stride)[:, :width]
+        uv = raw[uv_offset : uv_offset + (height // 2) * stride].reshape(height // 2, stride)[:, :width]
+        return cv2.cvtColor(np.vstack([y, uv]), cv2.COLOR_YUV2BGR_NV12)
+    if bpp is None:
+        raise ValueError(f"unhandled qnxcam frametype {frametype}")
+    if stride < width * bpp:
+        raise ValueError(f"stride {stride} is narrower than {width} pixels")
+    if height * stride > len(raw):
+        raise ValueError("qnxcam frame is shorter than height x stride")
+    rows = raw[: height * stride].reshape(height, stride)[:, : width * bpp]
+    packed = rows.reshape(height, width, bpp)
+    if frametype == FRAMETYPE_YUYV:
+        return cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_YUYV)
+    if frametype == FRAMETYPE_UYVY:
+        return cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_UYVY)
+    return cv2.cvtColor(packed, cv2.COLOR_BGRA2BGR)
+
+
 @dataclass(frozen=True)
 class SourceSpec:
     """A parsed ``--source`` argument: a kind plus its string target."""
 
     kind: SourceKind
     target: str
+    flip: bool = False
 
     @property
     def path(self) -> str:
-        if self.kind != "dir":
-            raise ValueError(f"source is {self.kind}, not a directory")
+        if self.kind not in ("dir", "qnxfile"):
+            raise ValueError(f"source is {self.kind}, not a path")
         return self.target
 
     @property
@@ -318,10 +457,19 @@ class SourceSpec:
 
 
 def parse_source_spec(spec: str) -> SourceSpec:
-    """Parse ``dir:``/``camera:``/``net:`` prefixes; a bare path is a directory."""
+    """Parse ``dir:``/``camera:``/``net:``/``qnxfile:`` prefixes; a bare path is a directory."""
     value = spec.strip()
     if not value:
         raise ValueError("source must not be empty")
+    if value.startswith("qnxfile:"):
+        path = value[8:]
+        flip = False
+        if path.endswith(":flip"):
+            path = path[: -len(":flip")]
+            flip = True
+        if not path:
+            raise ValueError("qnxfile: needs a path")
+        return SourceSpec("qnxfile", path, flip)
     if value.startswith("dir:"):
         path = value[4:]
         if not path:
@@ -347,6 +495,8 @@ def open_source(spec: str, *, net_bind: str | None = None) -> FrameSource:
         return DirSource(parsed.path)
     if parsed.kind == "camera":
         return CameraSource(parsed.index)
+    if parsed.kind == "qnxfile":
+        return QnxFileSource(parsed.path, flip=parsed.flip)
     return NetSource(parsed.port, net_bind or DEFAULT_NET_BIND)
 
 

@@ -14,7 +14,7 @@ snapshot built on Sunday morning; never say a number that isn't on screen. One i
 | 7 | 2:20 | `#/` funnel + "How sure are we?" | "We tested our own method. Radar near a dark ship turned out to be no better than chance, so we never accuse on radar alone. Physics is what we trust." | evidence panel |
 | 8 | 2:40 | back to `#/live/BALTIC_WATCH` | "It's for compliance teams and coast guards: it separates what physics proves from what only looks suspicious. Ask me about any dot." | live map |
 
-QNX sponsor table only (Sun 10:00): Patrol unit tab, kill the detector live, recovery 0.75 s.
+QNX sponsor table only (Sun 10:00): Patrol unit tab, kill the detector live, recovery about 0.15 s (warm standby detector, measured on the Pi; see docs/patrol-demo.md).
 
 ## Rules
 - Rehearse on the **Sunday 06:00 snapshot** (counts and event order change as the recording grows).

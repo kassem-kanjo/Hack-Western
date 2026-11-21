@@ -17,15 +17,16 @@ import os
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
 router = APIRouter(prefix="/api/edge", tags=["edge"])
 
 STATUS_FILE = "edge_status.json"
 LATEST_FRAME = "latest.jpg"
+DECISION_FILE = "latest_decision.json"
 CONTROL_DIR = "control"
 KILL_FILE = "kill_detector"
 STRESS_FILE = "stress_ai"
@@ -37,6 +38,7 @@ CONTROL_TIMEOUT_S = 2.0
 # status is tiny JSON, a frame is one JPEG, and everything must arrive within two seconds.
 STATUS_MAX_BYTES = 64 << 10
 FRAME_MAX_BYTES = 2 << 20
+DECISION_MAX_BYTES = 64 << 10
 RELAY_DEADLINE_S = 2.0
 DEFAULT_EDGE_DIR = "data/edge"
 
@@ -62,6 +64,11 @@ def status_path() -> Path:
 def latest_path() -> Path:
     """The annotated frame sits next to the status file the supervisor writes."""
     return status_path().parent / LATEST_FRAME
+
+
+def decision_path() -> Path:
+    """The per-frame decision sits next to the status file, like the frame."""
+    return status_path().parent / DECISION_FILE
 
 
 def kill_path() -> Path:
@@ -148,6 +155,17 @@ def _frame_available(path: Path) -> bool:
         return False
 
 
+def _fetch_remote_decision(host: str) -> dict[str, Any] | None:
+    """The Pi's latest decision object, or None within the same bounded budget as status."""
+    url = _edge_url(host, DECISION_FILE)
+    try:
+        body = _relay(url, DECISION_MAX_BYTES)
+        payload = json.loads(body)
+    except (httpx.HTTPError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 @router.get("/status")
 def get_status() -> dict[str, Any]:
     """Return the newest status we can get, labelled with where it came from."""
@@ -202,12 +220,56 @@ def get_frame() -> Response:
     )
 
 
-@router.post("/kill", status_code=202)
-def kill_detector() -> dict[str, Any]:
-    """Ask the supervisor to SIGKILL the detector; recovery then follows on its own."""
+@router.get("/decision")
+def get_decision() -> dict[str, Any]:
+    """The per-frame verdict: local file, or relayed from the Pi exactly like the frame."""
+    host = edge_host()
+    payload: dict[str, Any] | None = None
+    if host:
+        try:
+            payload = _fetch_remote_decision(host)
+        except _RelayTooLarge:
+            raise HTTPException(status_code=502, detail="edge decision too large") from None
+    else:
+        try:
+            local = json.loads(decision_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            local = None
+        payload = local if isinstance(local, dict) else None
+    if payload is None:
+        raise HTTPException(status_code=404, detail="no decision")
+    return payload
+
+
+CONTROL_HEADER = "x-darkfleet-control"
+
+
+def _require_control_allowed(request: Request) -> str | None:
+    """Gate the two write paths; returns the Pi host (or None for a local unit).
+
+    1. ``EDGE_DEMO_CONTROLS=1`` must be set.
+    2. A remote unit (``EDGE_HOST``) additionally needs ``EDGE_STATUS_TOKEN``: the Pi's status
+       server then refuses control calls that do not carry it.
+    3. The request must come from our own page: a custom header (a cross-site form cannot set
+       one) and, when the browser sent an Origin, the same host as this request.
+    """
     if not controls_enabled():
         raise HTTPException(status_code=403, detail="controls disabled")
     host = edge_host()
+    if host and not status_token():
+        raise HTTPException(status_code=403, detail="remote controls need EDGE_STATUS_TOKEN")
+    if request.headers.get(CONTROL_HEADER) != "1":
+        raise HTTPException(status_code=403, detail="control header missing")
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).netloc != request.headers.get("host", ""):
+        raise HTTPException(status_code=403, detail="cross-origin control refused")
+    return host
+
+
+@router.post("/kill", status_code=202)
+def kill_detector(request: Request) -> dict[str, Any]:
+    """Ask the supervisor to SIGKILL the detector; recovery then follows on its own."""
+    host = _require_control_allowed(request)
     if host:
         if not _forward_control(host, "control/kill"):
             raise HTTPException(status_code=502, detail="edge did not accept the control")
@@ -221,11 +283,9 @@ def kill_detector() -> dict[str, Any]:
 
 
 @router.post("/stress", status_code=202)
-def stress_detector() -> dict[str, Any]:
+def stress_detector(request: Request) -> dict[str, Any]:
     """Simulate the AI hogging every core for ten seconds (demo only)."""
-    if not controls_enabled():
-        raise HTTPException(status_code=403, detail="controls disabled")
-    host = edge_host()
+    host = _require_control_allowed(request)
     if host:
         if not _forward_control(host, "control/stress", {"seconds": STRESS_SECONDS}):
             raise HTTPException(status_code=502, detail="edge did not accept the control")

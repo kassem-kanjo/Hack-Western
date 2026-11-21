@@ -21,6 +21,16 @@ STATUS = {
     "detector_alive": True,
 }
 
+DECISION = {
+    "t": 1700000000.0,
+    "frame_id": 3,
+    "source": "qnxcam:5",
+    "ai": {"engine": "opencv-dnn 4.12.0", "inference_ms": 172.0, "boxes": []},
+    "patrol": {"lat": 26.57, "lon": 56.25, "name": "Strait of Hormuz patrol"},
+    "ais": {"nearby": [], "radius_km": 2.0, "snapshot_t": "2026-11-21T15:31:00Z"},
+    "verdict": {"level": "idle", "text": "No vessel in view"},
+}
+
 # Frame the relay expects: try to use real JPEG magic so nothing parses it as JSON by mistake.
 JPEG = b"\xff\xd8\xff\xe0fake-jpeg"
 
@@ -214,12 +224,81 @@ def test_status_reports_controls_and_frame_availability(
     assert body["frame_available"] is True
 
 
+def test_decision_is_served_from_the_local_state_dir(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (local_status.parent / "latest_decision.json").write_text(json.dumps(DECISION), encoding="utf-8")
+
+    response = client.get("/api/edge/decision")
+
+    assert response.status_code == 200
+    assert response.json() == DECISION
+
+
+def test_decision_is_fetched_from_the_pi_when_configured(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [json.dumps(DECISION).encode()])
+
+    response = client.get("/api/edge/decision")
+
+    assert response.status_code == 200
+    assert response.json()["frame_id"] == 3
+    assert calls == {
+        "method": "GET",
+        "url": "http://edge.local:7071/latest_decision.json",
+        "timeout": 1.0,
+        "follow_redirects": False,
+    }
+
+
+def test_decision_token_is_forwarded_when_configured(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "abc")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [json.dumps(DECISION).encode()])
+
+    assert client.get("/api/edge/decision").status_code == 200
+    assert calls["url"] == "http://edge.local:7071/latest_decision.json?token=abc"
+
+
+def test_decision_over_the_byte_cap_is_502(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_stream(monkeypatch, calls, [b"{" + b"x" * edge.DECISION_MAX_BYTES])
+
+    response = client.get("/api/edge/decision")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "edge decision too large"
+
+
+def test_missing_decision_is_404(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("EDGE_HOST", raising=False)
+
+    response = client.get("/api/edge/decision")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "no decision"
+
+
+CONTROL = {"X-Darkfleet-Control": "1"}
+
+
 def test_kill_is_403_when_controls_are_disabled(
     client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "0")
 
-    response = client.post("/api/edge/kill")
+    response = client.post("/api/edge/kill", headers=CONTROL)
 
     assert response.status_code == 403
     assert response.json()["detail"] == "controls disabled"
@@ -231,7 +310,7 @@ def test_kill_writes_the_control_file_when_local(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
 
-    response = client.post("/api/edge/kill")
+    response = client.post("/api/edge/kill", headers=CONTROL)
 
     assert response.status_code == 202
     body = response.json()
@@ -260,14 +339,15 @@ def test_kill_is_forwarded_to_the_pi_when_remote(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
     monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "tok")
     calls: dict[str, Any] = {}
     _patch_post(monkeypatch, calls)
 
-    response = client.post("/api/edge/kill")
+    response = client.post("/api/edge/kill", headers=CONTROL)
 
     assert response.status_code == 202
     assert response.json()["target"] == "pi"
-    assert calls["url"] == "http://edge.local:7071/control/kill"
+    assert calls["url"] == "http://edge.local:7071/control/kill?token=tok"
     assert calls["json"] == {}
     assert calls["timeout"] == edge.CONTROL_TIMEOUT_S
     assert not (local_status.parent / "control").exists(), "a remote edge is never written locally"
@@ -282,7 +362,7 @@ def test_kill_forwarding_carries_the_token(
     calls: dict[str, Any] = {}
     _patch_post(monkeypatch, calls)
 
-    assert client.post("/api/edge/kill").status_code == 202
+    assert client.post("/api/edge/kill", headers=CONTROL).status_code == 202
     assert calls["url"] == "http://edge.local:7071/control/kill?token=s3cret"
 
 
@@ -291,10 +371,11 @@ def test_kill_forwarding_failure_is_502(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
     monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "tok")
     calls: dict[str, Any] = {}
     _patch_post(monkeypatch, calls, status_code=500)
 
-    response = client.post("/api/edge/kill")
+    response = client.post("/api/edge/kill", headers=CONTROL)
 
     assert response.status_code == 502
     assert response.json()["detail"] == "edge did not accept the control"
@@ -306,7 +387,7 @@ def test_stress_is_403_when_controls_are_disabled(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "0")
 
-    response = client.post("/api/edge/stress")
+    response = client.post("/api/edge/stress", headers=CONTROL)
 
     assert response.status_code == 403
     assert not (local_status.parent / "control").exists()
@@ -317,7 +398,7 @@ def test_stress_writes_ten_seconds_locally(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
 
-    response = client.post("/api/edge/stress")
+    response = client.post("/api/edge/stress", headers=CONTROL)
 
     assert response.status_code == 202
     body = response.json()
@@ -335,7 +416,7 @@ def test_stress_is_forwarded_to_the_pi_when_remote(
     calls: dict[str, Any] = {}
     _patch_post(monkeypatch, calls)
 
-    response = client.post("/api/edge/stress")
+    response = client.post("/api/edge/stress", headers=CONTROL)
 
     assert response.status_code == 202
     assert response.json()["target"] == "pi"
@@ -349,10 +430,11 @@ def test_stress_forwarding_failure_is_502(
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
     monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "tok")
     calls: dict[str, Any] = {}
     _patch_post(monkeypatch, calls, status_code=429)
 
-    response = client.post("/api/edge/stress")
+    response = client.post("/api/edge/stress", headers=CONTROL)
 
     assert response.status_code == 502
     assert not (local_status.parent / "control").exists()
@@ -422,3 +504,21 @@ def test_frame_token_is_forwarded_when_configured(
 
     assert client.get("/api/edge/frame.jpg").status_code == 200
     assert calls["url"] == "http://edge.local:7071/latest.jpg?token=abc"
+
+
+def test_controls_need_the_header_and_a_same_origin_request(
+    client, monkeypatch: pytest.MonkeyPatch, local_status: Path
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    assert client.post("/api/edge/kill").status_code == 403
+    hostile = {**CONTROL, "Origin": "https://evil.example"}
+    assert client.post("/api/edge/kill", headers=hostile).status_code == 403
+    assert client.post("/api/edge/kill", headers=CONTROL).status_code == 202
+
+
+def test_remote_controls_are_refused_without_a_token(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.delenv("EDGE_STATUS_TOKEN", raising=False)
+    assert client.post("/api/edge/kill", headers=CONTROL).status_code == 403
+    assert client.post("/api/edge/stress", headers=CONTROL).status_code == 403

@@ -20,7 +20,7 @@ import time
 import pytest
 
 from darkfleet.edge import realtime
-from darkfleet.edge.supervisor import Supervisor, SupervisorConfig
+from darkfleet.edge.supervisor import Supervisor, SupervisorConfig, parse_qnxcam
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -105,7 +105,7 @@ def _stop(sup: Supervisor, thread: threading.Thread, stop: threading.Event) -> N
     stop.set()
     thread.join(timeout=15)
     assert not thread.is_alive(), "supervisor did not stop"
-    for child in (sup.detector, sup.safety):
+    for child in (sup.detector, sup.camera, sup.safety):
         assert not _alive(None if child.proc is None else child.proc.pid), f"{child.name} left running"
 
 
@@ -150,7 +150,7 @@ def test_kill_the_detector_is_restarted_with_recovery_under_5s(state_dir):
 
 def test_safety_core_keeps_answering_status_while_detector_is_dead(state_dir):
     # A long back-off keeps the detector down for a window we can observe.
-    sup, thread, stop = _start(state_dir, restart_backoff_s=2.0)
+    sup, thread, stop = _start(state_dir, restart_backoff_s=2.0, standby=False)
     try:
         _wait_frames(state_dir, 5)
         os.kill(sup.detector_pid, signal.SIGKILL)
@@ -280,6 +280,68 @@ def test_status_reports_every_process_priority(state_dir):
         # The detector runs at nice +10, whatever the OS allowed for the two trusted processes.
         assert priorities["detector"]["nice"] == 10
         assert priorities["detector"]["policy"] == "SCHED_OTHER"
+        # No --qnxcam: the camera block is present and honestly reports no helper.
+        assert status["camera"] == {"source": FIXTURES, "alive": False, "fps": 20.0}
+        assert status["safety_tick"]["hz"] == 20
+        assert set(status["safety_tick"]) == {
+            "hz",
+            "p50_late_ms",
+            "p99_late_ms",
+            "max_late_ms",
+            "late_count_60s",
+            "ticks_60s",
+        }
+    finally:
+        _stop(sup, thread, stop)
+
+
+def test_parse_qnxcam_spec() -> None:
+    assert parse_qnxcam("5:/tmp/qnxcam.frame") == (5, "/tmp/qnxcam.frame")
+    for bad in ("5", "five:/tmp/x", ":/tmp/x", "5:"):
+        with pytest.raises(ValueError):
+            parse_qnxcam(bad)
+
+
+def test_qnxcam_helper_is_started_and_restarted(state_dir, tmp_path):
+    """A camera helper that exits is restarted and both transitions are events."""
+    fake = tmp_path / "fakecam"
+    fake.write_text("#!/bin/sh\nsleep 0.4\n", encoding="utf-8")
+    fake.chmod(0o755)
+    sup = Supervisor(
+        SupervisorConfig(
+            source=FIXTURES,
+            state_dir=state_dir,
+            lat=55.0,
+            lon=19.0,
+            mock=True,
+            fps=20.0,
+            restart_backoff_s=0.2,
+            set_priority=False,
+            qnxcam=f"5:{tmp_path}/qnxcam.frame",
+            qnxcam_bin=str(fake),
+        )
+    )
+    stop = threading.Event()
+    thread = threading.Thread(target=sup.run, kwargs={"stop": stop, "duration_s": 60}, daemon=True)
+    thread.start()
+    try:
+        status = _wait(
+            lambda: _edge(state_dir) if _edge(state_dir).get("camera", {}).get("alive") else None,
+            timeout=10,
+            label="camera alive",
+        )
+        assert status["camera"]["source"] == f"5:{tmp_path}/qnxcam.frame"
+        restarted = _wait(
+            lambda: (
+                _edge(state_dir)
+                if {"camera stopped", "camera started"}
+                <= {e["event"] for e in _edge(state_dir).get("events", [])}
+                else None
+            ),
+            timeout=10,
+            label="camera stopped and started again",
+        )
+        assert restarted["camera"]["source"] == f"5:{tmp_path}/qnxcam.frame"
     finally:
         _stop(sup, thread, stop)
 
@@ -333,5 +395,25 @@ def test_stress_control_file_starts_and_stops_workers(state_dir):
         assert idle["stress"]["workers"] == 0
         assert any(e["event"] == "stress ended" for e in idle["events"])
         assert sup._stress_procs == []
+    finally:
+        _stop(sup, thread, stop)
+
+
+def test_warm_standby_is_promoted_instantly_and_replaced(state_dir):
+    sup, thread, stop = _start(state_dir, restart_backoff_s=2.0)
+    try:
+        _wait_frames(state_dir, 5)
+        _wait(lambda: _edge(state_dir).get("standby_alive") or None, timeout=10, label="standby up")
+        old = sup.detector_pid
+        os.kill(old, signal.SIGKILL)
+        recovered = _wait(
+            lambda: _edge(state_dir) if _edge(state_dir).get("last_recovery_ms") is not None else None,
+            timeout=10,
+            label="recovery through the standby",
+        )
+        # The 2 s cold back-off is bypassed: the standby already holds the model.
+        assert recovered["last_recovery_ms"] < 1000
+        assert sup.detector_pid != old
+        _wait(lambda: _edge(state_dir).get("standby_alive") or None, timeout=10, label="new standby")
     finally:
         _stop(sup, thread, stop)
