@@ -36,6 +36,7 @@ STATUS_PATH = "/edge_status.json"
 FRAME_PATH = "/latest.jpg"
 DECISION_PATH = "/latest_decision.json"
 AB_PATH = "/ab_result.json"
+SIGHTINGS_PATH = "/sightings.json"
 AB_NAME = "ab_result.json"
 LATEST_FRAME_NAME = "latest.jpg"
 DECISION_NAME = "latest_decision.json"
@@ -68,6 +69,7 @@ class _StatusServer(ThreadingHTTPServer):
         self.latest_path = status_path.parent / LATEST_FRAME_NAME
         self.decision_path = status_path.parent / DECISION_NAME
         self.ab_path = status_path.parent / AB_NAME
+        self.sightings_path = status_path.parent / "sightings.jsonl"
         self.control_dir = status_path.parent / CONTROL_DIR
         self.token = token.encode("utf-8") if token else None
         self.last_control: dict[str, float] = {}  # route -> monotonic time of the last write
@@ -159,6 +161,8 @@ class _StatusHandler(BaseHTTPRequestHandler):
             self._serve_frame(send_body)
         elif route == DECISION_PATH:
             self._serve_decision(send_body)
+        elif route == SIGHTINGS_PATH:
+            self._serve_sightings(send_body)
         elif route == AB_PATH:
             self._serve_json_file(self.server.ab_path, send_body)  # type: ignore[attr-defined]
         else:
@@ -194,6 +198,18 @@ class _StatusHandler(BaseHTTPRequestHandler):
             self._send(_NOT_FOUND, b'{"error":"no frame"}', send_body)
             return
         self._send(200, body, send_body, "image/jpeg")
+
+    def _serve_sightings(self, send_body: bool) -> None:
+        """The chain's verdict plus the last 20 sightings, newest first (read-only)."""
+        from darkfleet.edge import sightings
+
+        path = str(self.server.sightings_path)  # type: ignore[attr-defined]
+        records, _torn = sightings.read_records(path)
+        body = json.dumps(
+            {"chain": sightings.verify(path), "sightings": list(reversed(records[-20:]))},
+            sort_keys=True,
+        ).encode("utf-8")
+        self._send(200, body, send_body, "application/json")
 
     def _serve_json_file(self, path: Path, send_body: bool) -> None:
         """A small JSON file next to the status file (the A/B result), validated before serving."""

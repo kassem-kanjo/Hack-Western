@@ -532,3 +532,24 @@ def test_ab_is_404_until_a_result_exists_then_served(client: TestClient, local_s
     )
     body = client.get("/api/edge/ab").json()
     assert body["guarded"]["late"] == 0 and body["unguarded"]["late"] == 3
+
+
+def test_sightings_are_404_without_a_log_then_served_with_feed_items(
+    client: TestClient, local_status: Path
+) -> None:
+    from darkfleet.edge.sightings import SightingsLog
+
+    assert client.get("/api/edge/sightings").status_code == 404
+    log = SightingsLog(str(local_status.parent / "sightings.jsonl"))
+    log.submit(
+        {
+            "kind": "patrol_sighting",
+            "frame_sha256": "a" * 64,
+            "patrol": {"lat": 54.45, "lon": 10.25, "name": "Kiel Bight"},
+        }
+    )
+    log.close()
+    body = client.get("/api/edge/sightings").json()
+    assert body["chain"]["ok"] is True and body["chain"]["records"] == 1
+    item = body["feed"][0]
+    assert item["kind"] == "patrol_sighting" and item["lat"] == 54.45 and item["title"] == "Vessel not on AIS"

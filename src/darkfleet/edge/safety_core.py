@@ -50,6 +50,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import protocol, realtime
+from .sightings import SightingsLog
 
 STATE_OK = "OK"
 STATE_DEGRADED = "DEGRADED"
@@ -107,6 +108,7 @@ class CoreConfig:
     score_min: float = 0.3
     tick_hz: float = TICK_HZ
     ais_max_age_s: float = 900.0
+    sightings_path: str | None = None  # hash-chained log of not_on_ais alerts
     frame_width_px: int = 640  # width the box coordinates refer to (range estimate)
 
     @property
@@ -489,6 +491,7 @@ class SafetyCore:
             "unit": {"lat": self.config.unit_lat, "lon": self.config.unit_lon},
             "nearest_ais_km": nearest,
             "ais_records": len(self.vessels),
+            "frame_sha256": msg.get("frame_sha256"),
             "latency_ms": None if latency_ms is None else round(latency_ms, 1),
             "deadline_ms": round(self.config.deadline_s * 1000),
             "on_time": None if latency_ms is None else latency_ms <= self.config.deadline_s * 1000,
@@ -833,6 +836,7 @@ def run(
     core = SafetyCore(config, ais.vessels)
     core.snapshot_t = _iso_z(time.time())
     alerts = _AlertLog(config.alerts_path)
+    sightings = SightingsLog(config.sightings_path) if config.sightings_path else None
     writer = _LatestWriter(on_idle=ais.poll)
     listener = _listen(config.socket_path)
     client: socket.socket | None = None
@@ -863,7 +867,7 @@ def run(
                     client = new_client
                     decoder = protocol.MessageDecoder()  # a new link starts with an empty buffer
             if client is not None and client in readable:
-                client, closed = _read(client, decoder, core, alerts, writer, now)
+                client, closed = _read(client, decoder, core, alerts, writer, sightings, now)
                 if closed:
                     core.on_disconnect(now)
 
@@ -899,6 +903,8 @@ def run(
     finally:
         writer.close()
         alerts.close()
+        if sightings is not None:
+            sightings.close()
         if client is not None:
             client.close()
         listener.close()
@@ -937,12 +943,30 @@ def _accept(
     return conn
 
 
+def _sighting(core: SafetyCore, record: dict[str, Any]) -> dict[str, Any]:
+    """What the log keeps of one not-on-AIS alert (all of it comes from the alert record)."""
+    cfg = core.config
+    return {
+        "kind": "patrol_sighting",
+        "frame_id": record.get("frame_id"),
+        "frame_sha256": record.get("frame_sha256"),
+        "patrol": {"lat": cfg.unit_lat, "lon": cfg.unit_lon, "name": cfg.patrol_name},
+        "verdict": NOT_ON_AIS_TEXT,
+        "confidence": record.get("confidence"),
+        "trend": record.get("trend"),
+        "range_m": record.get("range_m"),
+        "latency_ms": record.get("latency_ms"),
+        "on_time": record.get("on_time"),
+    }
+
+
 def _read(
     client: socket.socket,
     decoder: protocol.MessageDecoder,
     core: SafetyCore,
     alerts: _AlertLog,
     writer: _LatestWriter,
+    sightings: SightingsLog | None,
     now: float,
 ) -> tuple[socket.socket | None, bool]:
     """Read what is available. Returns (client or None, closed?)."""
@@ -965,6 +989,8 @@ def _read(
     for msg in messages:
         for record in core.on_message(msg, now):
             alerts.append(record)
+            if sightings is not None and record.get("kind") == ALERT_KIND:
+                sightings.submit(_sighting(core, record))
         if msg["type"] == protocol.DETECTIONS and core.last_decision is not None:
             writer.submit(core.config.decision_path, core.last_decision)
     return client, False
@@ -983,6 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status-every-s", type=float, default=0.1)
     parser.add_argument("--cooldown-s", type=float, default=5.0)
     parser.add_argument("--patrol-name", default="patrol", help="name shown in the decision file")
+    parser.add_argument("--sightings", default=None, help="hash-chained sightings log (JSONL)")
     parser.add_argument("--source", default="unknown", help='decision source label, e.g. "qnxcam:5"')
     parser.add_argument("--score-min", type=float, default=0.3, help="minimum vessel score for a verdict")
     parser.add_argument(
@@ -1012,6 +1039,7 @@ def main(argv: list[str] | None = None) -> int:
         patrol_name=args.patrol_name,
         source=args.source,
         score_min=args.score_min,
+        sightings_path=args.sightings,
         tick_hz=args.tick_hz,
     )
     stop = threading.Event()
