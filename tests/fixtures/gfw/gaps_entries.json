@@ -1,0 +1,238 @@
+[
+ {
+  "start": "2026-07-19T11:58:00.000Z",
+  "end": "2026-08-19T00:27:14.000Z",
+  "id": "2366b894a2107aff7c4bf6699fdd58f9",
+  "type": "gap",
+  "position": {
+   "lat": 13.8076,
+   "lon": 51.8154
+  },
+  "regions": {
+   "mpa": [],
+   "eez": [
+    "8353"
+   ],
+   "rfmo": [
+    "ACAP",
+    "PERSGA",
+    "IWC",
+    "IOTC"
+   ],
+   "fao": [
+    "51",
+    "51.3"
+   ],
+   "majorFao": [
+    "51"
+   ],
+   "eez12Nm": [],
+   "highSeas": [],
+   "mpaNoTakePartial": [],
+   "mpaNoTake": [],
+   "ebsa": [
+    "NWIO_19"
+   ],
+   "imma": [],
+   "dukePaa": [],
+   "protectedseas": [
+    "AIHSTREATY12",
+    "AIYEM1",
+    "AIHSTREATY36",
+    "AIHSMA105",
+    "AIHSEBSA232",
+    "AIHSTREATY28"
+   ],
+   "hsp": [],
+   "fraGfcmFao": []
+  },
+  "boundingBox": [
+   -16.693795,
+   5.041322,
+   120.324688,
+   22.573778
+  ],
+  "distances": {
+   "startDistanceFromShoreKm": 493,
+   "endDistanceFromShoreKm": 0,
+   "startDistanceFromPortKm": 522.041375,
+   "endDistanceFromPortKm": 0
+  },
+  "vessel": {
+   "id": "902ec1b33-3111-d4b8-a254-788b8621a875",
+   "name": "FENG YA NO18",
+   "ssvid": "416004522",
+   "flag": "TWN",
+   "type": "fishing",
+   "nextPort": null
+  },
+  "gap": {
+   "intentionalDisabling": true,
+   "distanceKm": "14440.364714187981",
+   "durationHours": 732.4872222222223,
+   "impliedSpeedKnots": "10.644790701130152",
+   "positions12HoursBeforeSat": "20",
+   "positionsPerDaySatReception": 40.28000847462948,
+   "offPosition": {
+    "lat": 5.041322,
+    "lon": -16.693795
+   },
+   "onPosition": {
+    "lat": 22.573778,
+    "lon": 120.324688
+   }
+  }
+ },
+ {
+  "start": "2026-07-19T21:07:13.000Z",
+  "end": "2026-08-26T11:26:47.000Z",
+  "id": "dda7c2faf9fe02e60b7445f8464e49d2",
+  "type": "gap",
+  "position": {
+   "lat": 19.9584,
+   "lon": 55.3076
+  },
+  "regions": {
+   "mpa": [],
+   "eez": [],
+   "rfmo": [],
+   "fao": [
+    "51.3",
+    "51"
+   ],
+   "majorFao": [
+    "51"
+   ],
+   "eez12Nm": [],
+   "highSeas": [],
+   "mpaNoTakePartial": [],
+   "mpaNoTake": [],
+   "ebsa": [],
+   "imma": [],
+   "dukePaa": [],
+   "protectedseas": [],
+   "hsp": [],
+   "fraGfcmFao": []
+  },
+  "boundingBox": [
+   54.06308333333333,
+   14.521116666666666,
+   56.5521,
+   25.39565
+  ],
+  "distances": {
+   "startDistanceFromShoreKm": 202,
+   "endDistanceFromShoreKm": 19,
+   "startDistanceFromPortKm": 244.2875,
+   "endDistanceFromPortKm": 0
+  },
+  "vessel": {
+   "id": "ec7dbcf5d-d44c-ba9c-45ff-369054471cd3",
+   "name": "KAHLA",
+   "ssvid": "403510000",
+   "flag": "SAU",
+   "type": "other_non_fishing",
+   "nextPort": null
+  },
+  "gap": {
+   "intentionalDisabling": true,
+   "distanceKm": "1231.633297311039",
+   "durationHours": 902.3261111111111,
+   "impliedSpeedKnots": "0.7370159968293446",
+   "positions12HoursBeforeSat": "33",
+   "positionsPerDaySatReception": 83.15848608963807,
+   "offPosition": {
+    "lat": 14.521116666666666,
+    "lon": 54.06308333333333
+   },
+   "onPosition": {
+    "lat": 25.39565,
+    "lon": 56.5521
+   }
+  }
+ },
+ {
+  "start": "2026-07-27T14:46:50.000Z",
+  "end": "2026-08-17T11:31:41.000Z",
+  "id": "f70b93c90164a106441d3beee6df2996",
+  "type": "gap",
+  "position": {
+   "lat": 15.7951,
+   "lon": 54.8787
+  },
+  "regions": {
+   "mpa": [],
+   "eez": [
+    "8354"
+   ],
+   "rfmo": [
+    "IWC",
+    "IOTC",
+    "ACAP"
+   ],
+   "fao": [
+    "51",
+    "51.3"
+   ],
+   "majorFao": [
+    "51"
+   ],
+   "eez12Nm": [],
+   "highSeas": [],
+   "mpaNoTakePartial": [],
+   "mpaNoTake": [],
+   "ebsa": [
+    "NWIO_14"
+   ],
+   "imma": [],
+   "dukePaa": [],
+   "protectedseas": [
+    "AIHSMA105",
+    "AIHSEBSA228",
+    "AIOMN1",
+    "AIHSTREATY12",
+    "AIHSMA109",
+    "AIHSTREATY36",
+    "AIHSTREATY28"
+   ],
+   "hsp": [],
+   "fraGfcmFao": []
+  },
+  "boundingBox": [
+   54.75413,
+   15.714483333333334,
+   55.00331,
+   15.875738333333333
+  ],
+  "distances": {
+   "startDistanceFromShoreKm": 135,
+   "endDistanceFromShoreKm": 120,
+   "startDistanceFromPortKm": 150.404328125,
+   "endDistanceFromPortKm": 150.82721875
+  },
+  "vessel": {
+   "id": "19a3cc63b-b22b-178a-d3f9-14123a27540a",
+   "name": "RAWAQ",
+   "ssvid": "403651000",
+   "flag": "SAU",
+   "type": "other_non_fishing",
+   "nextPort": null
+  },
+  "gap": {
+   "intentionalDisabling": true,
+   "distanceKm": "32.111986280352696",
+   "durationHours": 500.7475,
+   "impliedSpeedKnots": "0.03462640445444719",
+   "positions12HoursBeforeSat": "69",
+   "positionsPerDaySatReception": 74.6218729975388,
+   "offPosition": {
+    "lat": 15.714483333333334,
+    "lon": 54.75413
+   },
+   "onPosition": {
+    "lat": 15.875738333333333,
+    "lon": 55.00331
+   }
+  }
+ }
+]
