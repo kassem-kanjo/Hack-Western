@@ -23,6 +23,7 @@ import { renderCaseFile } from "./screens/caseFile";
 import { rankCases, renderOverview } from "./screens/overview";
 import { renderLive, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
+import { initPresent } from "./present/present";
 
 // MapLibre's worker is a sibling file in the package: point it at the copy Vite
 // emits so it is served locally (offline, no CDN).
@@ -187,3 +188,4 @@ window.addEventListener("hashchange", route);
 
 route(); // first paint: the loading line until the snapshot arrives
 loadCases();
+initPresent();

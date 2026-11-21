@@ -503,6 +503,13 @@
   stroke-dasharray: 3 3;
 }
 
+/* Only the seven ranked events get a full glyph. Everything else is a 3 px
+   dot at half opacity; it stays clickable through its hit disc but never
+   competes with the list's shapes. */
+.live-marker-dot {
+  pointer-events: none;
+}
+
 /* Rank numbers match the rail's 1..7; the halo keeps them readable over dots. */
 .live-marker-num {
   font-family: var(--font-mono);

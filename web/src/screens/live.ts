@@ -501,7 +501,11 @@ export function renderLive(
     /** Push the filtered markers and the current selection to the map. */
     function pushMap(capped: LiveEvent[]): void {
       // The first LIST_ROWS markers carry the same 1..7 rank as the rail's rows.
-      map.setEvents(capped, selectedEvent(), LIST_ROWS);
+      // A selection whose kind the chips have hidden is not drawn either: the
+      // map must show exactly the kind on screen, never a leftover ring.
+      const chosen = selectedEvent();
+      const visibleSelection = chosen !== null && active.has(chosen.kind) ? chosen : null;
+      map.setEvents(capped, visibleSelection, LIST_ROWS);
     }
 
     function applyFilter(): void {

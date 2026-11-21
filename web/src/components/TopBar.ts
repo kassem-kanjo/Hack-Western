@@ -48,16 +48,15 @@ export function topBar(opts: {
       ? h("a", { class: "demo-link", href: opts.demoHref }, "Start demo")
       : null;
 
-  // Present is a V2 feature (presentation mode). It is drawn now so the bar matches the
-  // approved design, and disabled so nobody mistakes it for a working control.
+  // Presentation mode (design/v2/04-present.png). The click is handled by
+  // document delegation in present.ts, because this bar is rebuilt on navigation.
   const present = h(
     "button",
     {
       class: "present-btn",
       type: "button",
-      disabled: true,
-      title: "Coming in V2",
-      "aria-label": "Present (coming in V2)",
+      title: "Start the guided 3-minute walkthrough",
+      "aria-label": "Present: start the guided walkthrough",
     },
     "Present",
     h("kbd", { class: "kbd" }, "P"),
