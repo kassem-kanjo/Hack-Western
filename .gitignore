@@ -19,3 +19,4 @@ data/cache/
 .DS_Store
 # agent scratch
 .worktrees/
+logs/
