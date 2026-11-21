@@ -15,6 +15,12 @@ import pytest
 from darkfleet.edge import status_http
 
 STATUS = {"state": "OK", "frames_total": 3}
+DECISION = {
+    "t": 1700000000.0,
+    "frame_id": 7,
+    "source": "qnxcam:5",
+    "verdict": {"level": "idle", "text": "No vessel in view"},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +33,7 @@ def status_file(tmp_path: Path) -> Path:
     path = tmp_path / "edge_status.json"
     path.write_text(json.dumps(STATUS), encoding="utf-8")
     (tmp_path / "latest.jpg").write_bytes(b"\xff\xd8jpeg")
+    (tmp_path / "latest_decision.json").write_text(json.dumps(DECISION), encoding="utf-8")
     return path
 
 
@@ -101,6 +108,37 @@ def test_token_can_come_from_the_environment(status_file: Path, monkeypatch: pyt
     with _running(status_file, token=None) as port:
         assert _get(port, status_http.STATUS_PATH)[0] == 403
         assert _get(port, f"{status_http.STATUS_PATH}?token=from-env")[0] == 200
+
+
+# --- per-frame decision -----------------------------------------------------
+
+
+def test_decision_is_served_verbatim(status_file: Path) -> None:
+    with _running(status_file) as port:
+        code, body = _get(port, status_http.DECISION_PATH)
+
+    assert code == 200
+    assert json.loads(body) == DECISION
+
+
+def test_decision_needs_the_token_when_configured(status_file: Path) -> None:
+    with _running(status_file, token="s3cret") as port:
+        denied = _get(port, status_http.DECISION_PATH)
+        allowed = _get(port, f"{status_http.DECISION_PATH}?token=s3cret")
+
+    assert denied[0] == 403
+    assert allowed[0] == 200
+
+
+def test_missing_or_half_written_decision_is_503(status_file: Path) -> None:
+    decision = status_file.parent / "latest_decision.json"
+    decision.unlink()
+    with _running(status_file) as port:
+        assert _get(port, status_http.DECISION_PATH)[0] == 503
+
+    decision.write_text('{"frame_id": ', encoding="utf-8")
+    with _running(status_file) as port:
+        assert _get(port, status_http.DECISION_PATH)[0] == 503
 
 
 # --- demo controls: the supervisor's files, never a signal ------------------

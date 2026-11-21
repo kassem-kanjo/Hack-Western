@@ -1,36 +1,55 @@
 /**
- * Patrol unit tab (#36): is the unit still safe when its AI fails?
+ * Patrol unit tab (#36): what did the patrol unit just see, and what did it decide?
  *
- * Left: the camera frame, annotated by the untrusted detector, refreshed at
- * ~4 fps while the tab is visible. Right: the one line that matters (the
- * safety core is running) and the detector's state, then the numbers, the
- * scheduling classes and deadline statistics that make the real-time claim
- * checkable, the last six supervisor events, and the two demo actions: kill
- * the detector, or load every core at the detector's priority.
+ * Left: the latest camera frame, boxes already drawn by the Pi, refreshed only
+ * when the decision names a new frame. Right: the three-step chain that led to
+ * the verdict (camera -> untrusted AI -> safety core), the verdict itself, the
+ * patrol position, and the reliability numbers that make the real-time claim
+ * checkable. Below them the two demo actions.
  *
- * The screen owns its timers because the router does not hold a handle to it.
+ * The decision is the source of truth and is polled once a second while the tab
+ * is visible; the supervisor status supplies scheduling, loop lateness and the
+ * controls. The frame is double-buffered, so a 1 fps swap never flashes.
+ *
+ * The screen owns its timer because the router does not hold a handle to it.
  * Every tick checks `main.isConnected`; the moment another tab replaces this
- * screen the intervals stop, and nothing is fetched in a hidden tab.
+ * screen the interval stops, and nothing is fetched in a hidden tab.
  */
 
 import "../styles/patrol.css";
 
-import type { EdgeEvent, EdgeSchedule, EdgeStatus } from "../api";
-import { edgeFrameUrl, fetchEdgeStatus, killEdgeDetector, stressEdgeDetector } from "../api";
+import type {
+  EdgeAi,
+  EdgeDecision,
+  EdgeEvent,
+  EdgeSchedule,
+  EdgeStatus,
+  EdgeVerdictLevel,
+} from "../api";
+import {
+  edgeFrameUrl,
+  fetchEdgeDecision,
+  fetchEdgeStatus,
+  killEdgeDetector,
+  stressEdgeDetector,
+} from "../api";
 import { h } from "../components/dom";
 import { topBar } from "../components/TopBar";
-import { fmtInt, fmtUtcFull } from "../format";
+import { fmtInt, fmtUtc } from "../format";
 
-/** Status poll interval (only while the document is visible). */
-const POLL_MS = 1000;
-/** 4 fps: fast enough to read as live, slow enough that the image settles. */
-const FRAME_MS = 250;
+/** Poll rate: the decision is rewritten per frame (3-5 per second on the Pi). */
+const POLL_MS = 400;
 /** How long the measured recovery number stays on the button after recovery. */
 const RECOVERY_HOLD_MS = 5000;
+/** The kill state stays on screen at least this long, even if recovery is faster. */
+const KILL_MIN_SHOW_MS = 1200;
+/** A decision older than this (unit clock) means no frames are arriving. */
+const STALE_FRAME_MS = 3000;
 /** A detector event younger than this means the supervisor is mid-restart. */
 const RESTART_WINDOW_MS = 5000;
-/** Calm list length: never turn the rail into a log viewer. */
-const EVENTS_SHOWN = 6;
+
+/** A chain square's meaning: running, coming back, stopped, or nothing yet. */
+type Tone = "ok" | "warn" | "bad" | "idle";
 
 /** `t_wall` is Unix seconds; `t` (if present) is ISO. Either may be missing. */
 function eventTimeMs(event: EdgeEvent): number | null {
@@ -44,80 +63,159 @@ function eventTimeMs(event: EdgeEvent): number | null {
   return null;
 }
 
-/** "just now" / "12 s ago" / "3 min ago" / "2 h ago"; never a future time. */
-function relativeTime(ms: number, now: number): string {
-  const diff = Math.max(0, now - ms);
-  if (diff < 5000) return "just now";
-  if (diff < 60_000) return `${Math.floor(diff / 1000)} s ago`;
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
-  return `${Math.floor(diff / 3_600_000)} h ago`;
+/** The decision's wall clock: ISO, Unix seconds, or (defensively) milliseconds. */
+function wallMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === "string") {
+    const at = Date.parse(value);
+    return Number.isFinite(at) ? at : null;
+  }
+  return null;
 }
 
-/** Supervisor event names are terse; the screen uses plain words for the known ones. */
-function eventText(event: EdgeEvent): string {
-  switch (event.event) {
-    case "detector started":
-      return "AI detector started";
-    case "detector down":
-      return "AI detector stopped";
-    case "detector silent, killing":
-      return "AI detector stopped responding";
-    case "detector recovered":
-      return typeof event.recovery_ms === "number"
-        ? `AI detector recovered in ${Math.round(event.recovery_ms)} ms`
-        : "AI detector recovered";
-    case "safety_core started":
-      return "Safety core started";
-    case "safety_core exited":
-      return "Safety core restarted";
-    default:
-      return event.event.replace(/_/g, " ");
-  }
+/** "21 Nov 20:41:07Z": seconds included, because a decision is a moment. */
+function fmtWall(ms: number): string {
+  const iso = new Date(ms).toISOString();
+  return `${fmtUtc(iso)}:${iso.slice(17, 19)}Z`;
+}
+
+/** 20 -> "20", 12.5 -> "12.5": camera and loop rates read without noise. */
+function fmtRate(value: number): string {
+  return value >= 10 ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
 }
 
 function finiteOrNull(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function msLabel(value: number | null | undefined): string {
+/** Recovery is quoted in seconds once it is over a second ("2.8 s"). */
+function fmtRecovery(value: number | null | undefined): string {
   const ms = finiteOrNull(value);
-  return ms === null ? "\u2014" : `${Math.round(ms)} ms`;
+  if (ms === null) return "\u2014";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-/**
- * "Safety core: SCHED_FIFO 30" on a board that granted it, "AI detector: nice +10"
- * when it did not. The policy comes from the supervisor, never from a guess here.
- */
-function schedLabel(name: string, sched: EdgeSchedule | null | undefined): string {
-  if (!sched) return `${name}: \u2014`;
-  const policy = (sched.policy ?? "").toUpperCase();
-  const priority = finiteOrNull(sched.priority) ?? 0;
-  if (policy === "SCHED_FIFO" || policy === "SCHED_RR") {
-    return `${name}: ${policy} ${priority}`;
+/** A radius keeps its integer form ("2 km"), a distance keeps one decimal ("1.2 km"). */
+function fmtRadius(km: number): string {
+  return Number.isInteger(km) ? String(km) : km.toFixed(1);
+}
+
+/** "SCHED_FIFO 30" on QNX, "SCHED_OTHER 8" (or its nice value) elsewhere. */
+function schedValue(sched: EdgeSchedule | null | undefined): string {
+  if (!sched) return "\u2014";
+  const policy = (sched.policy ?? "").trim().toUpperCase();
+  const priority = finiteOrNull(sched.priority);
+  const nice = finiteOrNull(sched.nice);
+  if (policy !== "") {
+    if (priority !== null) return `${policy} ${Math.round(priority)}`;
+    if (nice !== null) return `${policy} nice ${nice >= 0 ? "+" : ""}${Math.round(nice)}`;
+    return policy;
   }
-  const nice = finiteOrNull(sched.nice) ?? 0;
-  return `${name}: nice ${nice >= 0 ? "+" : ""}${nice}`;
+  return priority !== null ? String(Math.round(priority)) : "\u2014";
+}
+
+/** Sub-millisecond lateness is the point: 0.3 ms must not round to "0 ms". */
+function fmtMs(value: number): string {
+  return value < 10 ? value.toFixed(1) : String(Math.round(value));
+}
+
+/** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute. */
+function loopValue(tick: EdgeStatus["safety_tick"]): string {
+  if (!tick) return "\u2014";
+  const parts: string[] = [];
+  const hz = finiteOrNull(tick.hz);
+  parts.push(`${hz === null ? "\u2014" : fmtRate(hz)} Hz`);
+  const p50 = finiteOrNull(tick.p50_late_ms);
+  if (p50 !== null) parts.push(`median late ${fmtMs(p50)} ms`);
+  const p99 = finiteOrNull(tick.p99_late_ms);
+  if (p99 !== null) parts.push(`p99 ${fmtMs(p99)} ms`);
+  const max = finiteOrNull(tick.max_late_ms);
+  if (max !== null) parts.push(`max ${fmtMs(max)} ms`);
+  const late = finiteOrNull(tick.late_count_60s);
+  const ticks = finiteOrNull(tick.ticks_60s);
+  const of = ticks === null ? "" : ` of ${fmtInt(ticks)}`;
+  parts.push(`${late === null ? "\u2014" : fmtInt(late)}${of} ticks >5 ms late (60 s)`);
+  return parts.join(" \u00b7 ");
+}
+
+/** The highest-confidence box the detector reported, or null for none. */
+function topBox(ai: EdgeAi | null | undefined): { label: string; score: number } | null {
+  const boxes = ai?.boxes;
+  if (!Array.isArray(boxes)) return null;
+  let best: { label: string; score: number } | null = null;
+  for (const box of boxes) {
+    const score = finiteOrNull(box?.score);
+    if (score === null) continue;
+    if (best === null || score > best.score) {
+      const label = typeof box.label === "string" && box.label.trim() !== "" ? box.label.trim() : "object";
+      best = { label, score };
+    }
+  }
+  return best;
+}
+
+/** "boat 82%": the one detection line a judge can read at 1 m. */
+function aiText(ai: EdgeAi | null | undefined): string {
+  const box = topBox(ai);
+  if (box === null) return "nothing";
+  const pct = box.score <= 1 ? Math.round(box.score * 100) : Math.round(box.score);
+  return `${box.label} ${pct}%`;
+}
+
+function verdictLevel(value: unknown): EdgeVerdictLevel {
+  return value === "alert" || value === "ok" ? value : "idle";
+}
+
+/** The safety core step: what AIS knew when the verdict was made. */
+function aisLine(decision: EdgeDecision | null): string {
+  if (decision === null) return "waiting for a decision";
+  const text = typeof decision.verdict?.text === "string" ? decision.verdict.text.trim() : "";
+  if (text.startsWith("Matches AIS")) return text;
+
+  const nearby = Array.isArray(decision.ais?.nearby) ? decision.ais.nearby : [];
+  const noun = nearby.length === 1 ? "ship" : "ships";
+  const radius = finiteOrNull(decision.ais?.radius_km);
+  const tail = decision.ai?.down === true ? " \u00b7 still checking" : "";
+  if (radius === null) return `${fmtInt(nearby.length)} AIS ${noun} nearby${tail}`;
+  return `${fmtInt(nearby.length)} AIS ${noun} within ${fmtRadius(radius)} km${tail}`;
+}
+
+function verdictText(decision: EdgeDecision | null): string {
+  if (decision === null) return "Waiting for a decision";
+  const text = typeof decision.verdict?.text === "string" ? decision.verdict.text.trim() : "";
+  return text !== "" ? text : "No decision";
+}
+
+interface Step {
+  row: HTMLElement;
+  value: HTMLElement;
 }
 
 /**
  * Paint the Patrol screen into `app`.
  *
- * Returns synchronously. A status fetch continues in the background; the
- * intervals stop themselves when the screen is replaced or the tab is hidden.
+ * Returns synchronously. Status and decision fetches continue in the background;
+ * the interval stops itself when the screen is replaced or the tab is hidden.
  */
 export function renderPatrol(app: HTMLElement): void {
   let disposed = false;
-  /** True between a successful status fetch and the next failure. */
+  /** True from a successful status fetch until the next failure. */
   let online = false;
-  /** One status request at a time: a slow API must not queue a second poll. */
-  let statusInFlight = false;
+  /** One poll at a time: a slow API must not queue a second one. */
+  let pollInFlight = false;
   let pollTimer: number | null = null;
-  let frameTimer: number | null = null;
   let lastOkMs: number | null = null;
 
+  /** Latest good payloads; the screen keeps the last decision while a fetch fails. */
+  let status: EdgeStatus | null = null;
+  let decision: EdgeDecision | null = null;
+  /** The last frame id we asked the camera for, so a still unit costs one request. */
+  let lastFrameId: number | null = null;
+
   // Frame state. The visible <img> is only swapped once the next frame has
-  // loaded, so 4 fps never flashes the black stage between frames.
-  let frameAvailable = false;
+  // loaded, so a new frame never flashes the black stage.
   let frameLoaded = false;
 
   // Kill/recovery state.
@@ -125,14 +223,19 @@ export function renderPatrol(app: HTMLElement): void {
   let killing = false;
   let stressing = false;
   let stressActive = false;
-  let sawDead = false;
   let killedAt: number | null = null;
   let recoveredMs: number | null = null;
   // Restart count when the kill was requested: the supervisor's own recovery_ms is
   // only final once a restart past this count has delivered its first frame.
   let restartsAtKill: number | null = null;
   let lastRestarts = 0;
+  // The previous measured recovery, so an old number is never shown for a new kill.
+  let recoveryAtKill: number | null = null;
   let recoveredUntil = 0;
+
+  /** The verdict's key, so the row animates on change and never on a repeat paint. */
+  let lastVerdictKey: string | null = null;
+  const noMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   const bar = topBar({
     active: "patrol",
@@ -143,11 +246,11 @@ export function renderPatrol(app: HTMLElement): void {
   });
   const badge = bar.querySelector<HTMLElement>(".mode-badge");
 
-  // ---- stage: the annotated camera frame ----
+  // ---- stage: the frame and its one caption row ----
 
   const frameImg = h("img", {
     class: "patrol-frame-img",
-    alt: "Camera frame from the patrol unit, with the AI detector's boxes drawn on it",
+    alt: "Latest camera frame from the patrol unit, with the AI detector's boxes drawn on it",
     hidden: true,
   });
   const framePlaceholder = h(
@@ -159,103 +262,136 @@ export function renderPatrol(app: HTMLElement): void {
   /** The offscreen loader; a decoded frame replaces the visible one atomically. */
   const frameBuffer = new Image();
 
+  /** The camera is judged by the unit itself: helper down, source starved, or no new decision. */
+  let cameraOffline = false;
+
   function syncFrame(): void {
-    const show = online && frameAvailable && frameLoaded;
+    const show = online && frameLoaded && !cameraOffline;
     frameImg.hidden = !show;
     framePlaceholder.hidden = show;
+    framePlaceholder.textContent = cameraOffline ? "Camera offline" : "Waiting for the camera\u2026";
   }
 
+  /** Same clock on both sides (the Pi's), so laptop/Pi clock skew cannot fake an outage. */
+  function isCameraOffline(s: EdgeStatus, d: EdgeDecision | null): boolean {
+    // Only a unit with a camera helper (source "<unit>:<path>") can report the helper dead;
+    // a net or directory source legitimately has none.
+    if (s.camera?.alive === false && /^\d+:/.test(s.camera.source ?? "")) return true;
+    if (s.detector_alive && s.detector_waiting) return true;
+    const now = finiteOrNull(s.t_wall);
+    const at = d === null ? null : wallMs(d.t);
+    if (now !== null && at !== null && d?.ai?.down !== true && now * 1000 - at > STALE_FRAME_MS) return true;
+    return false;
+  }
+
+  /** One image request at a time: a new src would abort the one still in flight. */
+  let frameLoading = false;
+
   frameBuffer.onload = (): void => {
+    frameLoading = false;
     if (disposed) return;
     frameLoaded = true;
     frameImg.src = frameBuffer.src;
     syncFrame();
   };
   frameBuffer.onerror = (): void => {
+    // One dropped JPEG is not a reason to blank the last good frame.
+    frameLoading = false;
+    // Ask again on the next decision, even if its frame id has not moved.
+    lastFrameId = null;
     if (disposed) return;
-    frameLoaded = false;
     syncFrame();
   };
+
+  function loadFrame(): void {
+    if (disposed || frameLoading) return;
+    frameLoading = true;
+    frameBuffer.src = edgeFrameUrl(Date.now());
+  }
+
+  const caption = h("div", { class: "patrol-caption" }, "Waiting for the first decision");
 
   const stage = h(
     "section",
     { class: "stage patrol-stage" },
     h("div", { class: "patrol-frame" }, frameImg, framePlaceholder),
+    caption,
   );
 
-  // ---- rail: state, numbers, events, action ----
+  // ---- right rail: the chain, the verdict, the numbers, the actions ----
 
-  const safetyValue = h("span", { class: "patrol-state-value" }, "checking\u2026");
-  const safetyLine = h(
-    "div",
-    { class: "patrol-state" },
-    h("span", { class: "patrol-state-name" }, "Safety core:"),
-    safetyValue,
-  );
-
-  const detectorValue = h(
-    "span",
-    { class: "patrol-state-value", "aria-live": "polite" },
-    "checking\u2026",
-  );
-  const detectorLine = h(
-    "div",
-    { class: "patrol-state" },
-    h("span", { class: "patrol-state-name" }, "AI detector:"),
-    detectorValue,
-  );
-
-  const states = h("div", { class: "patrol-states" }, safetyLine, detectorLine);
-
-  function metric(label: string): { row: HTMLElement; value: HTMLElement } {
-    const value = h("span", { class: "patrol-metric-value" }, "\u2014");
+  function step(name: string, note?: string): Step {
+    const value = h("span", { class: "patrol-step-value" }, "\u2014");
     const row = h(
-      "div",
-      { class: "patrol-metric" },
-      h("span", { class: "patrol-metric-label" }, label),
-      value,
+      "li",
+      { class: "patrol-step is-idle" },
+      h("span", { class: "patrol-step-square", "aria-hidden": "true" }),
+      h(
+        "div",
+        { class: "patrol-step-body" },
+        h(
+          "span",
+          { class: "patrol-step-name" },
+          name,
+          note === undefined ? null : h("span", { class: "patrol-step-note" }, ` ${note}`),
+        ),
+        value,
+      ),
     );
     return { row, value };
   }
 
-  const frames = metric("Frames");
-  const inference = metric("Inference");
-  const misses = metric("Deadline misses");
-  const restarts = metric("Detector restarts");
-  const recovery = metric("Last recovery");
-  const alerts = metric("Alerts");
+  function setStep(target: Step, tone: Tone, text: string): void {
+    target.row.className = `patrol-step is-${tone}`;
+    target.value.textContent = text;
+  }
 
-  const metrics = h(
-    "div",
-    { class: "patrol-metrics" },
-    frames.row,
-    inference.row,
-    misses.row,
-    restarts.row,
-    recovery.row,
-    alerts.row,
+  const cameraStep = step("Camera");
+  const aiStep = step("AI detector", "(untrusted)");
+  const safetyStep = step("Safety core");
+  const chain = h(
+    "ol",
+    { class: "patrol-chain" },
+    cameraStep.row,
+    aiStep.row,
+    safetyStep.row,
   );
 
-  const eventsList = h("ol", { class: "patrol-events" });
-  const eventsEmpty = h("p", { class: "patrol-events-empty" }, "No events yet.");
-
-  // ---- real-time detail: scheduling classes, latency, deadline misses ----
-
-  const safetySched = h("div", { class: "patrol-line" }, "Safety core: \u2014");
-  const detectorSched = h("div", { class: "patrol-line" }, "AI detector: \u2014");
-  const checkP99 = h("div", { class: "patrol-line" }, "Safety check p99: \u2014");
-  const misses60 = h("div", { class: "patrol-line" }, "Deadline misses (60 s): \u2014");
-  const underLoad = h("div", { class: "patrol-line is-amber", hidden: true }, "AI under load");
-
-  const detail = h(
-    "div",
-    { class: "patrol-detail" },
-    safetySched,
-    detectorSched,
-    checkP99,
-    misses60,
-    underLoad,
+  const verdictEl = h(
+    "p",
+    { class: "patrol-verdict is-idle", role: "status" },
+    "Waiting for a decision",
   );
+  const positionEl = h("p", { class: "patrol-position" }, "Patrol position: \u2014");
+
+  function field(label: string): { dt: HTMLElement; dd: HTMLElement } {
+    const dt = h("dt", null, label);
+    const dd = h("dd", null, "\u2014");
+    return { dt, dd };
+  }
+
+  const safetySched = field("Safety core");
+  const aiSched = field("AI detector");
+  const loop = field("Safety loop lateness");
+  const recovery = field("Last recovery");
+  const restarts = field("Restarts");
+
+  const fields = h(
+    "dl",
+    { class: "patrol-fields" },
+    safetySched.dt,
+    safetySched.dd,
+    aiSched.dt,
+    aiSched.dd,
+    loop.dt,
+    loop.dd,
+    recovery.dt,
+    recovery.dd,
+    restarts.dt,
+    restarts.dd,
+  );
+
+  const underLoad = h("p", { class: "patrol-load", hidden: true }, "AI under load");
 
   const killBtn = h(
     "button",
@@ -267,39 +403,28 @@ export function renderPatrol(app: HTMLElement): void {
     { class: "btn patrol-stress", type: "button", hidden: true },
     "Stress the AI (10 s)",
   );
+  const hint = h("p", { class: "patrol-hint", hidden: true });
   const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
-  const killHint = h("p", { class: "patrol-hint", hidden: true });
-  const killNote = h(
-    "p",
-    { class: "patrol-note" },
-    "The detector is untrusted. A small safety core keeps checking for ships that don't broadcast, even while the AI restarts.",
-  );
-  const runsOn = h("p", { class: "patrol-source" }, "Runs on: laptop");
 
-  const rail = h(
+  const side = h(
     "aside",
-    { class: "patrol-rail" },
-    h("h2", { class: "patrol-title" }, "Patrol unit"),
-    states,
-    metrics,
-    detail,
-    h("h3", { class: "patrol-h" }, "Recent events"),
-    eventsList,
-    eventsEmpty,
-    h("div", { class: "patrol-foot" }, actions, killHint, killNote, runsOn),
+    { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
+    chain,
+    verdictEl,
+    positionEl,
+    h("h3", { class: "patrol-h" }, "Reliability"),
+    fields,
+    underLoad,
+    actions,
+    hint,
   );
 
-  // ---- offline: one calm block instead of a half-live screen ----
+  // ---- offline: one calm line instead of a half-live screen ----
 
-  const offlineLast = h("p", null, "Last seen: never");
-  const offline = h(
-    "div",
-    { class: "patrol-offline" },
-    h("h2", null, "Patrol unit offline"),
-    offlineLast,
-  );
+  const offlineLine = h("p", null, "Patrol unit offline");
+  const offline = h("div", { class: "patrol-offline" }, offlineLine);
 
-  const main = h("main", { class: "main patrol-main" }, stage, rail);
+  const main = h("main", { class: "main patrol-main" }, stage, side);
 
   app.replaceChildren(bar, main);
 
@@ -315,70 +440,25 @@ export function renderPatrol(app: HTMLElement): void {
    * reads "restarting" rather than a flat "down".
    */
   function detectorState(
-    status: EdgeStatus,
+    s: EdgeStatus,
     now: number,
-  ): { label: string; tone: "running" | "restarting" | "down" } {
-    if (status.detector_alive) {
-      // Alive but the source has no frame yet: honest, and still the quiet baseline.
+  ): { label: string; tone: Tone } {
+    if (s.detector_alive) {
       return {
-        label: status.detector_waiting ? "waiting for frames" : "running",
-        tone: "running",
+        label: s.detector_waiting ? "waiting for frames" : "running",
+        tone: s.detector_waiting ? "warn" : "ok",
       };
     }
-    if (killing) return { label: "restarting", tone: "restarting" };
+    if (killing) return { label: "restarting", tone: "warn" };
 
     let newest = Number.NEGATIVE_INFINITY;
-    for (const event of status.events ?? []) {
+    for (const event of s.events ?? []) {
       if (!event.event.toLowerCase().includes("detector")) continue;
       const at = eventTimeMs(event);
       if (at !== null && at > newest) newest = at;
     }
-    if (now - newest <= RESTART_WINDOW_MS) return { label: "restarting", tone: "restarting" };
-    return { label: "down", tone: "down" };
-  }
-
-  function paintMetrics(status: EdgeStatus): void {
-    frames.value.textContent = fmtInt(status.frames_total ?? 0);
-    inference.value.textContent = msLabel(status.last_inference_ms);
-    misses.value.textContent = fmtInt(status.deadline_misses ?? 0);
-    restarts.value.textContent = fmtInt(status.detector_restarts ?? 0);
-    recovery.value.textContent = msLabel(status.last_recovery_ms);
-    alerts.value.textContent = fmtInt(status.alerts_total ?? 0);
-  }
-
-  function paintDetail(status: EdgeStatus): void {
-    const priorities = status.priorities ?? {};
-    safetySched.textContent = schedLabel("Safety core", priorities.safety_core);
-    detectorSched.textContent = schedLabel("AI detector", priorities.detector);
-    checkP99.textContent = `Safety check p99: ${msLabel(status.latency_p99_ms)}`;
-    misses60.textContent = `Deadline misses (60 s): ${fmtInt(status.deadline_misses_60s ?? 0)}`;
-    stressActive = status.stress?.active === true;
-    underLoad.hidden = !stressActive;
-  }
-
-  function paintEvents(events: EdgeEvent[]): void {
-    // Newest first, and never more than a glance: six rows, calm list.
-    const recent = events.slice(-EVENTS_SHOWN).reverse();
-    const now = Date.now();
-    eventsList.replaceChildren();
-    eventsList.hidden = recent.length === 0;
-    eventsEmpty.hidden = recent.length > 0;
-
-    for (const event of recent) {
-      const at = eventTimeMs(event);
-      eventsList.append(
-        h(
-          "li",
-          { class: "patrol-event" },
-          h(
-            "span",
-            { class: "patrol-event-time" },
-            at === null ? "\u2014" : relativeTime(at, now),
-          ),
-          h("span", { class: "patrol-event-text" }, eventText(event)),
-        ),
-      );
-    }
+    if (now - newest <= RESTART_WINDOW_MS) return { label: "restarting", tone: "warn" };
+    return { label: "stopped", tone: "bad" };
   }
 
   function paintKill(): void {
@@ -393,7 +473,7 @@ export function renderPatrol(app: HTMLElement): void {
 
     if (recoveredUntil > Date.now() && recoveredMs !== null) {
       killBtn.disabled = true;
-      killBtn.textContent = `Recovered in ${Math.round(recoveredMs)} ms`;
+      killBtn.textContent = `Recovered in ${fmtRecovery(recoveredMs)}`;
       return;
     }
 
@@ -408,122 +488,230 @@ export function renderPatrol(app: HTMLElement): void {
     stressBtn.textContent = stressing ? "Stressing the AI\u2026" : "Stress the AI (10 s)";
   }
 
-  function paint(status: EdgeStatus): void {
-    online = true;
-    if (main.firstElementChild !== stage) main.replaceChildren(stage, rail);
-    paintBadge(true);
-
-    controls = status.controls === true;
-    safetyValue.textContent = "running";
-
-    const hadFrame = frameAvailable;
-    frameAvailable = status.frame_available === true;
-    if (frameAvailable && !hadFrame) {
-      // Paint the first frame now; the visible image is swapped on load, so
-      // this never shows a half-rendered JPEG.
-      frameBuffer.src = edgeFrameUrl(Date.now());
-    }
-    syncFrame();
-
+  /** Scheduling, loop lateness, recovery/restart counts, stress and controls. */
+  function paintReliability(s: EdgeStatus): void {
     const now = Date.now();
-    if (!status.detector_alive) sawDead = true;
+    const priorities = s.priorities ?? {};
+    safetySched.dd.textContent = schedValue(priorities.safety_core);
+    aiSched.dd.textContent = schedValue(priorities.detector);
+    loop.dd.textContent = loopValue(s.safety_tick);
+    recovery.dd.textContent = fmtRecovery(s.last_recovery_ms);
+    restarts.dd.textContent = fmtInt(s.detector_restarts ?? 0);
+
+    stressActive = s.stress?.active === true;
+    underLoad.hidden = !stressActive;
+
+    controls = s.controls === true;
 
     // The kill is finished the first time the detector is seen alive again
-    // after it was seen dead. The 3 s guard covers a kill that lands between
+    // after it was seen dead. The 8 s guard covers a kill that lands between
     // two polls (the supervisor restarts within ~2 s), so the button cannot
     // stay on "watching recovery" forever.
-    lastRestarts = finiteOrNull(status.detector_restarts) ?? lastRestarts;
-    const measured = finiteOrNull(status.last_recovery_ms);
-    const restartedSinceKill = restartsAtKill !== null && lastRestarts > restartsAtKill;
+    lastRestarts = finiteOrNull(s.detector_restarts) ?? lastRestarts;
+    const measured = finiteOrNull(s.last_recovery_ms);
+    const restartedSinceKill =
+      restartsAtKill !== null && lastRestarts > restartsAtKill && measured !== recoveryAtKill;
     if (
       killing &&
-      status.detector_alive &&
+      s.detector_alive &&
+      // A warm standby recovers in ~150 ms; hold "restarting" long enough to be read.
+      (killedAt === null || now - killedAt >= KILL_MIN_SHOW_MS) &&
       ((restartedSinceKill && measured !== null) ||
         (killedAt !== null && now - killedAt >= 8000))
     ) {
-      // Show the supervisor's measured number (the one the panel shows), never a
-      // browser-side timing; the 8 s guard only stops the button waiting forever.
+      // Show the supervisor's measured number, never a browser-side timing; the
+      // 8 s guard only stops the button from waiting forever.
       recoveredMs = restartedSinceKill ? measured : null;
       restartsAtKill = null;
       recoveredUntil = now + RECOVERY_HOLD_MS;
       killing = false;
-      sawDead = false;
       killedAt = null;
     }
-    if (!killing) sawDead = false;
 
-    const state = detectorState(status, now);
-    detectorValue.textContent = state.label;
-    detectorValue.className = `patrol-state-value is-${state.tone}`;
-
-    paintMetrics(status);
-    paintDetail(status);
-    paintEvents(status.events ?? []);
     paintKill();
     paintStress();
+  }
 
-    runsOn.textContent =
-      status.source === "pi" ? "Runs on: QNX Raspberry Pi" : "Runs on: laptop";
+  function paintCaption(d: EdgeDecision | null): void {
+    if (d === null) {
+      caption.textContent = "Waiting for the first decision";
+      return;
+    }
+    const parts: string[] = [`Frame ${String(d.frame_id)}`];
+    const at = wallMs(d.t);
+    if (at !== null) parts.push(fmtWall(at));
+    const source = typeof d.source === "string" ? d.source.trim() : "";
+    if (source !== "") parts.push(source);
+    const inference = finiteOrNull(d.ai?.inference_ms);
+    if (inference !== null) parts.push(`AI ${Math.round(inference)} ms`);
+    caption.textContent = parts.join(" \u00b7 ");
+  }
+
+  /** The three steps, each one line: what saw, what guessed, what checked AIS. */
+  function paintChain(s: EdgeStatus, d: EdgeDecision | null): void {
+    const detector = detectorState(s, Date.now());
+
+    // 1 Camera: the source and the rate the safety core processed frames at.
+    const source = typeof d?.source === "string" ? d.source.trim() : "";
+    const fps = finiteOrNull(s.frames_per_s);
+    const cameraParts: string[] = [];
+    if (source !== "") cameraParts.push(source);
+    if (fps !== null) cameraParts.push(`${fmtRate(fps)} fps`);
+    if (cameraOffline) {
+      setStep(cameraStep, "bad", "offline");
+    } else {
+      setStep(
+        cameraStep,
+        s.frame_available ? "ok" : "warn",
+        s.frame_available ? cameraParts.join(" \u00b7 ") || "\u2014" : "waiting for frames",
+      );
+    }
+
+    // 2 AI: untrusted, and named as such; under stress its slower time is the point.
+    if (killing || !s.detector_alive || d?.ai?.down === true) {
+      const label = s.detector_alive || killing ? "restarting" : detector.label;
+      setStep(aiStep, s.detector_alive || killing ? "warn" : detector.tone, label);
+    } else if (s.detector_waiting) {
+      setStep(aiStep, "warn", "waiting for frames");
+    } else if (d === null) {
+      setStep(aiStep, "idle", "waiting for a decision");
+    } else {
+      let text = aiText(d.ai);
+      if (stressActive) {
+        const inference = finiteOrNull(d.ai?.inference_ms);
+        if (inference !== null) text += ` \u00b7 ${Math.round(inference)} ms`;
+      }
+      setStep(aiStep, "ok", text);
+    }
+
+    // 3 Safety core: the trusted AIS check, independent of the AI's opinion.
+    const safetyTone: Tone =
+      s.state === "OK" ? "ok" : s.state === "DEGRADED" ? "warn" : "idle";
+    setStep(safetyStep, safetyTone, aisLine(d));
+  }
+
+  function paintVerdict(d: EdgeDecision | null): void {
+    const level = d === null ? "idle" : verdictLevel(d.verdict?.level);
+    const text = verdictText(d);
+    const key = `${level}|${text}`;
+    if (key === lastVerdictKey) return;
+
+    const first = lastVerdictKey === null;
+    lastVerdictKey = key;
+    verdictEl.className = `patrol-verdict is-${level}`;
+    verdictEl.textContent = d === null ? text : `${level.toUpperCase()} \u00b7 ${text}`;
+
+    // Motion only to explain: a fade marks a new decision, nothing idles.
+    if (!first && !noMotion.matches) {
+      verdictEl.classList.remove("is-fading");
+      void verdictEl.offsetWidth;
+      verdictEl.classList.add("is-fading");
+    }
+  }
+
+  function paintPosition(d: EdgeDecision | null): void {
+    const name =
+      typeof d?.patrol?.name === "string" && d.patrol.name.trim() !== ""
+        ? d.patrol.name.trim()
+        : null;
+    const lat = finiteOrNull(d?.patrol?.lat);
+    const lon = finiteOrNull(d?.patrol?.lon);
+    const coords = lat !== null && lon !== null ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : null;
+    const body = [name, coords].filter((part): part is string => part !== null).join(" \u00b7 ");
+    positionEl.textContent = `Patrol position: ${body !== "" ? body : "\u2014"}`;
+  }
+
+  function paint(): void {
+    if (status === null) return;
+    cameraOffline = isCameraOffline(status, decision);
+    syncFrame();
+    paintReliability(status);
+    paintCaption(decision);
+    paintChain(status, decision);
+    paintVerdict(decision);
+    paintPosition(decision);
+
+    if (decision !== null) {
+      const id = finiteOrNull(decision.frame_id);
+      // Frame id missing (older writer): paint the first frame, then wait for a
+      // real id instead of hammering the camera every second.
+      const nextId = id === null ? -1 : id;
+      if (nextId !== lastFrameId) {
+        lastFrameId = nextId;
+        loadFrame();
+      }
+    }
   }
 
   function showOffline(): void {
     online = false;
-    frameAvailable = false;
     syncFrame();
     paintBadge(false);
-    offlineLast.textContent =
-      lastOkMs === null
-        ? "Last seen: never"
-        : `Last seen ${fmtUtcFull(new Date(lastOkMs).toISOString())}`;
+    const seen =
+      lastOkMs === null ? null : Math.max(1, Math.floor((Date.now() - lastOkMs) / 1000));
+    offlineLine.textContent =
+      seen === null ? "Patrol unit offline" : `Patrol unit offline \u00b7 last seen ${seen} s ago`;
     if (main.firstElementChild !== offline) main.replaceChildren(offline);
   }
 
   async function poll(): Promise<void> {
-    if (disposed || statusInFlight) return;
+    if (disposed || pollInFlight) return;
     if (!main.isConnected) {
       dispose();
       return;
     }
 
-    statusInFlight = true;
+    pollInFlight = true;
     try {
-      const status = await fetchEdgeStatus();
+      // Status is the unit's heartbeat; the decision is what it concluded. A
+      // missing decision is not an offline unit, so the two are judged apart.
+      // Status first: asking an offline unit for a decision only fills the console with 404s.
+      const [statusResult] = await Promise.allSettled([fetchEdgeStatus()]);
       if (disposed) return;
-      // A 200 with no status file is the API saying "no unit"; that is offline,
-      // not a screen full of zeros.
-      if (status.state === "UNKNOWN" && status.error) {
+
+      if (statusResult.status === "rejected") {
         showOffline();
         return;
       }
+      const next = statusResult.value;
+      // A 200 with no status file is the API saying "no unit"; that is offline,
+      // not a screen full of zeros.
+      if (next.state === "UNKNOWN" && next.error) {
+        showOffline();
+        return;
+      }
+
+      const [decisionResult] = await Promise.allSettled([fetchEdgeDecision()]);
+      if (disposed) return;
+
       lastOkMs = Date.now();
-      paint(status);
+      if (!online) {
+        online = true;
+        main.replaceChildren(stage, side);
+        syncFrame();
+      }
+      paintBadge(true);
+
+      status = next;
+      if (decisionResult.status === "fulfilled") decision = decisionResult.value;
+      paint();
     } catch {
       if (!disposed) showOffline();
     } finally {
-      statusInFlight = false;
+      pollInFlight = false;
     }
-  }
-
-  function frameTick(): void {
-    if (disposed) return;
-    if (!main.isConnected) {
-      dispose();
-      return;
-    }
-    if (!online || !frameAvailable || document.visibilityState !== "visible") return;
-    frameBuffer.src = edgeFrameUrl(Date.now());
   }
 
   async function requestKill(): Promise<void> {
     if (disposed || killing) return;
 
     killing = true;
-    sawDead = false;
     killedAt = Date.now();
     restartsAtKill = lastRestarts;
+    recoveryAtKill = finiteOrNull(status?.last_recovery_ms);
     recoveredUntil = 0;
-    killHint.hidden = true;
-    killHint.textContent = "";
+    hint.hidden = true;
+    hint.textContent = "";
     paintKill();
 
     try {
@@ -536,8 +724,8 @@ export function renderPatrol(app: HTMLElement): void {
       killing = false;
       killedAt = null;
       paintKill();
-      killHint.textContent = "The patrol unit did not accept the kill request.";
-      killHint.hidden = false;
+      hint.textContent = "The patrol unit did not accept the kill request.";
+      hint.hidden = false;
     }
   }
 
@@ -549,8 +737,8 @@ export function renderPatrol(app: HTMLElement): void {
     if (disposed || stressing) return;
 
     stressing = true;
-    killHint.hidden = true;
-    killHint.textContent = "";
+    hint.hidden = true;
+    hint.textContent = "";
     paintStress();
 
     try {
@@ -560,8 +748,8 @@ export function renderPatrol(app: HTMLElement): void {
       void poll();
     } catch {
       if (disposed) return;
-      killHint.textContent = "The patrol unit did not accept the stress request.";
-      killHint.hidden = false;
+      hint.textContent = "The patrol unit did not accept the stress request.";
+      hint.hidden = false;
     } finally {
       if (!disposed) {
         stressing = false;
@@ -574,51 +762,42 @@ export function renderPatrol(app: HTMLElement): void {
     void requestStress();
   });
 
-  // ---- timers: visible tab only ----
+  // ---- timer: visible tab only ----
 
-  function startTimers(): void {
-    if (disposed) return;
-    if (pollTimer === null) {
-      pollTimer = window.setInterval(() => {
-        void poll();
-      }, POLL_MS);
-    }
-    if (frameTimer === null) {
-      frameTimer = window.setInterval(frameTick, FRAME_MS);
-    }
+  function startTimer(): void {
+    if (disposed || pollTimer !== null) return;
+    pollTimer = window.setInterval(() => {
+      void poll();
+    }, POLL_MS);
   }
 
-  function stopTimers(): void {
+  function stopTimer(): void {
     if (pollTimer !== null) {
       window.clearInterval(pollTimer);
       pollTimer = null;
-    }
-    if (frameTimer !== null) {
-      window.clearInterval(frameTimer);
-      frameTimer = null;
     }
   }
 
   function dispose(): void {
     if (disposed) return;
     disposed = true;
-    stopTimers();
+    stopTimer();
     document.removeEventListener("visibilitychange", onVisibility);
   }
 
   function onVisibility(): void {
     if (disposed) return;
     if (document.visibilityState === "visible") {
-      startTimers();
+      startTimer();
       void poll();
     } else {
-      stopTimers();
+      stopTimer();
     }
   }
 
   document.addEventListener("visibilitychange", onVisibility);
   if (document.visibilityState === "visible") {
-    startTimers();
+    startTimer();
     void poll();
   }
 }

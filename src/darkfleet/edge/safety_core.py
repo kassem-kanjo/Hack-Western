@@ -13,6 +13,11 @@ detector message that is malformed drops that connection, not the core.
 Rule (v1): a frame with a "boat" box raises ALERT "VESSEL NOT BROADCASTING" unless some cached
 AIS vessel lies within `match_km` of the unit's own position. The camera bearing is not used yet.
 
+The core also owns the decision file: after every DETECTIONS message it builds
+``<state-dir>/latest_decision.json`` (AI boxes, patrol position, nearby AIS, verdict) and
+``run`` replaces it atomically. Its 20 Hz housekeeping loop uses absolute ``time.monotonic``
+deadlines and reports its own lateness as ``safety_tick`` in the status file.
+
 Dependencies: standard library and `protocol` only (no pyproj, no numpy), so the module runs
 on QNX with the same Python.
 """
@@ -23,6 +28,7 @@ import argparse
 import json
 import math
 import os
+import queue
 import select
 import signal
 import socket
@@ -40,11 +46,21 @@ from . import protocol, realtime
 STATE_OK = "OK"
 STATE_DEGRADED = "DEGRADED"
 ALERT_KIND = "VESSEL NOT BROADCASTING"
+VESSEL_LABELS = frozenset({"boat", "ship"})
+DECISION_NAME = "latest_decision.json"
+BLIND_TEXT = "AI DOWN \u2014 sensor blind, manual watch"
+VERDICT_ALERT = "alert"
+VERDICT_OK = "ok"
+VERDICT_IDLE = "idle"
 
 _EARTH_RADIUS_KM = 6371.0088
 _KM_PER_DEG = 110.0  # Deliberately a little small: the lat/lon pre-filter must never reject a true neighbour.
-_TICK_S = 0.05
 _SOCKET_PATH_MAX = 100  # AF_UNIX paths are limited to ~104 bytes on macOS.
+# The housekeeping loop is 20 Hz. A tick more than this late counts as a miss for
+# `late_count_60s`; p99/max report the raw lateness either way.
+TICK_HZ = 20.0
+LATE_TOLERANCE_MS = 5.0
+_SELECT_MAX_S = 0.5  # wake at least twice a second even if a longer tick period is configured
 # Statistical windows. One minute matches the console's "Deadline misses (60 s)";
 # frames_per_s is a short window so a stalled camera shows up almost immediately.
 _STATS_WINDOW_S = 60.0
@@ -66,6 +82,14 @@ class CoreConfig:
     status_every_s: float = 0.1
     fifo_priority: int = 30  # real-time class on QNX; refused on macOS and logged once
     set_priority: bool = True
+    # Decision contract: where the frame-by-frame verdict is written, what the unit is called
+    # and which boxes count as a vessel.
+    decision_path: str | None = None
+    patrol_name: str = "patrol"
+    source: str = "unknown"
+    score_min: float = 0.3
+    tick_hz: float = TICK_HZ
+    ais_max_age_s: float = 900.0
 
     @property
     def silence_s(self) -> float:
@@ -78,6 +102,7 @@ class AisVessel:
     lat: float
     lon: float
     t: float
+    name: str = ""
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -111,7 +136,8 @@ def load_ais_snapshot(path: str | None) -> list[AisVessel]:
         except (KeyError, TypeError, ValueError):
             continue
         if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
-            vessels.append(AisVessel(mmsi=mmsi, lat=lat, lon=lon, t=t))
+            name = rec.get("name")
+            vessels.append(AisVessel(mmsi=mmsi, lat=lat, lon=lon, t=t, name=str(name) if name else ""))
     return vessels
 
 
@@ -138,14 +164,34 @@ class SafetyCore:
         self.detector_waiting = False  # the last heartbeat said "waiting for frames"
         self.detector_sched: dict[str, Any] | None = None  # the detector's own scheduling class
         self.transitions: list[dict[str, Any]] = []
+        self.last_frame_id = 0
+        self.last_decision: dict[str, Any] | None = None  # written to latest_decision.json by run()
+        self.snapshot_t: str = _iso_z(time.time())  # when the AIS cache was last loaded
         # Rolling statistics: safety-check latency, frame arrivals and deadline misses.
         self._latency_ms: deque[tuple[float, float]] = deque()
         self._frame_at: deque[float] = deque()
         self._miss_at: deque[float] = deque()
+        self._tick_late_ms: deque[tuple[float, float]] = deque()
         self._last_msg_mono: float | None = None
         self._last_alert_mono: float | None = None
         # Starting in OK with no message yet: the silence clock starts at the first tick.
         self._started_mono: float | None = None
+
+    # --- AIS cache ---------------------------------------------------------
+
+    def set_vessels(self, vessels: list[AisVessel], now_wall: float | None = None) -> None:
+        """Replace the AIS cache and stamp the decision file with this snapshot time."""
+        self.vessels = list(vessels)
+        self.snapshot_t = _iso_z(time.time() if now_wall is None else now_wall)
+
+    def expire_ais(self, now_wall: float) -> None:
+        """Drop records older than ``ais_max_age_s``. A t of 0 means "unknown", never expired."""
+        if not self.vessels:
+            return
+        cutoff = now_wall - self.config.ais_max_age_s
+        kept = [v for v in self.vessels if v.t <= 0 or v.t >= cutoff]
+        if len(kept) != len(self.vessels):
+            self.vessels = kept  # the snapshot time stays the file's load time
 
     # --- state machine -----------------------------------------------------
 
@@ -198,6 +244,8 @@ class SafetyCore:
             self.deadline_misses += 1
             self._miss_at.append(now)
         records = self._evaluate(msg, now)
+        self.last_decision = self.build_decision(msg)
+        self.last_frame_id = int(msg["frame_id"])
         self._frame_at.append(now)
         self._latency_ms.append((now, (time.perf_counter() - started) * 1000.0))
         self._prune(now)
@@ -208,24 +256,98 @@ class SafetyCore:
 
     # --- rules -------------------------------------------------------------
 
+    def nearby_vessels(self, radius_km: float) -> list[dict[str, Any]]:
+        """Cached AIS vessels within ``radius_km`` of the patrol position, nearest first."""
+        cfg = self.config
+        dlat = radius_km / _KM_PER_DEG * 1.05
+        cos_lat = max(math.cos(math.radians(cfg.unit_lat)), 0.01)
+        dlon = radius_km / (_KM_PER_DEG * cos_lat) * 1.05
+        found: list[dict[str, Any]] = []
+        for v in self.vessels:
+            if abs(v.lat - cfg.unit_lat) > dlat or abs(v.lon - cfg.unit_lon) > dlon:
+                continue
+            distance = haversine_km(cfg.unit_lat, cfg.unit_lon, v.lat, v.lon)
+            if distance <= radius_km:
+                found.append({"mmsi": _mmsi_value(v.mmsi), "name": v.name, "km": round(distance, 2)})
+        found.sort(key=lambda item: item["km"])
+        return found
+
     def nearest_vessel_km(self, radius_km: float) -> float | None:
         """Distance from the unit to the nearest cached vessel within `radius_km`, else None.
 
         A cheap lat/lon box pre-filter runs first; the haversine is only computed for the few
         vessels inside the box.
         """
+        nearby = self.nearby_vessels(radius_km)
+        return None if not nearby else float(nearby[0]["km"])
+
+    def build_decision(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """The ``latest_decision.json`` object for one DETECTIONS message.
+
+        Pure: the caller decides where (and whether) to write it. `source` is the label the
+        deployment chose (``qnxcam:5``, ``net:7070``); the detector's own spec is the fallback.
+        """
         cfg = self.config
-        dlat = radius_km / _KM_PER_DEG * 1.05
-        cos_lat = max(math.cos(math.radians(cfg.unit_lat)), 0.01)
-        dlon = radius_km / (_KM_PER_DEG * cos_lat) * 1.05
-        best: float | None = None
-        for v in self.vessels:
-            if abs(v.lat - cfg.unit_lat) > dlat or abs(v.lon - cfg.unit_lon) > dlon:
-                continue
-            d = haversine_km(cfg.unit_lat, cfg.unit_lon, v.lat, v.lon)
-            if d <= radius_km and (best is None or d < best):
-                best = d
-        return best
+        vessels = self.nearby_vessels(cfg.match_km)
+        vessel_boxes = [
+            box
+            for box in msg["boxes"]
+            if box["cls"].lower() in VESSEL_LABELS and box["score"] >= cfg.score_min
+        ]
+        if not vessel_boxes:
+            verdict = {"level": VERDICT_IDLE, "text": "No vessel in view"}
+        elif vessels:
+            nearest = vessels[0]
+            name = str(nearest["name"] or nearest["mmsi"])
+            verdict = {
+                "level": VERDICT_OK,
+                "text": f"Matches AIS: {name} ({float(nearest['km']):.1f} km)",
+            }
+        else:
+            verdict = {"level": VERDICT_ALERT, "text": "Vessel seen, not broadcasting"}
+        return {
+            "t": time.time(),
+            "frame_id": int(msg["frame_id"]),
+            "source": cfg.source if cfg.source and cfg.source != "unknown" else msg.get("source", "unknown"),
+            "ai": {
+                "engine": str(msg.get("engine", "unknown")),
+                "inference_ms": round((msg["t_done"] - msg["t_capture"]) * 1000.0, 1),
+                "boxes": [
+                    {
+                        "label": str(box["cls"]),
+                        "score": round(float(box["score"]), 3),
+                        "xyxy": [box["x"], box["y"], box["x"] + box["w"], box["y"] + box["h"]],
+                    }
+                    for box in msg["boxes"]
+                ],
+            },
+            "patrol": {"lat": cfg.unit_lat, "lon": cfg.unit_lon, "name": cfg.patrol_name},
+            "ais": {"nearby": vessels, "radius_km": cfg.match_km, "snapshot_t": self.snapshot_t},
+            "verdict": verdict,
+        }
+
+    def build_blind_decision(self) -> dict[str, Any]:
+        """The decision file while the AI is down: the safety core still answers, and says so.
+
+        What stays true without the detector: the 20 Hz loop, the heartbeat watch, the AIS
+        cross-check (ships broadcasting near the patrol position are still listed) and this
+        verdict. What is lost: seeing ships that are not broadcasting. So the verdict asks
+        for a human on watch instead of reporting "no vessel in view".
+        """
+        cfg = self.config
+        return {
+            "t": time.time(),
+            "frame_id": self.last_frame_id,
+            "source": cfg.source if cfg.source and cfg.source != "unknown" else "unknown",
+            "ai": {"engine": "down", "inference_ms": None, "boxes": [], "down": True},
+            "patrol": {"lat": cfg.unit_lat, "lon": cfg.unit_lon, "name": cfg.patrol_name},
+            "ais": {
+                "nearby": self.nearby_vessels(cfg.match_km),
+                "radius_km": cfg.match_km,
+                "snapshot_t": self.snapshot_t,
+            },
+            "verdict": {"level": VERDICT_ALERT, "text": BLIND_TEXT},
+        }
 
     def _evaluate(self, msg: dict[str, Any], now: float) -> list[dict[str, Any]]:
         boats = [b for b in msg["boxes"] if b["cls"] == "boat"]
@@ -264,6 +386,10 @@ class SafetyCore:
             self.transitions + [{"t_wall": self.state_since_wall, "state": state, "reason": reason}]
         )[-20:]
 
+    def note_tick(self, late_ms: float, now: float) -> None:
+        """Record how late one safety-core housekeeping tick started (monotonic clock)."""
+        self._tick_late_ms.append((now, max(0.0, float(late_ms))))
+
     def _prune(self, now: float) -> None:
         """Drop samples older than the statistics window (called on every frame/status)."""
         for series in (self._frame_at, self._miss_at):
@@ -271,6 +397,24 @@ class SafetyCore:
                 series.popleft()
         while self._latency_ms and now - self._latency_ms[0][0] > _STATS_WINDOW_S:
             self._latency_ms.popleft()
+        while self._tick_late_ms and now - self._tick_late_ms[0][0] > _STATS_WINDOW_S:
+            self._tick_late_ms.popleft()
+
+    def _tick_stats(self, now: float) -> dict[str, Any]:
+        """Lateness of the core's own 20 Hz loop (not end-to-end frame time)."""
+        self._prune(now)
+        lateness = [late for _, late in self._tick_late_ms]
+        p50 = _percentile(lateness, 0.50)
+        p99 = _percentile(lateness, 0.99)
+        hz = self.config.tick_hz
+        return {
+            "hz": int(hz) if float(hz).is_integer() else round(hz, 3),
+            "p50_late_ms": 0.0 if p50 is None else round(p50, 3),
+            "p99_late_ms": 0.0 if p99 is None else round(p99, 3),
+            "ticks_60s": len(lateness),
+            "max_late_ms": 0.0 if not lateness else round(max(lateness), 3),
+            "late_count_60s": sum(1 for late in lateness if late > LATE_TOLERANCE_MS),
+        }
 
     def _stats(self, now: float) -> dict[str, Any]:
         """Per-second and per-minute numbers the console shows for real-time behaviour."""
@@ -323,12 +467,23 @@ class SafetyCore:
             "last_alert": self.last_alert,
             "ais_records": len(self.vessels),
             "ais_error": ais_error,
+            "safety_tick": self._tick_stats(now),
             "transitions": self.transitions,
         }
 
 
 def _round_or_none(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
+
+
+def _mmsi_value(mmsi: str) -> int | str:
+    """The contract shows an integer MMSI; keep a non-numeric identifier as a string."""
+    return int(mmsi) if mmsi.isdigit() else mmsi
+
+
+def _iso_z(wall: float) -> str:
+    """A UTC second-resolution stamp, e.g. ``2026-11-21T15:31:00Z``."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(wall))
 
 
 def _percentile(values: list[float], fraction: float) -> float | None:
@@ -341,19 +496,97 @@ def _percentile(values: list[float], fraction: float) -> float | None:
 
 
 class _AlertLog:
-    """Append-only JSONL. Each record is fsynced: an alert must survive a power cut."""
+    """Append-only JSONL. Each record is fsynced: an alert must survive a power cut.
+
+    The fsync takes ~100 ms on the Pi's disk, so it runs on a side thread: the 20 Hz loop only
+    enqueues. ``close`` drains the queue, so nothing queued is lost on a clean stop.
+    """
 
     def __init__(self, path: str) -> None:
         self.path = path
         directory = os.path.dirname(os.path.abspath(path))
         os.makedirs(directory, exist_ok=True)
+        self._queue: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
+        self._thread = threading.Thread(target=self._run, name="alert-log", daemon=True)
+        self._thread.start()
 
     def append(self, record: dict[str, Any]) -> None:
+        self._queue.put(record)
+
+    def _run(self) -> None:
+        while True:
+            record = self._queue.get()
+            if record is None:
+                return
+            try:
+                self._write(record)
+            except OSError:
+                pass  # a full disk must not stop the safety core; the alert is still in status
+
+    def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(line)
             fh.flush()
             os.fsync(fh.fileno())
+
+    def close(self) -> None:
+        self._queue.put(None)
+        self._thread.join(timeout=3.0)
+
+
+class _LatestWriter:
+    """Writes JSON files on a side thread so the 20 Hz loop never waits on the filesystem.
+
+    Measured on the QNX Pi: with the camera streaming, one atomic file replace took up to 160 ms,
+    which made the safety loop itself late. Only the newest object per path is kept; an older one
+    that was never written is simply superseded (the files are "latest state", not a log).
+    """
+
+    def __init__(self, on_idle: Callable[[], None] | None = None) -> None:
+        # on_idle runs about once a second on this thread: filesystem polling (the AIS file's
+        # mtime) belongs here too. A stat() on the Pi's disk stalled the loop for up to 90 ms.
+        self._on_idle = on_idle
+        self._lock = threading.Lock()
+        self._pending: dict[str, dict[str, Any]] = {}
+        self._wake = threading.Event()
+        self._closing = False
+        self._thread = threading.Thread(target=self._run, name="safety-writer", daemon=True)
+        self._thread.start()
+
+    def submit(self, path: str | None, obj: dict[str, Any]) -> None:
+        if not path:
+            return
+        with self._lock:
+            self._pending[path] = obj
+        self._wake.set()
+
+    def _run(self) -> None:
+        while True:
+            self._wake.wait(timeout=1.0)
+            self._wake.clear()
+            if self._on_idle is not None:
+                try:
+                    self._on_idle()
+                except Exception:  # a bad AIS file keeps the previous cache; never kill the thread
+                    pass
+            with self._lock:
+                batch, self._pending = self._pending, {}
+                closing = self._closing
+            for path, obj in batch.items():
+                try:
+                    _write_json_atomic(path, obj)
+                except OSError:
+                    pass  # a read-only state dir must not kill the core
+            if closing and not self._pending:
+                return
+
+    def close(self) -> None:
+        """Flush what is queued and stop the thread (bounded wait)."""
+        with self._lock:
+            self._closing = True
+        self._wake.set()
+        self._thread.join(timeout=2.0)
 
 
 def _write_json_atomic(path: str, obj: dict[str, Any]) -> None:
@@ -388,6 +621,16 @@ class _AisCache:
         self._mtime: float | None = None
         self.vessels: list[AisVessel] = []
         self.error: str | None = None
+        self._changed = False
+
+    def poll(self) -> None:
+        """Side-thread entry: reload when the file changed and remember that it did."""
+        if self.refresh():
+            self._changed = True
+
+    def take_changed(self) -> bool:
+        changed, self._changed = self._changed, False
+        return changed
 
     def refresh(self) -> bool:
         if self.path is None:
@@ -439,14 +682,19 @@ def run(
     ais = _AisCache(config.ais_path)
     ais.refresh()
     core = SafetyCore(config, ais.vessels)
+    core.snapshot_t = _iso_z(time.time())
     alerts = _AlertLog(config.alerts_path)
+    writer = _LatestWriter(on_idle=ais.poll)
     listener = _listen(config.socket_path)
     client: socket.socket | None = None
     decoder = protocol.MessageDecoder()
 
     start = time.monotonic()
     core.start(start)
+    period = 1.0 / config.tick_hz if config.tick_hz > 0 else _SELECT_MAX_S
+    next_tick = start + period
     last_status = 0.0
+    last_blind = 0.0
     now = start
     if on_ready is not None:
         on_ready(core)
@@ -455,8 +703,9 @@ def run(
             now = time.monotonic()
             if duration_s is not None and now - start >= duration_s:
                 break
+            timeout = max(0.0, min(next_tick - now, _SELECT_MAX_S))
             rlist = [listener] if client is None else [listener, client]
-            readable, _, _ = select.select(rlist, [], [], _TICK_S)
+            readable, _, _ = select.select(rlist, [], [], timeout)
             now = time.monotonic()
 
             if listener in readable:
@@ -465,16 +714,27 @@ def run(
                     client = new_client
                     decoder = protocol.MessageDecoder()  # a new link starts with an empty buffer
             if client is not None and client in readable:
-                client, closed = _read(client, decoder, core, alerts, now)
+                client, closed = _read(client, decoder, core, alerts, writer, now)
                 if closed:
                     core.on_disconnect(now)
 
-            core.tick(now)
+            # The housekeeping tick runs on absolute deadlines, so a late wake-up does not
+            # shift the whole schedule. Its lateness is what `safety_tick` reports.
+            if now >= next_tick:
+                core.note_tick((now - next_tick) * 1000.0, now)
+                core.tick(now)
+                core.expire_ais(time.time())
+                if core.state == STATE_DEGRADED and now - last_blind >= 0.25:
+                    last_blind = now
+                    writer.submit(config.decision_path, core.build_blind_decision())
+                while next_tick <= now:
+                    next_tick += period
+
             if now - last_status >= config.status_every_s:
-                if ais.refresh():
-                    core.vessels = ais.vessels
+                if ais.take_changed():
+                    core.set_vessels(ais.vessels)
                 last_status = now
-                _write_json_atomic(
+                writer.submit(
                     config.status_path,
                     core.status(
                         priority=priority,
@@ -485,6 +745,8 @@ def run(
                     ),
                 )
     finally:
+        writer.close()
+        alerts.close()
         if client is not None:
             client.close()
         listener.close()
@@ -528,6 +790,7 @@ def _read(
     decoder: protocol.MessageDecoder,
     core: SafetyCore,
     alerts: _AlertLog,
+    writer: _LatestWriter,
     now: float,
 ) -> tuple[socket.socket | None, bool]:
     """Read what is available. Returns (client or None, closed?)."""
@@ -550,6 +813,8 @@ def _read(
     for msg in messages:
         for record in core.on_message(msg, now):
             alerts.append(record)
+        if msg["type"] == protocol.DETECTIONS and core.last_decision is not None:
+            writer.submit(core.config.decision_path, core.last_decision)
     return client, False
 
 
@@ -565,10 +830,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--deadline-ms", type=float, default=200.0)
     parser.add_argument("--status-every-s", type=float, default=0.1)
     parser.add_argument("--cooldown-s", type=float, default=5.0)
+    parser.add_argument("--patrol-name", default="patrol", help="name shown in the decision file")
+    parser.add_argument("--source", default="unknown", help='decision source label, e.g. "qnxcam:5"')
+    parser.add_argument("--score-min", type=float, default=0.3, help="minimum vessel score for a verdict")
+    parser.add_argument(
+        "--decision", default=None, help="latest_decision.json path (default: beside the status file)"
+    )
+    parser.add_argument("--tick-hz", type=float, default=TICK_HZ)
     parser.add_argument("--no-priority", action="store_true", help="do not change scheduling")
     parser.add_argument("--duration", type=float, default=None, help="stop after N seconds (tests, demos)")
     args = parser.parse_args(argv)
 
+    decision_path = args.decision
+    if decision_path is None:
+        decision_path = os.path.join(os.path.dirname(os.path.abspath(args.status)), DECISION_NAME)
     config = CoreConfig(
         socket_path=args.socket,
         status_path=args.status,
@@ -581,6 +856,11 @@ def main(argv: list[str] | None = None) -> int:
         alert_cooldown_s=args.cooldown_s,
         status_every_s=args.status_every_s,
         set_priority=not args.no_priority,
+        decision_path=decision_path,
+        patrol_name=args.patrol_name,
+        source=args.source,
+        score_min=args.score_min,
+        tick_hz=args.tick_hz,
     )
     stop = threading.Event()
 

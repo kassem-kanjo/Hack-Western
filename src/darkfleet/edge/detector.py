@@ -18,6 +18,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ from darkfleet.edge.sources import (
 )
 
 DEFAULT_MODEL = "data/models/yolox_nano.onnx"
-INPUT_SIZE = 416
+INPUT_SIZE = 416  # default; the Pi runs --input-size 320 (YOLOX is fully convolutional)
 PAD_VALUE = 114
 BOAT_CLASS = 8  # COCO "boat"
 STRIDES = (8, 16, 32)
@@ -61,6 +62,9 @@ ANNOTATE_EVERY = 2
 _DEFAULT_FRAME_HW = (360, 640, 3)
 
 Box = dict[str, Any]
+
+# Set by SIGUSR1: the supervisor promotes a standby detector to the active one.
+_PROMOTE = threading.Event()
 
 
 def letterbox(img_hw: tuple[int, int], size: int = INPUT_SIZE) -> float:
@@ -146,7 +150,8 @@ class OnnxDetector:
     4.12 from the same repository runs the same ONNX graph. `engine` names the one in use.
     """
 
-    def __init__(self, model_path: str) -> None:
+    def __init__(self, model_path: str, input_size: int = INPUT_SIZE) -> None:
+        self.input_size = input_size
         self._session = None
         self._net = None
         try:
@@ -160,7 +165,12 @@ class OnnxDetector:
 
             self._net = cv2.dnn.readNetFromONNX(str(model_path))
             self.engine = f"opencv-dnn {cv2.__version__}"
-        print(f"detector: inference engine {self.engine}", file=sys.stderr)
+        print(f"detector: inference engine {self.engine}, input {self.input_size}px", file=sys.stderr)
+
+    def warm_up(self) -> None:
+        """One dummy inference so the first real frame does not pay the engine's set-up cost."""
+        blank = np.full((480, 640, 3), PAD_VALUE, dtype=np.uint8)
+        self.detect(blank, 0.99)
 
     def _run(self, blob: np.ndarray) -> np.ndarray:
         if self._session is not None:
@@ -172,13 +182,14 @@ class OnnxDetector:
         import cv2
 
         h, w = img.shape[:2]
-        ratio = letterbox((h, w), INPUT_SIZE)
+        size = self.input_size
+        ratio = letterbox((h, w), size)
         new_w, new_h = max(1, round(w * ratio)), max(1, round(h * ratio))
-        canvas = np.full((INPUT_SIZE, INPUT_SIZE, 3), PAD_VALUE, dtype=np.uint8)
+        canvas = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
         canvas[:new_h, :new_w] = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         blob = canvas.transpose(2, 0, 1)[None].astype(np.float32)
         output = self._run(blob)
-        return decode_yolox(np.asarray(output)[0], ratio, score_min)
+        return decode_yolox(np.asarray(output)[0], ratio, score_min, input_size=size)
 
 
 class Link:
@@ -326,8 +337,25 @@ def run(args: argparse.Namespace) -> int:
 
     frames = mock_frames(args.source) if args.mock else None
     net_bind = args.net_bind or os.environ.get("EDGE_NET_BIND") or None
+    model = None if args.mock else OnnxDetector(args.model, args.input_size)
+    if model is not None:
+        model.warm_up()
+    engine = "mock" if args.mock else getattr(model, "engine", "unknown")
+    if args.standby:
+        # Warm standby: the model is loaded and warmed; sit idle (no socket, no frame source,
+        # nothing sent to the safety core) until the supervisor promotes us with SIGUSR1.
+        print("detector: standby ready (model loaded)", file=sys.stderr, flush=True)
+        ready_dir = args.state_dir or os.path.dirname(os.path.abspath(args.socket))
+        try:  # the supervisor only counts a standby as ready once this marker exists
+            Path(ready_dir, f"standby_{os.getpid()}.ready").write_text("ready\n")
+        except OSError:
+            pass
+        parent = os.getppid()
+        while not _PROMOTE.wait(0.2):
+            if os.getppid() != parent:
+                return 0  # the supervisor is gone: do not linger as an orphan
+        print("detector: standby promoted", file=sys.stderr, flush=True)
     source: FrameSource | None = None if args.mock else open_source(args.source, net_bind=net_bind)
-    model = None if args.mock else OnnxDetector(args.model)
 
     state_dir = args.state_dir or os.path.dirname(os.path.abspath(args.socket))
     writer = FrameWriter(state_dir)
@@ -378,7 +406,7 @@ def run(args: argparse.Namespace) -> int:
                 img = decode_frame(frame)
                 boxes = model.detect(img, args.score_min)
             t_done = time.monotonic()
-            link.send(make_detections(frame_id, t_capture, t_done, boxes))
+            link.send(make_detections(frame_id, t_capture, t_done, boxes, engine=engine, source=args.source))
             if img is not None and (frame_id % ANNOTATE_EVERY == 0 or boxes):
                 writer.write(img, boxes)
             frame_id += 1
@@ -420,8 +448,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="exit 0 when the source is exhausted")
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--score-min", type=float, default=0.3)
+    parser.add_argument("--input-size", type=int, default=INPUT_SIZE, help="network input, multiple of 32")
+    parser.add_argument(
+        "--standby", action="store_true", help="load the model, then wait for SIGUSR1 before working"
+    )
     args = parser.parse_args(argv)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGUSR1, lambda *_: _PROMOTE.set())
     try:
         return run(args)
     except KeyboardInterrupt:

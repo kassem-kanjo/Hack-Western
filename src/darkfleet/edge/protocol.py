@@ -42,7 +42,13 @@ class ProtocolError(ValueError):
 
 
 def make_detections(
-    frame_id: int, t_capture: float, t_done: float, boxes: list[dict[str, Any]]
+    frame_id: int,
+    t_capture: float,
+    t_done: float,
+    boxes: list[dict[str, Any]],
+    *,
+    engine: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     msg = {
         "type": DETECTIONS,
@@ -51,6 +57,10 @@ def make_detections(
         "t_done": float(t_done),
         "boxes": [_normalise_box(b) for b in boxes],
     }
+    if engine is not None:
+        msg["engine"] = str(engine)
+    if source is not None:
+        msg["source"] = str(source)
     validate(msg)
     return msg
 
@@ -109,6 +119,9 @@ def validate(msg: Any) -> None:
                 raise ProtocolError("each box needs a string cls")
             for key in ("score", *_BOX_KEYS):
                 _require_number(box, key)
+        for key in ("engine", "source"):
+            if key in msg and not isinstance(msg[key], str):
+                raise ProtocolError(f"{key} must be a string")
     elif mtype == HEARTBEAT:
         _require_number(msg, "t")
         if "state" in msg and not isinstance(msg["state"], str):

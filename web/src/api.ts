@@ -512,6 +512,19 @@ export interface EdgeStress {
 }
 
 /**
+ * `status.safety_tick`: lateness of the safety core's own 20 Hz loop, not the
+ * end-to-end frame time (that is `last_inference_ms`). Missing on older supervisors.
+ */
+export interface EdgeSafetyTick {
+  hz?: number | null;
+  p50_late_ms?: number | null;
+  p99_late_ms?: number | null;
+  max_late_ms?: number | null;
+  late_count_60s?: number | null;
+  ticks_60s?: number | null;
+}
+
+/**
  * `GET /api/edge/status`: the supervisor's status JSON plus the two fields the
  * console needs (`controls`, `frame_available`). `source` is "pi" when the API
  * relayed the Pi and "local" when it read the laptop's status file.
@@ -536,8 +549,17 @@ export interface EdgeStatus {
   deadline_misses_60s?: number | null;
   /** True while the detector is alive but its source has no frame yet. */
   detector_waiting?: boolean;
+  /** Wall clock on the unit (Unix seconds); compare with the decision's `t`, same clock. */
+  t_wall?: number;
+  /** The camera helper: alive, frame rate, source. */
+  camera?: { alive?: boolean; fps?: number; source?: string } | null;
+  /** A warm standby detector is loaded and ready to take over. */
+  standby_alive?: boolean;
+  recovery_ms_history?: number[];
   priorities?: EdgePriorities | null;
   stress?: EdgeStress | null;
+  /** The safety core's own loop lateness (20 Hz), not end-to-end frame time. */
+  safety_tick?: EdgeSafetyTick | null;
   /** Alert shape is owned by the safety core; the patrol screen shows the count only. */
   last_alert: unknown;
   last_frame_age_ms: number | null;
@@ -561,9 +583,78 @@ export interface EdgeKillResponse {
   seconds?: number;
 }
 
+/** One detection the untrusted detector drew on the frame, in pixels. */
+export interface EdgeBox {
+  label: string;
+  /** 0..1 confidence. */
+  score: number;
+  xyxy: [number, number, number, number];
+}
+
+/** What the detector reported for one frame. */
+export interface EdgeAi {
+  engine: string;
+  /** Detector-side inference time for this frame, milliseconds. */
+  inference_ms: number | null;
+  boxes: EdgeBox[];
+  /** True in the safety core's own decision while the detector is down. */
+  down?: boolean;
+}
+
+/** Where the unit says it is. */
+export interface EdgePatrol {
+  lat: number;
+  lon: number;
+  name: string;
+}
+
+/** One AIS hull heard inside the safety core's radius. */
+export interface EdgeAisShip {
+  mmsi: number;
+  name: string;
+  km: number;
+}
+
+/** The safety core's AIS picture when it made the verdict. */
+export interface EdgeAis {
+  nearby: EdgeAisShip[];
+  radius_km: number;
+  snapshot_t: string;
+}
+
+export type EdgeVerdictLevel = "alert" | "ok" | "idle";
+
+/** The safety core's one-line decision. */
+export interface EdgeVerdict {
+  level: EdgeVerdictLevel;
+  text: string;
+}
+
+/**
+ * `<state-dir>/latest_decision.json`, rewritten atomically after every processed
+ * frame and served by `GET /api/edge/decision` (local file or relayed from the Pi).
+ */
+export interface EdgeDecision {
+  /** Wall clock at decision time: ISO 8601, or Unix seconds on older writers. */
+  t: string | number;
+  /** Advances once per processed frame; the frame image follows it. */
+  frame_id: number;
+  /** e.g. "qnxcam:5" or "net:7070". */
+  source: string;
+  ai: EdgeAi;
+  patrol: EdgePatrol;
+  ais: EdgeAis;
+  verdict: EdgeVerdict;
+}
+
 /** Newest supervisor status, with controls and frame availability. */
 export function fetchEdgeStatus(signal?: AbortSignal): Promise<EdgeStatus> {
   return getJson<EdgeStatus>("/api/edge/status", signal);
+}
+
+/** The latest decision (what the unit saw and what the safety core concluded). */
+export function fetchEdgeDecision(signal?: AbortSignal): Promise<EdgeDecision> {
+  return getJson<EdgeDecision>("/api/edge/decision", signal);
 }
 
 /**
@@ -587,7 +678,7 @@ export async function stressEdgeDetector(signal?: AbortSignal): Promise<EdgeKill
 async function postEdgeControl(name: string, signal?: AbortSignal): Promise<EdgeKillResponse> {
   const res = await fetch(`/api/edge/${name}`, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", "X-Darkfleet-Control": "1" },
     signal,
   });
   if (!res.ok) {
