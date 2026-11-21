@@ -15,3 +15,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 1:** mostly DeepSeek (#28 pieces, edge protocol/detector); Claude: edge safety core/supervisor review fixes. Better than audit 1.
 - **Rule breaks:** none new; the #28 lead stopped once while its coders ran (resumed by Chief).
 - **Change for next 30 min:** write recorder coverage windows to `data/cache/ais/coverage.log` from the log's reconnect lines so #19 can exclude holes; confirm the recorder resumes after every wake.
+
+## Sat 21 Nov, 00:24 ET (audit 3, covers 00:00-00:24)
+- **Went well:** 3 lead-less DeepSeek lanes (API, basemap, Tiger) went from brief to green PR in ~10 min each; #28 fully DeepSeek-coded; validation lead produced an honest pre-registered null instead of a flattering number; CI caught a format slip on #42.
+- **Went wrong:** I wrote "00:45" into STATUS at 00:20, the same guessed-timestamp break as audit 1 (rule existed, I didn't apply it); my first CI wait loop used `exit 1` inside `until` and died; the first snapshot showed the wrong funnel number (99 vs 109), caught before any UI used it (#47).
+- **Code share since audit 2:** ~90% DeepSeek (API, basemap, Tiger, #28 pieces, validation core); Claude: validation runner (needs keys), two-line format fix.
+- **Rule breaks:** guessed timestamp (repeat).
+- **Change for next 30 min:** timestamps only via `$(date)` inside the command that writes them (done here); Chief no longer types times by hand.
