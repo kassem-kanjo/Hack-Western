@@ -11,9 +11,10 @@ red=0; say(){ printf '%-10s %s\n' "$1" "$2"; }
 # 1. Recorder alive and writing (file touched in the last 10 min)
 if pgrep -f record_ais.py >/dev/null; then
   f=$(ls -t data/cache/ais/BALTIC_WATCH/*.jsonl.gz 2>/dev/null | head -1)
-  if [ -n "$f" ] && [ -n "$(find "$f" -mmin -10 2>/dev/null)" ]; then say OK "recorder alive, latest $(basename "$f") $(du -h "$f" | cut -f1)"
-  else say RED "recorder running but no data written in 10 min"; red=1; fi
+  if [ -n "$f" ] && [ -n "$(find "$f" -mmin -3 2>/dev/null)" ]; then say OK "recorder alive, latest $(basename "$f") $(du -h "$f" | cut -f1)"
+  else say RED "recorder running but no data written in 3 min (hung reconnect? restart it)"; red=1; fi
 else say RED "recorder NOT running (restart: see docs/STATUS.md)"; red=1; fi
+tail -1 logs/record_all.log 2>/dev/null | grep -q "reconnect" && say WARN "recorder is reconnecting: $(tail -1 logs/record_all.log | cut -c1-80)"
 
 # 2. CI on main
 ci=$("$GH" run list -R $REPO -b main -L 1 --json conclusion,status,displayTitle -q '.[0] | "\(.status) \(.conclusion) \(.displayTitle)"' 2>/dev/null)
