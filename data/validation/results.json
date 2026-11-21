@@ -1,0 +1,263 @@
+{
+ "generated": "2026-11-21",
+ "requests_live": 79,
+ "null_test": {
+  "variants": {
+   "primary": {
+    "label": "All kept gaps, all unmatched radar cells (as specified)",
+    "n_gaps": 1338,
+    "real": 108,
+    "k": 50,
+    "shuffled_mean": 100.48,
+    "shuffled_sd": 8.823068095183494,
+    "null_lo": 86.45,
+    "null_hi": 117.32499999999999,
+    "ratio": 1.0748407643312101,
+    "p_value": 0.23529411764705882,
+    "ratio_lo": 0.9147608102674446,
+    "ratio_hi": 1.246293441586082,
+    "interpretation": "not distinguishable from chance (interval includes 1)"
+   },
+   "filtered": {
+    "label": "Moving gaps only (off-on >= 5 km) and radar cells seen on < 3 days (plan item 3 filters, declared in advance)",
+    "n_gaps": 1121,
+    "real": 49,
+    "k": 50,
+    "shuffled_mean": 43.84,
+    "shuffled_sd": 4.617446948967644,
+    "null_lo": 35.0,
+    "null_hi": 54.099999999999994,
+    "ratio": 1.1177007299270074,
+    "p_value": 0.13725490196078433,
+    "ratio_lo": 0.8751699323763751,
+    "ratio_hi": 1.3718309869329077,
+    "interpretation": "not distinguishable from chance (interval includes 1)"
+   }
+  },
+  "by_cell": [
+   {
+    "cell": "40..45N, 170..175E",
+    "n_gaps": 168,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "0..5N, 165..170E",
+    "n_gaps": 136,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "-30..-25N, -45..-40E",
+    "n_gaps": 127,
+    "real": 33,
+    "shuffled_mean": 33.42
+   },
+   {
+    "cell": "-20..-15N, -80..-75E",
+    "n_gaps": 105,
+    "real": 14,
+    "shuffled_mean": 9.84
+   },
+   {
+    "cell": "-25..-20N, -45..-40E",
+    "n_gaps": 102,
+    "real": 34,
+    "shuffled_mean": 35.36
+   },
+   {
+    "cell": "5..10N, -50..-45E",
+    "n_gaps": 101,
+    "real": 18,
+    "shuffled_mean": 13.46
+   },
+   {
+    "cell": "10..15N, -170..-165E",
+    "n_gaps": 98,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "40..45N, 155..160E",
+    "n_gaps": 86,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "40..45N, 175..180E",
+    "n_gaps": 77,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "-35..-30N, 95..100E",
+    "n_gaps": 66,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "-35..-30N, 100..105E",
+    "n_gaps": 62,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "40..45N, 150..155E",
+    "n_gaps": 56,
+    "real": 8,
+    "shuffled_mean": 5.36
+   },
+   {
+    "cell": "-20..-15N, 170..175E",
+    "n_gaps": 55,
+    "real": 1,
+    "shuffled_mean": 3.04
+   },
+   {
+    "cell": "10..15N, -50..-45E",
+    "n_gaps": 50,
+    "real": 0,
+    "shuffled_mean": 0.0
+   },
+   {
+    "cell": "-20..-15N, -130..-125E",
+    "n_gaps": 49,
+    "real": 0,
+    "shuffled_mean": 0.0
+   }
+  ],
+  "n_gaps_total": 1338,
+  "prism_time_step_fallbacks": 27,
+  "prism_failures_counted_as_no_hit": 9,
+  "n_gaps_no_valid_shift": 0,
+  "real_count_all_gaps_unpaired": 108,
+  "spatial_shuffle": {
+   "done": false,
+   "reason": "Skipped: no land mask in the project and a 50-150 km spatial shift would need radar re-fetched around every shifted prism (the cached radar covers each 5x5 degree cell plus 1 degree only), and without a land mask shifted prisms that land on shore would bias the shuffled count downward"
+  },
+  "notes": [
+   "1338 gaps in the 15 busiest 5x5 degree cells (the ones the region scan fetched radar for); the other 4,286 kept gaps have no radar fetched and are not in this test.",
+   "Each gap's prism is shifted by a random whole number of days with 7 <= |shift| <= 21, drawn uniformly from the shifts that keep the shifted gap inside 2026-07-25 to 2026-11-15 (radar days we fetched). 50 shuffles; 0 gaps with no valid shift are left out.",
+   "Shifts are whole days, so the shifted prism is the same shape and the same time of day; only which radar overpasses fall in it changes."
+  ]
+ },
+ "recall_test": {
+  "n_cases": 146,
+  "n_skipped_geometry_error": 5,
+  "n_vessels": 66,
+  "median_gap_hours": 40.36569444444444,
+  "rates": {
+   "footprint": {
+    "label": "True position inside the whole-gap footprint",
+    "k": 143,
+    "n": 146,
+    "rate": 0.9794520547945206,
+    "lo": 0.9413322297150013,
+    "hi": 0.9929877455121721
+   },
+   "day_lens": {
+    "label": "Inside the day-lens (the radar-cell test we use)",
+    "k": 146,
+    "n": 146,
+    "rate": 1.0,
+    "lo": 0.9743622598797664,
+    "hi": 1.0
+   },
+   "instant_lens": {
+    "label": "Inside the lens at the exact instant",
+    "k": 140,
+    "n": 146,
+    "rate": 0.958904109589041,
+    "lo": 0.9132459502254388,
+    "hi": 0.9810317403491414
+   },
+   "chance_day_lens": {
+    "label": "Chance: same test with the true position moved 50-150 km in a random direction",
+    "k": 2874,
+    "n": 2920,
+    "rate": 0.9842465753424657,
+    "lo": 0.9790521530304318,
+    "hi": 0.9881685062556252
+   }
+  },
+  "by_type": {
+   "fishing": {
+    "n": 58,
+    "day_lens_k": 58
+   },
+   "other_non_fishing": {
+    "n": 29,
+    "day_lens_k": 29
+   },
+   "inactive": {
+    "n": 29,
+    "day_lens_k": 29
+   },
+   "passenger": {
+    "n": 5,
+    "day_lens_k": 5
+   },
+   "insufficient_data": {
+    "n": 16,
+    "day_lens_k": 16
+   },
+   "carrier": {
+    "n": 3,
+    "day_lens_k": 3
+   },
+   "cargo": {
+    "n": 6,
+    "day_lens_k": 6
+   }
+  },
+  "vessels_queried": 110,
+  "api": {
+   "vessel_attribution_available": false,
+   "probes": [
+    {
+     "request": "POST /v3/4wings/report public-global-sar-presence:latest, filters[0]=matched='true', group-by=VESSEL_ID",
+     "result": "404: 'This feature is temporarily unavailable because of infrastructure constraints and an upstream data dependency issue.'"
+    },
+    {
+     "request": "same, group-by=MMSI",
+     "result": "404, same message"
+    },
+    {
+     "request": "same, group-by=DETECT_ID",
+     "result": "422: option not valid for dataset public-global-sar-presence:v5.0"
+    },
+    {
+     "request": "same, no group-by (matched='true')",
+     "result": "200, rows carry date, lat, lon, detections and a vesselIDs COUNT (1), not an identity"
+    },
+    {
+     "request": "same, group-by=FLAG or GEARTYPE",
+     "result": "200: adds the vessel's flag or class to each matched detection, still no identity"
+    }
+   ],
+   "next_best": "The API will not say which vessel a matched radar detection belongs to, so the real recall of 'prism plus radar finds the true ship' cannot be measured yet. Next-best truth used here: a vessel's own GFW event between two others (port visit, loitering, encounter) as the true position inside a synthetic gap. That tests the physics (speed cap, prism geometry), not radar visibility. Once 4Wings vessel attribution returns, rerun with matched detections as truth; or use a licensed AIS archive to hide a vessel's track and ask whether its radar blob falls in the prism."
+  }
+ },
+ "method": [
+  "Take the AIS gaps the region scan kept (5,624 non-gear gaps of 6 to 96 hours; 1,338 of them sit in the 15 cells where radar was fetched and enter Test 1). For each gap the 'prism' is every place the ship could have reached given its last and next known position, with a class speed limit.",
+  "A gap counts as a hit if at least one unmatched radar cell on a day of the gap lies inside that prism (radar cells carry a date, not a time, so we use the whole day's prism).",
+  "Test 1 moves each gap's prism in time by 7 to 21 days (same place, same shape, same radar data) and recounts. If the real count is no higher than these shifted counts, the radar cells we found are what you would see in that water on any week, not a signal about the ship.",
+  "Test 2 checks the prism itself: where a ship's position is known from GFW events between two other events, we pretend the first and last were the only fixes and ask whether the known position is inside the prism. We also move that position 50 to 150 km at random to see how often a wrong position would also be inside."
+ ],
+ "caveats": [
+  "Result in one line: the real count (108 of 1,338 gaps) is 1.07 times the shifted-prism count (interval 0.91 to 1.25), so this data does not show that radar inside a prism beats chance. In the two Brazilian cells, which hold most of the hits, real and shifted counts are the same (33 vs 33.4 and 34 vs 35.4): those hits are traffic and structures that are there every week.",
+  "Per-cell look (exploratory, not a tested claim): the three cells outside Brazil with hits show a small excess (14 vs 9.8, 18 vs 13.5, 8 vs 5.4 shifted); the sample is too small to tell it from chance.",
+  "Test 2 does not show the prism is specific: it contains the true position 100% of the time, but also contains a position moved 50-150 km at random 98.4% of the time. At a median gap of 40 hours the prism covers hundreds of kilometres, so 'inside the prism' alone carries little information; the evidence has to come from radar cells that are rare in that water, which Test 1 does not find.",
+  "A few prisms made GEOS reject the lens union: 27 retries with a different time step, 9 (gap, shift) pairs counted as no hit in Test 1, 5 cases skipped in Test 2. core/prism.py was out of scope; fix it there.",
+  "Test 1 uses only the 1,338 gaps in the 15 busiest cells, the ones the region scan fetched radar for; the rest of the 5,624 have no radar loaded. Those cells are dominated by Brazilian offshore-oil traffic, so the result says little about open-ocean transits.",
+  "Radar is not uniform in time (Sentinel-1 revisit patterns), so shifting by a few weeks can change coverage for reasons unrelated to ships; the shuffle averages over many shifts but cannot remove this.",
+  "Unmatched radar cells include fixed structures (platforms), other ships GFW could not match, and waves; the filtered variant removes cells seen on 3 or more days but cannot remove the rest.",
+  "No spatial shuffle was run (see Test 1).",
+  "Test 2 is a physics check, not a radar recall: its 'truth' is another GFW event position, which is itself a point inside a longer event, and vessels that stop at events are not a random sample of dark ships."
+ ],
+ "would_change": [
+  "A real count whose bootstrap interval sits above 1 in the filtered variant on a larger set of gaps would move the claim from 'no evidence' to 'evidence'.",
+  "Vessel-level attribution of matched radar detections would allow a true recall number.",
+  "A land mask and radar fetched around shifted prisms would allow the spatial shuffle."
+ ]
+}
