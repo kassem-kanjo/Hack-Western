@@ -1,23 +1,20 @@
 # STATUS (live)
 
-Updated: Fri 20 Nov, ~11:45 PM ET · next checkpoint: CP1 briefing Sat 9 AM
+Updated: Sat 21 Nov, ~1:15 AM ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
 ## In flight
-- Builders: GFW client + store (#4, #6), region scan F4 (#20), edge unit (#7).
-- **Baltic AIS recorder running since Fri 23:18 ET** (`logs/record_baltic.log`, data in `data/cache/ais/`); must run until the demo. Laptop must stay awake and online.
+- #28 scene times + false-positive filters + re-rank (Haiku lead, DeepSeek coders, branch feat/scene-times).
+- #27 validation: null test + recall (Sonnet lead, DeepSeek coders, worktree .worktrees/validation).
+- #7 edge unit (Haiku lead; WIP backed up on branch wip/overnight).
+- Baltic AIS recorder (since Fri 23:18 ET); health loop every 30 min (scripts/health.sh).
 
-## Done
-- Scaffold (#1), research (#9), design (#8, Critic/Director pass pending), core prisms + matching (#2, #3; 18 tests).
+## Done (merged)
+#1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
+#8 design · #9 research · #20 region scan (109 of 5,624 gaps with radar in prism) · #21 CI fix ·
+plan v2.1 after Opus Auditor review · #29 API schema frozen.
 
-## Next
-- Own gap detection from recorded AIS (#19) once a few hours of data exist.
-- M1: API + snapshot (#10), console (#11), scoring + sanctions (#12).
-
-## Pivots tonight (evidence in docs/feasibility-dark-fleet.md)
-- GFW publishes gaps only > 50 nm offshore → Baltic and Hormuz have ~0 gap events.
-- GFW per-vessel presence API is down (404 "temporarily unavailable") → can't rebuild history.
-- Plan: (1) Baltic = our own recorded AIS, our own gap detection, prisms, rendezvous, live;
-  (2) satellite view = unmatched SAR in Hormuz; (3) prism+SAR case from wherever the region scan finds overlap.
+## Key finding of the night
+Auditor showed the planned opener (CL YICHUN) fails our own physics → validation (#27) is the headline.
 
 ## Blocked / waiting on Kassem
 - Delete ~/Downloads/tiger-cloud-hack-western-credentials.env (plain-text password; copy now in .env).
