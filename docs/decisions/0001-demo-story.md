@@ -6,7 +6,8 @@ Status: **proposed** by Chief (Sat 21 Nov, 00:28 ET); decided by Kassem at CP1.
 - Funnel: 5,624 gaps → 109 with unmatched radar in the prism → 19 unexplained after physics checks (docs/rerank.md).
 - Test 1 (null shuffle): radar-in-prism does not beat chance: ratio 1.07, 95% CI 0.91-1.25 (docs/validation.md).
 - Test 2 (Brownian bridge, pre-registered): localisation is real (AUC 0.87, 0.84-0.90), radar signal is not (ratio 1.03).
-- Held-out test (open-ocean cells, May-Aug data, pre-registered): **running overnight**; decides between A and B.
+- Held-out test (open-ocean cells, May-Aug data, pre-registered): **inconclusive, leans null**: 4 real vs 5.7 shifted
+  (ratio 0.70, CI 0.15-1.37). Option B is not supported. **Chief recommends A.** Radar experiments stopped.
 
 ## Options
 **A. "Evidence before accusation" (recommended if the held-out test is null).** Dark Fleet shows where a dark
