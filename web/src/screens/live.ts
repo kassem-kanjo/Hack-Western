@@ -514,10 +514,23 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       chips,
       rowsEl,
     );
+    // A region with nothing to rank is a result, not a blank: one calm block
+    // takes the place of the zero chips and the empty list, in live view and in
+    // replay before the first finding begins.
+    const emptyEl = h(
+      "div",
+      { class: "live-empty", hidden: true },
+      h("h2", null, "Nothing unusual yet"),
+      h(
+        "p",
+        null,
+        `Our receivers heard ${vessels.length} ships here in the last ${hours} h. No silences, impossible jumps, identity clones, spoofed positions or meetings passed our checks.`,
+      ),
+    );
     // The detail panel is a sibling of the list and starts hidden; the list is
     // hidden instead of rebuilt when an event opens, so going back is instant.
     const detailEl = h("div", { class: "live-detail", hidden: true });
-    const rail = h("aside", { class: "rail live-rail" }, listWrap, detailEl);
+    const rail = h("aside", { class: "rail live-rail" }, listWrap, emptyEl, detailEl);
 
     // ---- rendering ----
 
@@ -540,6 +553,18 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     const chipParts = new Map<EventKind, { button: HTMLButtonElement; count: HTMLSpanElement }>();
     /** Last painted counts, so a frame that reached no new event touches no DOM. */
     let chipSignature = "";
+    /** Whether the rail currently shows the calm block instead of the list. */
+    let emptyShown = false;
+
+    /**
+     * True when the region has nothing a person could look at: no events at all
+     * live, and in replay nothing begun by the cursor. This is the one condition
+     * for the calm block, so zero chips can never reach the screen.
+     */
+    function noFindings(): boolean {
+      if (!replay) return all.length === 0;
+      return reachedCount() === 0;
+    }
 
     /**
      * Paint one chip's count. A zero at the cursor is still a filter worth
@@ -639,6 +664,27 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       });
     }
 
+    /**
+     * Paint the rail's list: the chips and ranked rows, or, when the region has
+     * nothing to rank, one calm block in their place. The empty block is never
+     * combined with a row of zero chips, which would look like a filter that
+     * could bring something back.
+     */
+    function renderList(): void {
+      emptyShown = noFindings();
+      emptyEl.hidden = !emptyShown;
+      listWrap.hidden = emptyShown;
+      if (emptyShown) {
+        chips.replaceChildren();
+        chipParts.clear();
+        chipSignature = "";
+        rowsEl.replaceChildren();
+        return;
+      }
+      renderChips();
+      renderRows();
+    }
+
     /** Tick element -> event, so the replay clock can dim future ticks without rebuilding. */
     const tickEvents = new Map<HTMLButtonElement, LiveEvent>();
 
@@ -694,6 +740,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       const vessel = selectedVesselRow();
       if (vessel !== null) {
         listWrap.hidden = true;
+        emptyEl.hidden = true;
         detailEl.hidden = false;
         detailEl.replaceChildren(
           vesselCard({
@@ -714,13 +761,16 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
 
       const event = selectedEvent();
       if (event === null) {
-        listWrap.hidden = false;
         detailEl.hidden = true;
         detailEl.replaceChildren();
+        // This decides between the list and the calm block; a region with no
+        // findings never gets chips or an empty ordered list.
+        renderList();
         return;
       }
 
       listWrap.hidden = true;
+      emptyEl.hidden = true;
       detailEl.hidden = false;
       detailEl.replaceChildren(
         eventDetail({
@@ -770,8 +820,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       // The map keeps its own cap; list and strip show everything the filter
       // left, so a chip never hides a finding from the ranked view.
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
-      renderChips();
-      renderRows();
+      renderList();
       renderTicks();
     }
 
@@ -832,7 +881,10 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       const before = filtered.length;
       filtered = eventsOfKinds(upToNow(), active);
       updateHero();
-      refreshChipCounts();
+      // The calm block and the list swap the moment the first finding begins;
+      // when a proof owns the rail, its hidden list is left alone until back.
+      if (detailEl.hidden && noFindings() !== emptyShown) renderList();
+      else refreshChipCounts();
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
       // The visible set is monotone in t, so an unchanged count means the same
       // rows; re-rendering them every frame would only cost layout.
@@ -945,8 +997,9 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       replayControls.slider.remove();
       filtered = eventsOfKinds(upToNow(), active);
       updateHero();
-      refreshChipCounts();
-      renderRows();
+      // Back live, the rail shows the list again (or the calm block if the
+      // whole region has nothing); an open proof is left where it is.
+      if (detailEl.hidden) renderList();
       renderTicks();
       updateScrub();
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
@@ -1085,8 +1138,6 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     });
 
     map.setVessels(vessels); // once; the AIS field never changes between selections
-    renderChips();
-    renderRows();
     renderTicks();
     renderRail();
     markCurrentRow();

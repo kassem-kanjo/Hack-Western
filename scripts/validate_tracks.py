@@ -136,25 +136,55 @@ def _coverage_from_repo(repo: Any) -> list[CoverageMinute]:
     return out
 
 
-def _load_jsonl(directory: Path) -> list[Ping]:
-    """Parse a directory of aisstream lines through the ingest lane, if it exists."""
+def _display_path(path: Path) -> str:
+    """Path as written in the committed outputs: repo-relative, or just the last two parts.
+
+    Both reports are public, so an absolute path would publish the local username. A path
+    inside the checkout is shown relative to its root; anything else is reduced to its final
+    two components, which is enough to identify the input without leaking where it lives.
+    """
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return "/".join(resolved.parts[-2:])
+
+
+def _load_jsonl(directory: Path) -> tuple[list[Ping], list[CoverageMinute]]:
+    """Parse aisstream lines through the ingest lane and build the coverage series.
+
+    The receiver's per-minute message counts come from the timestamps of the same parsed
+    pings, so ``--jsonl-dir`` runs the silence test exactly as the store path does instead
+    of skipping it for want of a ``coverage_minutes`` table.
+    """
     try:
         from darkfleet.ingest import ais_tracks
     except ImportError:
         print("skipping --jsonl-dir: darkfleet.ingest.ais_tracks (issue #72) is not in this build")
-        return []
+        return [], []
     paths = sorted([*directory.glob("*.jsonl"), *directory.glob("*.jsonl.gz")])
     if not paths:
-        print(f"skipping --jsonl-dir: no .jsonl or .jsonl.gz files in {directory}")
-        return []
+        print(f"skipping --jsonl-dir: no .jsonl or .jsonl.gz files in {_display_path(directory)}")
+        return [], []
     pings: list[Ping] = []
-    for item in ais_tracks.iter_files(paths):
+    for item in ais_tracks.iter_files(path for path in paths if path.name.endswith(".jsonl.gz")):
         obj = item
         if isinstance(item, str):
             obj = ais_tracks.parse_line(item)
         if isinstance(obj, Ping):
             pings.append(obj)
-    return pings
+    for path in paths:
+        if path.name.endswith(".jsonl.gz"):
+            continue
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    obj = ais_tracks.parse_line(line)
+                    if isinstance(obj, Ping):
+                        pings.append(obj)
+        except OSError:
+            continue
+    return pings, ais_tracks.coverage(p.t for p in pings)
 
 
 def _thin(pings: Sequence[Ping], minutes: float) -> list[Ping]:
@@ -210,9 +240,9 @@ def _group(
 def _load(args: argparse.Namespace) -> tuple[list[Track], int, list[CoverageMinute], str]:
     """Return tracks, the raw position count, coverage, and where the data came from."""
     if args.jsonl_dir:
-        pings = _load_jsonl(Path(args.jsonl_dir))
-        source = f"aisstream files in {args.jsonl_dir}"
-        coverage: list[CoverageMinute] = []
+        directory = Path(args.jsonl_dir)
+        pings, coverage = _load_jsonl(directory)
+        source = f"aisstream files in {_display_path(directory)}"
         tracks = _group(
             pings,
             {},
@@ -567,7 +597,13 @@ def _render(r: dict[str, Any]) -> str:
                     ["Tracks with injections", _count(detection["tracks"])],
                     ["Gaps injected", _count(detection["injected"])],
                     ["Gaps found", _count(detection["found"])],
-                    ["Recall", f"{_pct(detection['recall'])}"],
+                    ["Recall, all injected gaps", f"{_pct(detection['recall'])}"],
+                    [
+                        "Gaps starting while underway (>= 2 kn), the rule's scope",
+                        _count(detection["injected_underway"]),
+                    ],
+                    ["Found among those", _count(detection["found_underway"])],
+                    ["Recall within scope", f"{_pct(detection['recall_underway'])}"],
                 ],
             )
         )

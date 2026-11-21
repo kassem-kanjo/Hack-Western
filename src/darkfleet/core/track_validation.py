@@ -377,6 +377,7 @@ def detector_recall(
     tracks: Sequence[tuple[Sequence[Ping], Sequence[tuple[datetime, datetime]]]],
     coverage: Sequence[CoverageMinute],
     detector: SilenceDetector,
+    underway_kn: float = 2.0,
 ) -> dict[str, Any]:
     """Recall of a gap detector on tracks whose gaps we injected ourselves.
 
@@ -387,22 +388,37 @@ def detector_recall(
     """
     injected = 0
     found = 0
+    in_scope = 0
+    found_in_scope = 0
     n_tracks = 0
     for pings, gaps in tracks:
         n_tracks += 1
         if not gaps:
             continue
         events = detector(list(pings), coverage)
+        speed_at = {p.t: p.sog for p in pings}
         for start, end in gaps:
             injected += 1
-            if _gap_found(events, start, end):
+            hit = _gap_found(events, start, end)
+            if hit:
                 found += 1
+            # The silence rule only claims gaps that begin while the ship is underway; a
+            # moored ship going quiet is normal. Recall inside that scope is the fair number.
+            sog = speed_at.get(start)
+            if sog is not None and sog >= underway_kn:
+                in_scope += 1
+                if hit:
+                    found_in_scope += 1
     recall = found / injected if injected else float("nan")
     return {
         "tracks": n_tracks,
         "injected": injected,
         "found": found,
         "recall": recall,
+        "underway_kn": underway_kn,
+        "injected_underway": in_scope,
+        "found_underway": found_in_scope,
+        "recall_underway": found_in_scope / in_scope if in_scope else float("nan"),
     }
 
 
