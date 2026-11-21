@@ -22,7 +22,8 @@ above the case list, each entry carrying a stable `stage`, a display `label` and
 { "id": "gap:<gfw event id>", "vessel": { "name": "CL YICHUN", "mmsi": "538...", "flag": "MHL", "type": "cargo" },
   "off": { "t": "...Z", "pos": [-51.67, 7.99] }, "on": { "t": "...Z", "pos": [-48.28, 5.61] },
   "hours": 22.9, "score": 41, "band": "medium", "status": "candidate",
-  "n_candidates": 2, "n_meetings": 0, "region_label": "Off French Guiana" }
+  "n_candidates": 2, "n_meetings": 0, "region_label": "Off French Guiana",
+  "score_note": "Ranks cases for analyst attention. It is not evidence of wrongdoing." }
 ```
 `status`: `candidate` (≥ 1 radar candidate or meeting survives all checks), `ruled_out` (had one, failed a
 check; keep it, the UI shows why), `plain` (no evidence either way).

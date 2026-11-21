@@ -29,3 +29,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 3:** ~80% DeepSeek (console components/map/rail/timeline, funnel fix, bridge module); Claude: validation runners (keys), console api/format/frames, merge-conflict resolution.
 - **Rule breaks:** none new; visual review skipped the Critic/Director agents (Chief reviewed screenshots himself to save tokens; noted).
 - **Change for next 30 min:** no more parallel Sonnet leads; new work goes lead-less to DeepSeek with Chief review, one Haiku lead at most; rebuild the local snapshot after every data merge.
+
+## Sat 21 Nov, 02:23 ET (audit 5, covers 02:05-02:35)
+- **Went well:** 3 lead-less DeepSeek lanes (geometry, scoring, polish) all passed their checks first try; Chief verified each on real data (score distribution) or in a real browser (Playwright screenshots, no page errors) before PRs; zero Claude leads used.
+- **Went wrong:** polish lane took 18 min (largest diff); merging several PRs that touch the same snapshot builder needs `update-branch` first or CI runs on stale bases.
+- **Code share since audit 4:** ~100% DeepSeek; Chief wrote only briefs, review scripts and the screenshot harness.
+- **Rule breaks:** visual review still done by Chief, not Critic/Director (token budget); acceptable for polish rounds, Director review planned once at CP2.
+- **Change for next 30 min:** always `gh pr update-branch` before merging a queued PR; keep the screenshot harness (scratchpad/shot.py) as the standard UI gate for every web PR.

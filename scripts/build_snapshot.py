@@ -16,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from darkfleet.core.scoring import score_case
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOURCE = ROOT / "data" / "cases" / "cases_v2.json"
 DEFAULT_COUNTS = ROOT / "data" / "cases" / "rerank_counts.json"
@@ -34,6 +36,17 @@ def _read_cases(path: Path) -> tuple[list[dict[str, Any]], str | None]:
         generated_at = payload.get("generated_at")
         return cases, generated_at if isinstance(generated_at, str) else None
     raise ValueError(f"unsupported cases export: {type(payload).__name__}")
+
+
+def _score_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach the analyst-attention score to every case, then rank by it."""
+    scored: list[dict[str, Any]] = []
+    for case in cases:
+        scored_case = dict(case)
+        scored_case.update(score_case(scored_case))
+        scored.append(scored_case)
+    scored.sort(key=lambda case: case["score"], reverse=True)
+    return scored
 
 
 def _had_candidates(case: dict[str, Any]) -> bool:
@@ -119,6 +132,7 @@ def build(
 ) -> dict[str, Any]:
     """Write both snapshot files and return the totals for the caller to print."""
     cases, generated_at = _read_cases(source)
+    cases = _score_cases(cases)
     totals = compute_totals(cases, gaps_scanned, _read_counts(counts_path))
     payload = {
         "generated_at": generated_at
