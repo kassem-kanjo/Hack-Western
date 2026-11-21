@@ -32,8 +32,15 @@ SANCTIONED = 273222222
 MOORED = 273333333
 HORMUZ_FILLER = 273444444
 BALTIC_FILLER = 273555555
+EXITING = 273666666
+FISHING = 273777777
+CONTACT = 273888888
+INVALID = 123456789
+VALID_TWIN = 273999999
+HOLE_FILLER = 273123456
 
 SANCTIONED_IMO = 9876543
+EXITING_IMO = 9876544
 
 HORMUZ = "HORMUZ"
 BALTIC = "BALTIC_WATCH"
@@ -151,13 +158,13 @@ def _write_ais(
     return ais
 
 
-def _write_sanctions(root: Path) -> Path:
+def _write_sanctions(root: Path, extra: list[tuple[str, int]] = ()) -> Path:
+    """The sanctions CSV, with optional extra ``(caption, imo)`` rows for a bespoke fixture."""
+    rows = [("GESTIA", SANCTIONED_IMO), *extra]
+    body = "type,caption,imo,mmsi,flag,countries,risk,aliases,url,datasets\n"
+    body += "".join(f"VESSEL,{caption},{imo},,,,sanctioned,,,\n" for caption, imo in rows)
     path = root / "maritime.csv"
-    path.write_text(
-        "type,caption,imo,mmsi,flag,countries,risk,aliases,url,datasets\n"
-        f"VESSEL,GESTIA,{SANCTIONED_IMO},,,,sanctioned,,,\n",
-        encoding="utf-8",
-    )
+    path.write_text(body, encoding="utf-8")
     return path
 
 
@@ -291,9 +298,10 @@ def test_contract_shape_and_areas(tmp_path: Path) -> None:
 
     payload = _build(tmp_path)
 
-    assert set(payload) == {"generated_at", "refresh_s", "areas", "ships", "alerts", "counts"}
+    assert set(payload) == {"generated_at", "refresh_s", "recording", "areas", "ships", "alerts", "counts"}
     assert payload["refresh_s"] == 300
     assert set(payload["counts"]) == {"ships", "alerts", "hidden_routine"}
+    assert set(payload["recording"]) == {"latest_t", "lag_s", "gaps"}
     kinds = {area["kind"] for area in payload["areas"]}
     assert kinds == {"listening", "watched"}
     ids = {area["id"] for area in payload["areas"]}
@@ -488,3 +496,184 @@ def test_missing_unseen_file_adds_no_radar_alert(tmp_path: Path) -> None:
     payload = _build(tmp_path)
 
     assert all(alert["kind"] != "radar_unmatched" for alert in payload["alerts"])
+
+
+def _write_baltic_exit(root: Path) -> Path:
+    """A sanctioned cargo hull crossing the Baltic box's west edge westbound, then reappearing.
+
+    Its last fix sits about 6 km inside the 9.5 E edge of the BALTIC_WATCH box and its course
+    points due west: the ship is driving out of our receivers. The filler hull next to it keeps
+    global *and* local coverage healthy, so geometry is the only reason to suppress the gap.
+    """
+    ais = root / "ais"
+    lines = [_static(EXITING, _minute(0), "LEAVING WEST", 70, imo=EXITING_IMO)]
+    for minute in range(66):
+        lon = 10.00 - 0.40 * minute / 65  # 10.00 E -> 9.60 E, still inside the box
+        lines.append(_position(EXITING, _minute(minute), 55.0, lon, 12.0, cog=270.0))
+    # Reappears 85 min later, well west of the receivers: an ended gap, not an ongoing one.
+    lines.append(_position(EXITING, _minute(150), 55.0, 9.20, 12.0, cog=270.0))
+    lines.extend(_filler_lines(BALTIC_FILLER, 55.0, 9.90, 65, 179))
+    # A second nearby hull: local_activity needs two other ships inside 60 km in every bucket.
+    lines.extend(_filler_lines(HOLE_FILLER, 54.95, 9.95, 65, 179))
+    _write_region(ais, BALTIC, lines)
+    return ais
+
+
+def test_ship_exiting_the_baltic_box_westbound_is_not_a_dark_alert(tmp_path: Path) -> None:
+    _write_baltic_exit(tmp_path)
+    _write_sanctions(tmp_path, extra=[("LEAVING WEST", EXITING_IMO)])
+    explanation = build_watch.Explanation()
+
+    payload = build_watch.build(
+        hours=12,
+        ais_dir=tmp_path / "ais",
+        out=tmp_path / "out",
+        sanctions=tmp_path / "maritime.csv",
+        land=None,
+        unseen=None,
+        explain=explanation,
+    )
+
+    ships = {ship["mmsi"]: ship for ship in payload["ships"]}
+    # Watchlisted, so only the coverage gate can explain the drop: no other rule would remove it.
+    assert ships[EXITING]["watchlist"] == "sanctioned"
+    assert all(alert["mmsi"] != EXITING for alert in payload["alerts"])
+    assert not any(alert["kind"] == "dark" for alert in payload["alerts"])
+    assert explanation.tallies["dark"].removed["left coverage"] == 1
+
+
+def test_declared_slow_ship_gets_a_reach_cap_from_its_own_track() -> None:
+    # A fishing hull is not a dark candidate (the type gate excludes it), so drive the payload
+    # function directly: its filed class says 13.8 kn, its AIS track says a sustained 30 kn.
+    start = T0 + timedelta(hours=2)
+    track = [
+        build_watch.Ping(mmsi=FISHING, t=start - timedelta(minutes=10 - index), lat=55.0, lon=10.0, sog=30.0)
+        for index in range(11)
+    ]
+    other = [
+        build_watch.Ping(
+            mmsi=CONTACT,
+            t=start + timedelta(hours=1),
+            lat=55.36,  # 40 km north: inside the 36 kn reach after an hour, outside a 13.8 kn one
+            lon=10.0,
+            sog=0.4,
+            cog=0.0,
+        )
+    ]
+    event = build_watch.Event(
+        kind="silence",
+        mmsi=FISHING,
+        start=start,
+        end=None,
+        lat=55.0,
+        lon=10.0,
+        severity=0.6,
+        explanation="",
+    )
+
+    payload, _ = build_watch._alert_payload(
+        event,
+        "dark",
+        "ongoing",
+        vessels={},
+        categories={},
+        classes={FISHING: "fishing"},
+        tracks={FISHING: track, CONTACT: other},
+        land=None,
+        now=start + timedelta(hours=2),
+    )
+
+    assert payload["speed_cap_kn"] >= 36.0
+    # The contacts use the same cap: at 40 km the hull is only reachable from the track's speed.
+    assert [contact["mmsi"] for contact in payload["contacts"]] == [CONTACT]
+
+
+def _write_invalid_fixture(root: Path) -> Path:
+    """Two identical cargo tracks in Hormuz: one real identity, one impossible 123456789."""
+    ais = root / "ais"
+    lines = [_static(INVALID, _minute(0), "GHOST", 80), _static(VALID_TWIN, _minute(0), "REAL HULL", 80)]
+    for minute in range(66):
+        lat = 26.10 + 0.20 * minute / 65
+        lon = 56.10 + 0.18 * minute / 65
+        lines.append(_position(INVALID, _minute(minute), lat, lon, 12.0))
+        lines.append(_position(VALID_TWIN, _minute(minute), lat + 0.02, lon + 0.02, 12.0))
+    lines.append(_position(INVALID, _minute(150), 26.30, 56.28, 12.0))
+    lines.append(_position(VALID_TWIN, _minute(150), 26.32, 56.30, 12.0))
+    lines.extend(_filler_lines(HORMUZ_FILLER, 26.45, 56.35, 65, 179))
+    # local_activity wants two other nearby hulls in every bucket, not one.
+    lines.extend(_filler_lines(HOLE_FILLER, 26.40, 56.40, 65, 179))
+    _write_region(ais, HORMUZ, lines)
+    return ais
+
+
+def test_invalid_mmsi_never_alerts_but_stays_in_the_ships_list(tmp_path: Path) -> None:
+    _write_invalid_fixture(tmp_path)
+    _write_sanctions(tmp_path)
+    explanation = build_watch.Explanation()
+
+    payload = build_watch.build(
+        hours=12,
+        ais_dir=tmp_path / "ais",
+        out=tmp_path / "out",
+        sanctions=tmp_path / "maritime.csv",
+        land=None,
+        unseen=None,
+        explain=explanation,
+    )
+
+    # The twin proves the geometry would have alerted: it is inside HORMUZ_STRAIT and goes dark.
+    assert any(alert["kind"] == "dark" and alert["mmsi"] == VALID_TWIN for alert in payload["alerts"])
+    assert all(alert["mmsi"] != INVALID for alert in payload["alerts"])
+    assert all(contact["mmsi"] != INVALID for alert in payload["alerts"] for contact in alert["contacts"])
+    assert explanation.tallies["dark"].removed["invalid MMSI"] >= 1
+    ships = {ship["mmsi"]: ship for ship in payload["ships"]}
+    assert ships[INVALID]["valid"] is False
+    assert ships[VALID_TWIN]["valid"] is True
+
+
+def _write_hole_region(root: Path) -> Path:
+    """One dense region with a ten-minute receiver hole: no traffic from minute 100 to 109."""
+    ais = root / "ais"
+    lines = _filler_lines(HOLE_FILLER, 15.0, 41.0, 0, 99)
+    lines.extend(_filler_lines(HOLE_FILLER, 15.0, 41.0, 110, 179))
+    _write_region(ais, "RED_SEA", lines)
+    return ais
+
+
+def test_recording_reports_lag_and_detects_a_ten_minute_receiver_hole(tmp_path: Path) -> None:
+    _write_hole_region(tmp_path)
+
+    payload = build_watch.build(
+        hours=12,
+        ais_dir=tmp_path / "ais",
+        out=tmp_path / "out",
+        sanctions=None,
+        land=None,
+        unseen=None,
+    )
+    recording = payload["recording"]
+
+    assert recording["latest_t"] == "2026-11-21T02:59:29Z"
+    assert isinstance(recording["lag_s"], int) and recording["lag_s"] >= 0
+    assert recording["gaps"] == [
+        {"region": "RED_SEA", "start": "2026-11-21T01:40:00Z", "end": "2026-11-21T01:49:00Z"}
+    ]
+
+
+def test_shorter_receiver_holes_are_not_reported(tmp_path: Path) -> None:
+    # A two-minute quiet spell is a missed message, not an outage worth claiming.
+    ais = tmp_path / "ais"
+    lines = _filler_lines(HOLE_FILLER, 15.0, 41.0, 0, 99)
+    lines.extend(_filler_lines(HOLE_FILLER, 15.0, 41.0, 102, 179))
+    _write_region(ais, "RED_SEA", lines)
+
+    payload = build_watch.build(
+        hours=12,
+        ais_dir=ais,
+        out=tmp_path / "out",
+        sanctions=None,
+        land=None,
+        unseen=None,
+    )
+
+    assert payload["recording"]["gaps"] == []
