@@ -29,3 +29,8 @@
 - https://globalfishingwatch.org/our-apis/documentation/docs/v3/general-api-doc/key-concepts
 - https://aisstream.io/documentation
 - https://arxiv.org/pdf/2206.00897v4.pdf (xView3-SAR)
+
+## Gate results
+| Gate | Result | Evidence |
+|---|---|---|
+| F5 live AIS | **PASS** (Fri 23:08 ET) | aisstream, Baltic bbox [53.5-66N, 9.5-30.5E], 60 s: 763 messages, 591 unique vessels (362 position reports, 206 static data). Coverage is dense enough to detect silences live. |

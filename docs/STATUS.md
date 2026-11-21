@@ -15,4 +15,4 @@ Updated: Fri 20 Nov, ~11:45 PM ET · next checkpoint: CP1 briefing Sat 9 AM
 
 ## Feasibility gates (docs/mission.md)
 F1 GFW access: pending token · F2 SAR granularity: pending · F3 dark activity: pending ·
-F4 prism matcher: pending · F5 live AIS: pending key · F6 storage: pending · F7 edge detector: pending
+F4 prism matcher: pending · F5 live AIS: PASS (591 vessels in 60 s, Baltic) · F6 storage: pending · F7 edge detector: pending
