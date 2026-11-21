@@ -33,8 +33,9 @@ MAX_FRAME_BYTES = 8 << 20  # a 640x480 JPEG is tens of KiB; cap a hostile peer
 MAX_TOKEN_BYTES = 4096
 DEFAULT_NET_BIND = "127.0.0.1"  # opt in to 0.0.0.0 with --net-bind / EDGE_NET_BIND
 NET_TOKEN_ENV = "EDGE_NET_TOKEN"
-# One frame must arrive within this total budget, not merely within a per-recv timeout:
-# a peer sending one byte every 0.9 s would otherwise hold the detector forever.
+# A peer that stops making progress for this long mid-frame is dropped. Short-wait
+# readers keep their partial frame between calls; the total budget still stops a peer
+# dripping one byte every 0.9 s from holding the detector forever.
 FRAME_DEADLINE_S = 2.0
 # cv2.imdecode allocates from the image header, so a tiny hostile file can claim a huge
 # bitmap. Refuse oversized headers before OpenCV ever sees the bytes.
@@ -61,8 +62,12 @@ def list_images(root: Path) -> list[Path]:
 class FrameSource(Protocol):
     """What the detector needs: pull one frame, rewind, release."""
 
-    def read(self) -> Frame | None:
-        """Return the next frame, or None when none is available right now."""
+    def read(self, wait_s: float | None = None) -> Frame | None:
+        """Return the next frame, or None when none is available right now.
+
+        ``wait_s`` bounds how long the call may block, so the detector can send a
+        heartbeat and come back. ``None`` keeps the source's own default budget.
+        """
         ...
 
     def restart(self) -> None:
@@ -86,7 +91,7 @@ class DirSource:
             raise FileNotFoundError(f"no images in {root}")
         self._next = 0
 
-    def read(self) -> Frame | None:
+    def read(self, wait_s: float | None = None) -> Frame | None:
         if self._next >= len(self._paths):
             return None
         import cv2
@@ -126,7 +131,7 @@ class CameraSource:
             raise OSError(f"cannot open camera {self._index}")
         self._cv2, self._cap = cv2, cap
 
-    def read(self) -> Frame | None:
+    def read(self, wait_s: float | None = None) -> Frame | None:
         self._open()
         assert self._cap is not None
         ok, img = self._cap.read()
@@ -171,99 +176,112 @@ class NetSource:
         self.port: int = self._sock.getsockname()[1]
         self._conn: socket.socket | None = None
         self._authenticated = False
+        # Bytes of the message being read, kept across short-wait calls so a small
+        # heartbeat-sized wait never truncates a frame or corrupts the stream.
+        self._buf = bytearray()
+        self._last_progress = 0.0
 
-    def read(self) -> Frame | None:
-        """One complete JPEG frame. None means no client, a timeout or a dropped peer."""
+    def read(self, wait_s: float | None = None) -> Frame | None:
+        """One complete JPEG frame. None means no client, a timeout or a dropped peer.
+
+        ``wait_s`` bounds this call (the detector asks for 0.5 s so it can heartbeat
+        while the bridge is quiet). A partial frame is kept between calls; a peer that
+        makes no progress for ``FRAME_DEADLINE_S`` is dropped, as it always was.
+        """
+        strict = wait_s is None
+        budget = FRAME_DEADLINE_S if strict else max(0.0, wait_s)
+        deadline = time.monotonic() + budget
         while True:
-            if not self._accept():
+            payload = self._next_message(deadline, strict)
+            if payload is None:
                 return None
-            assert self._conn is not None
-            deadline = time.monotonic() + FRAME_DEADLINE_S
-            try:
-                if not self._authenticated and not self._authenticate(deadline):
-                    continue  # the peer was dropped; a reconnect may already be queued
-                header = self._recv_exact(FRAME_HEADER.size, deadline)
-                if header is None:
-                    if self._conn is None:
-                        continue  # peer disconnected; a reconnect may already be queued
-                    return None
-                (length,) = FRAME_HEADER.unpack(header)
-                if length == 0 or length > MAX_FRAME_BYTES:
+            if not self._authenticated:
+                assert self._token is not None
+                if len(payload) > MAX_TOKEN_BYTES or not secrets.compare_digest(payload, self._token):
                     self._drop()
+                    if strict:
+                        return None
                     continue
-                payload = self._recv_exact(length, deadline)
-                if payload is None:
-                    if self._conn is None:
-                        continue
+                self._authenticated = True
+                continue
+            return time.monotonic(), payload
+
+    def _next_message(self, deadline: float, strict: bool) -> bytes | None:
+        """One length-prefixed message, or None when the budget/peer gives out."""
+        while True:
+            if self._conn is None and not self._accept(deadline):
+                return None
+            if len(self._buf) < FRAME_HEADER.size:
+                if not self._fill(FRAME_HEADER.size, deadline, strict):
+                    if self._conn is None and time.monotonic() < deadline:
+                        continue  # the peer went away; a reconnect may already be queued
                     return None
-                return time.monotonic(), payload
+            (length,) = FRAME_HEADER.unpack_from(self._buf, 0)
+            if length == 0 or length > MAX_FRAME_BYTES:
+                self._drop()
+                if strict:
+                    return None
+                continue
+            end = FRAME_HEADER.size + length
+            if len(self._buf) < end and not self._fill(end, deadline, strict):
+                if self._conn is None and time.monotonic() < deadline:
+                    continue
+                return None
+            payload = bytes(self._buf[FRAME_HEADER.size : end])
+            del self._buf[:end]
+            return payload
+
+    def _fill(self, size: int, deadline: float, strict: bool) -> bool:
+        """Read until ``size`` bytes are buffered. False on timeout, EOF or a drop."""
+        assert self._conn is not None
+        while len(self._buf) < size:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                if strict:  # a one-shot read that timed out is a broken stream
+                    self._drop()
+                return False
+            if self._last_progress and time.monotonic() - self._last_progress > FRAME_DEADLINE_S:
+                self._drop()
+                return False
+            self._conn.settimeout(min(_RECV_TIMEOUT_S, left))
+            try:
+                chunk = self._conn.recv(min(size - len(self._buf), _RECV_CHUNK))
+            except TimeoutError:
+                continue  # the loop re-checks the budget
             except OSError:
                 self._drop()
-                return None
-
-    def _authenticate(self, deadline: float) -> bool:
-        """Consume the token message; a missing or wrong token drops the connection."""
-        if self._token is None:
-            self._authenticated = True
-            return True
-        header = self._recv_exact(FRAME_HEADER.size, deadline)
-        if header is None:
-            return False
-        (length,) = FRAME_HEADER.unpack(header)
-        if length == 0 or length > MAX_TOKEN_BYTES:
-            self._drop()
-            return False
-        payload = self._recv_exact(length, deadline)
-        if payload is None:
-            return False
-        if not secrets.compare_digest(payload, self._token):
-            self._drop()
-            return False
-        self._authenticated = True
+                return False
+            if not chunk:
+                self._drop()
+                return False
+            self._buf.extend(chunk)
+            self._last_progress = time.monotonic()
         return True
 
-    def _accept(self) -> bool:
+    def _accept(self, deadline: float) -> bool:
         if self._conn is not None:
             return True
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return False
+        self._sock.settimeout(min(_ACCEPT_TIMEOUT_S, left))
         try:
             conn, _ = self._sock.accept()
-        except TimeoutError:
-            return False
         except OSError:
             return False
         conn.settimeout(_RECV_TIMEOUT_S)
         self._conn = conn
-        self._authenticated = False
+        self._authenticated = self._token is None
+        self._buf.clear()
+        self._last_progress = time.monotonic()
         return True
-
-    def _recv_exact(self, n: int, deadline: float) -> bytes | None:
-        """Read ``n`` bytes without ever exceeding the frame's total deadline."""
-        assert self._conn is not None
-        chunks: list[bytes] = []
-        remaining = n
-        while remaining > 0:
-            left = deadline - time.monotonic()
-            if left <= 0:
-                self._drop()
-                return None
-            self._conn.settimeout(min(_RECV_TIMEOUT_S, left))
-            try:
-                chunk = self._conn.recv(min(remaining, _RECV_CHUNK))
-            except TimeoutError:
-                self._drop()
-                return None
-            if not chunk:
-                self._drop()
-                return None
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        return b"".join(chunks)
 
     def _drop(self) -> None:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
         self._authenticated = False
+        self._buf.clear()
 
     def restart(self) -> None:
         """Keep the connection: reconnecting is the bridge's job, not the detector's."""

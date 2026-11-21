@@ -236,19 +236,125 @@ def test_kill_writes_the_control_file_when_local(
     assert response.status_code == 202
     body = response.json()
     assert body["ok"] is True
+    assert body["target"] == "local"
     assert isinstance(body["requested_at"], float)
     assert (local_status.parent / "control" / "kill_detector").is_file()
 
 
-def test_kill_is_409_when_the_edge_is_remote(
+def _patch_post(monkeypatch: pytest.MonkeyPatch, calls: dict[str, Any], status_code: int = 202) -> None:
+    """Replace httpx.post with a fake that records the control request."""
+
+    def fake_post(url: str, *, json: Any = None, timeout: float, follow_redirects: bool) -> httpx.Response:
+        calls["url"] = url
+        calls["json"] = json
+        calls["timeout"] = timeout
+        calls["follow_redirects"] = follow_redirects
+        request = httpx.Request("POST", url)
+        return httpx.Response(status_code, json={"ok": status_code < 400}, request=request)
+
+    monkeypatch.setattr(edge.httpx, "post", fake_post)
+
+
+def test_kill_is_forwarded_to_the_pi_when_remote(
     client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
     monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_post(monkeypatch, calls)
 
     response = client.post("/api/edge/kill")
 
-    assert response.status_code == 409
+    assert response.status_code == 202
+    assert response.json()["target"] == "pi"
+    assert calls["url"] == "http://edge.local:7071/control/kill"
+    assert calls["json"] == {}
+    assert calls["timeout"] == edge.CONTROL_TIMEOUT_S
+    assert not (local_status.parent / "control").exists(), "a remote edge is never written locally"
+
+
+def test_kill_forwarding_carries_the_token(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "s3cret")
+    calls: dict[str, Any] = {}
+    _patch_post(monkeypatch, calls)
+
+    assert client.post("/api/edge/kill").status_code == 202
+    assert calls["url"] == "http://edge.local:7071/control/kill?token=s3cret"
+
+
+def test_kill_forwarding_failure_is_502(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_post(monkeypatch, calls, status_code=500)
+
+    response = client.post("/api/edge/kill")
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "edge did not accept the control"
+    assert not (local_status.parent / "control").exists()
+
+
+def test_stress_is_403_when_controls_are_disabled(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "0")
+
+    response = client.post("/api/edge/stress")
+
+    assert response.status_code == 403
+    assert not (local_status.parent / "control").exists()
+
+
+def test_stress_writes_ten_seconds_locally(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+
+    response = client.post("/api/edge/stress")
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["ok"] is True
+    assert body["seconds"] == edge.STRESS_SECONDS
+    assert (local_status.parent / "control" / "stress_ai").read_text() == "10"
+
+
+def test_stress_is_forwarded_to_the_pi_when_remote(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    monkeypatch.setenv("EDGE_STATUS_TOKEN", "abc")
+    calls: dict[str, Any] = {}
+    _patch_post(monkeypatch, calls)
+
+    response = client.post("/api/edge/stress")
+
+    assert response.status_code == 202
+    assert response.json()["target"] == "pi"
+    assert calls["url"] == "http://edge.local:7071/control/stress?token=abc"
+    assert calls["json"] == {"seconds": edge.STRESS_SECONDS}
+    assert not (local_status.parent / "control").exists()
+
+
+def test_stress_forwarding_failure_is_502(
+    client: TestClient, local_status: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("EDGE_DEMO_CONTROLS", "1")
+    monkeypatch.setenv("EDGE_HOST", "edge.local")
+    calls: dict[str, Any] = {}
+    _patch_post(monkeypatch, calls, status_code=429)
+
+    response = client.post("/api/edge/stress")
+
+    assert response.status_code == 502
     assert not (local_status.parent / "control").exists()
 
 

@@ -120,6 +120,56 @@ def test_deadline_miss_counted_when_frame_is_old_on_arrival():
     assert core.frames_total == 2
 
 
+def test_status_reports_frames_per_second_and_check_latency():
+    core = SafetyCore(_config(), vessels=[_vessel_km_north(1.0)])
+    core.start(0.0)
+    for frame_id, now in enumerate([1.0, 1.1, 1.2, 1.3]):
+        core.on_message(_boat_frame(frame_id, t_capture=now - 0.01), now=now)
+
+    status = core.status(priority="test", ais_error=None, now_wall=1.0, now_mono=1.35)
+
+    assert status["frames_per_s"] == 4.0  # four frames inside the one-second window
+    assert status["latency_samples"] == 4
+    assert status["latency_p50_ms"] is not None
+    assert status["latency_p99_ms"] is not None
+    assert status["latency_p99_ms"] >= status["latency_p50_ms"] >= 0.0
+
+
+def test_deadline_misses_are_reported_total_and_for_the_last_minute():
+    core = SafetyCore(_config(deadline_s=0.2), vessels=[_vessel_km_north(1.0)])
+    core.start(0.0)
+    core.on_message(_boat_frame(1, t_capture=0.0), now=0.5)  # a miss at t=0.5
+
+    fresh = core.status(priority="test", ais_error=None, now_wall=1.0, now_mono=0.6)
+    assert fresh["deadline_misses"] == 1
+    assert fresh["deadline_misses_60s"] == 1
+
+    later = core.status(priority="test", ais_error=None, now_wall=61.0, now_mono=61.0)
+    assert later["deadline_misses"] == 1  # the total never forgets
+    assert later["deadline_misses_60s"] == 0  # the minute window does
+    assert later["frames_per_s"] == 0.0
+
+
+def test_heartbeat_reports_waiting_state_and_the_detector_schedule():
+    core = SafetyCore(_config(deadline_s=0.2), vessels=[])
+    core.start(0.0)
+    sched = {"policy": "SCHED_OTHER", "priority": 0, "nice": 10}
+
+    core.on_message(protocol.make_heartbeat(0.1, state=protocol.WAITING_FOR_FRAMES, sched=sched), now=0.1)
+
+    assert core.detector_waiting is True
+    assert core.detector_sched == sched
+    assert core.state == STATE_OK  # a waiting detector is alive, not degraded
+
+    core.on_message(_boat_frame(1, t_capture=0.2), now=0.21)
+    assert core.detector_waiting is False  # a frame means the wait is over
+
+    core.on_message(protocol.make_heartbeat(0.3, state=protocol.WAITING_FOR_FRAMES), now=0.3)
+    assert core.detector_waiting is True
+    core.on_disconnect(0.4)
+    assert core.detector_waiting is False  # a dead link is never "waiting"
+
+
 def test_degraded_after_three_deadlines_of_silence_then_ok_on_resume():
     core = SafetyCore(_config(deadline_s=0.2), vessels=[])  # silence_s = 0.6
     core.start(0.0)

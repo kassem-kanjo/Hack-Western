@@ -3,9 +3,10 @@
  *
  * Left: the camera frame, annotated by the untrusted detector, refreshed at
  * ~4 fps while the tab is visible. Right: the one line that matters (the
- * safety core is running) and the detector's state, then the numbers, the last
- * six supervisor events, and the one action the demo needs: kill the detector
- * and watch the trusted core keep the unit safe while it recovers.
+ * safety core is running) and the detector's state, then the numbers, the
+ * scheduling classes and deadline statistics that make the real-time claim
+ * checkable, the last six supervisor events, and the two demo actions: kill
+ * the detector, or load every core at the detector's priority.
  *
  * The screen owns its timers because the router does not hold a handle to it.
  * Every tick checks `main.isConnected`; the moment another tab replaces this
@@ -14,8 +15,8 @@
 
 import "../styles/patrol.css";
 
-import type { EdgeEvent, EdgeStatus } from "../api";
-import { edgeFrameUrl, fetchEdgeStatus, killEdgeDetector } from "../api";
+import type { EdgeEvent, EdgeSchedule, EdgeStatus } from "../api";
+import { edgeFrameUrl, fetchEdgeStatus, killEdgeDetector, stressEdgeDetector } from "../api";
 import { h } from "../components/dom";
 import { topBar } from "../components/TopBar";
 import { fmtInt, fmtUtcFull } from "../format";
@@ -84,6 +85,21 @@ function msLabel(value: number | null | undefined): string {
 }
 
 /**
+ * "Safety core: SCHED_FIFO 30" on a board that granted it, "AI detector: nice +10"
+ * when it did not. The policy comes from the supervisor, never from a guess here.
+ */
+function schedLabel(name: string, sched: EdgeSchedule | null | undefined): string {
+  if (!sched) return `${name}: \u2014`;
+  const policy = (sched.policy ?? "").toUpperCase();
+  const priority = finiteOrNull(sched.priority) ?? 0;
+  if (policy === "SCHED_FIFO" || policy === "SCHED_RR") {
+    return `${name}: ${policy} ${priority}`;
+  }
+  const nice = finiteOrNull(sched.nice) ?? 0;
+  return `${name}: nice ${nice >= 0 ? "+" : ""}${nice}`;
+}
+
+/**
  * Paint the Patrol screen into `app`.
  *
  * Returns synchronously. A status fetch continues in the background; the
@@ -107,6 +123,8 @@ export function renderPatrol(app: HTMLElement): void {
   // Kill/recovery state.
   let controls = false;
   let killing = false;
+  let stressing = false;
+  let stressActive = false;
   let sawDead = false;
   let killedAt: number | null = null;
   let recoveredMs: number | null = null;
@@ -221,11 +239,35 @@ export function renderPatrol(app: HTMLElement): void {
   const eventsList = h("ol", { class: "patrol-events" });
   const eventsEmpty = h("p", { class: "patrol-events-empty" }, "No events yet.");
 
+  // ---- real-time detail: scheduling classes, latency, deadline misses ----
+
+  const safetySched = h("div", { class: "patrol-line" }, "Safety core: \u2014");
+  const detectorSched = h("div", { class: "patrol-line" }, "AI detector: \u2014");
+  const checkP99 = h("div", { class: "patrol-line" }, "Safety check p99: \u2014");
+  const misses60 = h("div", { class: "patrol-line" }, "Deadline misses (60 s): \u2014");
+  const underLoad = h("div", { class: "patrol-line is-amber", hidden: true }, "AI under load");
+
+  const detail = h(
+    "div",
+    { class: "patrol-detail" },
+    safetySched,
+    detectorSched,
+    checkP99,
+    misses60,
+    underLoad,
+  );
+
   const killBtn = h(
     "button",
     { class: "btn patrol-kill", type: "button", hidden: true },
     "Kill the AI detector",
   );
+  const stressBtn = h(
+    "button",
+    { class: "btn patrol-stress", type: "button", hidden: true },
+    "Stress the AI (10 s)",
+  );
+  const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
   const killHint = h("p", { class: "patrol-hint", hidden: true });
   const killNote = h(
     "p",
@@ -240,10 +282,11 @@ export function renderPatrol(app: HTMLElement): void {
     h("h2", { class: "patrol-title" }, "Patrol unit"),
     states,
     metrics,
+    detail,
     h("h3", { class: "patrol-h" }, "Recent events"),
     eventsList,
     eventsEmpty,
-    h("div", { class: "patrol-foot" }, killBtn, killHint, killNote, runsOn),
+    h("div", { class: "patrol-foot" }, actions, killHint, killNote, runsOn),
   );
 
   // ---- offline: one calm block instead of a half-live screen ----
@@ -275,7 +318,13 @@ export function renderPatrol(app: HTMLElement): void {
     status: EdgeStatus,
     now: number,
   ): { label: string; tone: "running" | "restarting" | "down" } {
-    if (status.detector_alive) return { label: "running", tone: "running" };
+    if (status.detector_alive) {
+      // Alive but the source has no frame yet: honest, and still the quiet baseline.
+      return {
+        label: status.detector_waiting ? "waiting for frames" : "running",
+        tone: "running",
+      };
+    }
     if (killing) return { label: "restarting", tone: "restarting" };
 
     let newest = Number.NEGATIVE_INFINITY;
@@ -295,6 +344,16 @@ export function renderPatrol(app: HTMLElement): void {
     restarts.value.textContent = fmtInt(status.detector_restarts ?? 0);
     recovery.value.textContent = msLabel(status.last_recovery_ms);
     alerts.value.textContent = fmtInt(status.alerts_total ?? 0);
+  }
+
+  function paintDetail(status: EdgeStatus): void {
+    const priorities = status.priorities ?? {};
+    safetySched.textContent = schedLabel("Safety core", priorities.safety_core);
+    detectorSched.textContent = schedLabel("AI detector", priorities.detector);
+    checkP99.textContent = `Safety check p99: ${msLabel(status.latency_p99_ms)}`;
+    misses60.textContent = `Deadline misses (60 s): ${fmtInt(status.deadline_misses_60s ?? 0)}`;
+    stressActive = status.stress?.active === true;
+    underLoad.hidden = !stressActive;
   }
 
   function paintEvents(events: EdgeEvent[]): void {
@@ -340,6 +399,13 @@ export function renderPatrol(app: HTMLElement): void {
 
     killBtn.disabled = false;
     killBtn.textContent = "Kill the AI detector";
+  }
+
+  function paintStress(): void {
+    stressBtn.hidden = !controls;
+    if (!controls) return;
+    stressBtn.disabled = stressing || stressActive;
+    stressBtn.textContent = stressing ? "Stressing the AI\u2026" : "Stress the AI (10 s)";
   }
 
   function paint(status: EdgeStatus): void {
@@ -391,8 +457,10 @@ export function renderPatrol(app: HTMLElement): void {
     detectorValue.className = `patrol-state-value is-${state.tone}`;
 
     paintMetrics(status);
+    paintDetail(status);
     paintEvents(status.events ?? []);
     paintKill();
+    paintStress();
 
     runsOn.textContent =
       status.source === "pi" ? "Runs on: QNX Raspberry Pi" : "Runs on: laptop";
@@ -475,6 +543,35 @@ export function renderPatrol(app: HTMLElement): void {
 
   killBtn.addEventListener("click", () => {
     void requestKill();
+  });
+
+  async function requestStress(): Promise<void> {
+    if (disposed || stressing) return;
+
+    stressing = true;
+    killHint.hidden = true;
+    killHint.textContent = "";
+    paintStress();
+
+    try {
+      await stressEdgeDetector();
+      if (disposed) return;
+      // Don't wait up to a second for the amber "AI under load" line.
+      void poll();
+    } catch {
+      if (disposed) return;
+      killHint.textContent = "The patrol unit did not accept the stress request.";
+      killHint.hidden = false;
+    } finally {
+      if (!disposed) {
+        stressing = false;
+        paintStress();
+      }
+    }
+  }
+
+  stressBtn.addEventListener("click", () => {
+    void requestStress();
   });
 
   // ---- timers: visible tab only ----

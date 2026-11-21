@@ -1,11 +1,13 @@
-"""Edge-unit status, frame and operator kill for the console.
+"""Edge-unit status, frame and operator controls for the console.
 
 The browser never calls the Pi. When ``EDGE_HOST`` is set this router fetches
 ``http://<EDGE_HOST>:7071/edge_status.json`` (and ``/latest.jpg``) with a one-second
 timeout and falls back to the local supervisor files. ``source`` says which one answered.
 
-Kill is a demo-only write path: it is enabled solely by ``EDGE_DEMO_CONTROLS=1`` and only
-when the edge is local. The supervisor watches the control file and kills the detector.
+Kill and stress are demo-only write paths: enabled solely by ``EDGE_DEMO_CONTROLS=1``.
+Locally they drop a control file the supervisor watches; with ``EDGE_HOST`` set they are
+forwarded to the Pi's ``status_http`` as ``POST /control/kill`` / ``POST /control/stress``,
+carrying ``EDGE_STATUS_TOKEN`` in the query when one is configured.
 """
 
 from __future__ import annotations
@@ -26,8 +28,11 @@ STATUS_FILE = "edge_status.json"
 LATEST_FRAME = "latest.jpg"
 CONTROL_DIR = "control"
 KILL_FILE = "kill_detector"
+STRESS_FILE = "stress_ai"
+STRESS_SECONDS = 10.0
 EDGE_STATUS_PORT = 7071
 EDGE_TIMEOUT_S = 1.0
+CONTROL_TIMEOUT_S = 2.0
 # A hostile or broken peer must not be able to fill the API's memory or hold the request open:
 # status is tiny JSON, a frame is one JPEG, and everything must arrive within two seconds.
 STATUS_MAX_BYTES = 64 << 10
@@ -61,6 +66,10 @@ def latest_path() -> Path:
 
 def kill_path() -> Path:
     return status_path().parent / CONTROL_DIR / KILL_FILE
+
+
+def stress_path() -> Path:
+    return status_path().parent / CONTROL_DIR / STRESS_FILE
 
 
 def edge_host() -> str:
@@ -198,15 +207,68 @@ def kill_detector() -> dict[str, Any]:
     """Ask the supervisor to SIGKILL the detector; recovery then follows on its own."""
     if not controls_enabled():
         raise HTTPException(status_code=403, detail="controls disabled")
-    if edge_host():
-        raise HTTPException(status_code=409, detail="edge is remote")
+    host = edge_host()
+    if host:
+        if not _forward_control(host, "control/kill"):
+            raise HTTPException(status_code=502, detail="edge did not accept the control")
+        return {"ok": True, "target": "pi", "requested_at": time.time()}
 
-    path = kill_path()
-    tmp = path.with_name(path.name + ".tmp")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(b"1")
-        os.replace(tmp, path)
+        _write_control(kill_path(), b"1")
     except OSError:
         raise HTTPException(status_code=503, detail="cannot write control file") from None
-    return {"ok": True, "requested_at": time.time()}
+    return {"ok": True, "target": "local", "requested_at": time.time()}
+
+
+@router.post("/stress", status_code=202)
+def stress_detector() -> dict[str, Any]:
+    """Simulate the AI hogging every core for ten seconds (demo only)."""
+    if not controls_enabled():
+        raise HTTPException(status_code=403, detail="controls disabled")
+    host = edge_host()
+    if host:
+        if not _forward_control(host, "control/stress", {"seconds": STRESS_SECONDS}):
+            raise HTTPException(status_code=502, detail="edge did not accept the control")
+        return {
+            "ok": True,
+            "target": "pi",
+            "seconds": STRESS_SECONDS,
+            "requested_at": time.time(),
+        }
+
+    try:
+        _write_control(stress_path(), f"{STRESS_SECONDS:g}".encode())
+    except OSError:
+        raise HTTPException(status_code=503, detail="cannot write control file") from None
+    return {
+        "ok": True,
+        "target": "local",
+        "seconds": STRESS_SECONDS,
+        "requested_at": time.time(),
+    }
+
+
+def _write_control(path: Path, payload: bytes) -> None:
+    """Replace a control file atomically; the supervisor consumes it exactly once."""
+    tmp = path.with_name(path.name + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(payload)
+    os.replace(tmp, path)
+
+
+def _forward_control(host: str, route: str, payload: dict[str, Any] | None = None) -> bool:
+    """POST one demo control to the Pi's status_http; False on any failure.
+
+    The response body is not relayed: the console only needs to know it was accepted.
+    """
+    try:
+        response = httpx.post(
+            _edge_url(host, route),
+            json=payload or {},
+            timeout=CONTROL_TIMEOUT_S,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return False
+    return True

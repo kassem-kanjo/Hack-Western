@@ -5,8 +5,14 @@ Runs on the Pi::
     python -m darkfleet.edge.status_http --status ~/darkfleet/edge_status.json --port 7071
 
 ``GET /edge_status.json`` and ``GET /latest.jpg`` are served straight from files the
-supervisor and detector replace atomically. There are no CORS headers and no write paths:
-the browser never talks to the Pi, ``api/edge.py`` does.
+supervisor and detector replace atomically. The browser never talks to the Pi,
+``api/edge.py`` does.
+
+Two demo-only write routes exist so both console buttons work when the edge is remote:
+``POST /control/kill`` drops a ``control/kill_detector`` file and ``POST /control/stress``
+drops ``control/stress_ai`` (body ``{"seconds": 10}``, default 10). The supervisor watches
+those files; this server never signals a process itself. Each control route is limited to
+one request per five seconds.
 
 The listener defaults to loopback. Opening it to the LAN is deliberate (``--bind 0.0.0.0``
 in ``scripts/edge_deploy.sh``) and should come with ``EDGE_STATUS_TOKEN``: when that env var
@@ -20,6 +26,8 @@ import json
 import os
 import secrets
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -29,8 +37,18 @@ FRAME_PATH = "/latest.jpg"
 LATEST_FRAME_NAME = "latest.jpg"
 DEFAULT_BIND = "127.0.0.1"
 TOKEN_ENV = "EDGE_STATUS_TOKEN"
+CONTROL_DIR = "control"
+KILL_FILE = "kill_detector"
+STRESS_FILE = "stress_ai"
+CONTROL_ROUTES = {"/control/kill": KILL_FILE, "/control/stress": STRESS_FILE}
+CONTROL_MIN_INTERVAL_S = 5.0
+DEFAULT_STRESS_S = 10.0
+MAX_STRESS_S = 120.0
+MAX_CONTROL_BODY = 1024
 _NOT_FOUND = 404
 _FORBIDDEN = 403
+_BAD_REQUEST = 400
+_TOO_MANY = 429
 _UNAVAILABLE = 503
 
 
@@ -42,19 +60,86 @@ class _StatusServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], status_path: Path, token: str | None = None) -> None:
         super().__init__(address, _StatusHandler)
         self.status_path = status_path
-        # A fixed sibling path, never derived from the request: this server stays read-only.
+        # Fixed sibling paths, never derived from the request.
         self.latest_path = status_path.parent / LATEST_FRAME_NAME
+        self.control_dir = status_path.parent / CONTROL_DIR
         self.token = token.encode("utf-8") if token else None
+        self.last_control: dict[str, float] = {}  # route -> monotonic time of the last write
+        self.control_lock = threading.Lock()
 
 
 class _StatusHandler(BaseHTTPRequestHandler):
-    server_version = "DarkFleetEdgeStatus/1.0"
+    server_version = "DarkFleetEdgeStatus/1.1"
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         self._reply(send_body=True)
 
     def do_HEAD(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         self._reply(send_body=False)
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        request = urlsplit(self.path)
+        if not self._authorized(request.query):
+            self._send(_FORBIDDEN, b'{"error":"forbidden"}', True)
+            return
+        name = CONTROL_ROUTES.get(request.path)
+        if name is None:
+            self._send(_NOT_FOUND, b'{"error":"not found"}', True)
+            return
+        server = self.server
+        now = time.monotonic()
+        with server.control_lock:  # type: ignore[attr-defined]
+            last = server.last_control.get(request.path)  # type: ignore[attr-defined]
+            limited = last is not None and now - last < CONTROL_MIN_INTERVAL_S
+            if not limited:
+                server.last_control[request.path] = now  # type: ignore[attr-defined]
+        if limited:
+            assert last is not None
+            wait = max(1, int(CONTROL_MIN_INTERVAL_S - (now - last)) + 1)
+            body = json.dumps({"error": "rate limited", "retry_after_s": wait}).encode("utf-8")
+            self._send(_TOO_MANY, body, True, extra_headers={"Retry-After": str(wait)})
+            return
+
+        seconds = DEFAULT_STRESS_S
+        if name == STRESS_FILE:
+            seconds, error = self._read_stress_body()
+            if error is not None:
+                self._send(_BAD_REQUEST, error, True)
+                return
+            payload = f"{seconds:g}".encode()
+        else:
+            payload = b"1"
+        try:
+            server.control_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[attr-defined]
+            target = server.control_dir / name  # type: ignore[attr-defined]
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_bytes(payload)
+            os.replace(tmp, target)
+        except OSError:
+            self._send(_UNAVAILABLE, b'{"error":"cannot write control file"}', True)
+            return
+        body = json.dumps({"ok": True, "control": name, "seconds": seconds}).encode("utf-8")
+        self._send(202, body, True)
+
+    def _read_stress_body(self) -> tuple[float, bytes | None]:
+        """Optional JSON body ``{"seconds": N}``; empty means the 10 s default."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return DEFAULT_STRESS_S, b'{"error":"bad content length"}'
+        if length < 0 or length > MAX_CONTROL_BODY:
+            return DEFAULT_STRESS_S, b'{"error":"bad content length"}'
+        raw = self.rfile.read(length) if length > 0 else b""
+        if not raw.strip():
+            return DEFAULT_STRESS_S, None
+        try:
+            parsed = json.loads(raw)
+            seconds = float(parsed.get("seconds", DEFAULT_STRESS_S))
+        except (ValueError, TypeError, AttributeError):
+            return DEFAULT_STRESS_S, b'{"error":"seconds must be a number"}'
+        if not 0.1 <= seconds <= MAX_STRESS_S:
+            return DEFAULT_STRESS_S, b'{"error":"seconds out of range"}'
+        return seconds, None
 
     def _reply(self, send_body: bool) -> None:
         request = urlsplit(self.path)
@@ -100,11 +185,20 @@ class _StatusHandler(BaseHTTPRequestHandler):
             return
         self._send(200, body, send_body, "image/jpeg")
 
-    def _send(self, code: int, body: bytes, send_body: bool, content_type: str = "application/json") -> None:
+    def _send(
+        self,
+        code: int,
+        body: bytes,
+        send_body: bool,
+        content_type: str = "application/json",
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         if send_body:
             self.wfile.write(body)

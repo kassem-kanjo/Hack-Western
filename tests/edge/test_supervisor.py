@@ -11,15 +11,43 @@ import json
 import os
 import shutil
 import signal
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 
 import pytest
 
+from darkfleet.edge import realtime
 from darkfleet.edge.supervisor import Supervisor, SupervisorConfig
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+# A stand-in detector that never produces a frame: it only heartbeats "waiting for frames".
+# This is the state a real detector is in while the bridge or camera is quiet.
+_WAITING_DETECTOR = """
+import socket, struct, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect(sys.argv[1])
+body = (b'{"type":"HEARTBEAT","t":1.0,"state":"waiting for frames",'
+        b'"sched":{"policy":"SCHED_OTHER","priority":0,"nice":10}}')
+msg = struct.pack("!I", len(body)) + body
+while True:
+    sock.sendall(msg)
+    time.sleep(0.15)
+"""
+
+
+class _WaitingSupervisor(Supervisor):
+    """Launches the heartbeat-only stand-in instead of the real detector."""
+
+    def _start_detector(self) -> None:
+        self.detector.proc = subprocess.Popen(
+            [sys.executable, "-c", _WAITING_DETECTOR, self.config.socket_path]
+        )
+        self.detector.started_wall = time.time()
+        self._event("detector started", pid=self.detector.proc.pid)
 
 
 def _alive(pid: int | None) -> bool:
@@ -198,5 +226,112 @@ def test_mock_run_reports_alerts_and_writes_alert_log(state_dir):
         assert status["last_alert"]["kind"] == "VESSEL NOT BROADCASTING"
         alerts_path = os.path.join(state_dir, "alerts.jsonl")
         assert os.path.getsize(alerts_path) > 0
+    finally:
+        _stop(sup, thread, stop)
+
+
+def test_waiting_detector_heartbeats_keep_it_alive(state_dir):
+    """A quiet source is not a dead detector: 'waiting for frames' heartbeats must keep the
+    supervisor from killing it, and no recovery_ms may be invented for the idle wait."""
+    sup = _WaitingSupervisor(
+        SupervisorConfig(
+            source=FIXTURES,
+            state_dir=state_dir,
+            lat=55.0,
+            lon=19.0,
+            mock=True,
+            heartbeat_timeout_s=0.5,  # far tighter than the 0.3 s heartbeat interval
+            restart_backoff_s=0.5,
+            set_priority=False,
+        )
+    )
+    stop = threading.Event()
+    thread = threading.Thread(target=sup.run, kwargs={"stop": stop, "duration_s": 60}, daemon=True)
+    thread.start()
+    try:
+        seen = _wait(
+            lambda: _edge(state_dir) if _edge(state_dir).get("detector_waiting") else None,
+            timeout=5,
+            label="waiting detector heartbeat",
+        )
+        assert seen["detector_alive"] is True
+        assert seen["detector_restarts"] == 0
+        assert seen["last_recovery_ms"] is None
+        assert not any(e["event"] == "detector silent, killing" for e in seen["events"])
+        assert seen["state"] == "OK"  # heartbeats are liveness for the safety core too
+
+        # The idle wait must not be counted as a restart/recovery either, later on.
+        time.sleep(0.8)
+        later = _edge(state_dir)
+        assert later["detector_restarts"] == 0
+        assert later["last_recovery_ms"] is None
+    finally:
+        _stop(sup, thread, stop)
+
+
+def test_status_reports_every_process_priority(state_dir):
+    sup, thread, stop = _start(state_dir)
+    try:
+        status = _wait_frames(state_dir, 3)
+        priorities = status["priorities"]
+        for name in ("safety_core", "supervisor", "detector"):
+            assert set(priorities[name]) >= {"policy", "priority", "nice"}
+            assert priorities[name]["policy"].startswith("SCHED_")
+        # The detector runs at nice +10, whatever the OS allowed for the two trusted processes.
+        assert priorities["detector"]["nice"] == 10
+        assert priorities["detector"]["policy"] == "SCHED_OTHER"
+    finally:
+        _stop(sup, thread, stop)
+
+
+def test_priority_fallback_is_reported_and_harmless(state_dir, monkeypatch):
+    """macOS has no sched_setscheduler; the supervisor must log once and keep its normal class."""
+    sup = Supervisor(
+        SupervisorConfig(
+            source=FIXTURES,
+            state_dir=state_dir,
+            lat=55.0,
+            lon=19.0,
+            mock=True,
+            set_priority=True,
+            fifo_priority=25,
+        )
+    )
+    fallback = {"policy": "SCHED_OTHER", "priority": 0, "nice": 0}
+    monkeypatch.setattr(realtime, "try_fifo", lambda _priority: (False, fallback))
+
+    sup._apply_priority()
+
+    assert sup._sched == fallback
+    assert sup.status()["priorities"]["supervisor"] == fallback
+
+
+def test_stress_control_file_starts_and_stops_workers(state_dir):
+    sup, thread, stop = _start(state_dir, stress_workers=2)
+    try:
+        _wait_frames(state_dir, 3)
+        path = os.path.join(state_dir, "control", "stress_ai")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("1")
+
+        active = _wait(
+            lambda: _edge(state_dir) if _edge(state_dir).get("stress", {}).get("active") else None,
+            timeout=5,
+            label="stress active",
+        )
+        assert active["stress"]["workers"] >= 1
+        assert active["stress"]["until"] > time.time() - 1
+        assert not os.path.exists(path), "the stress file is consumed exactly once"
+        assert any(e["event"] == "stress started" for e in active["events"])
+
+        idle = _wait(
+            lambda: _edge(state_dir) if not _edge(state_dir).get("stress", {}).get("active") else None,
+            timeout=10,
+            label="stress ended",
+        )
+        assert idle["stress"]["workers"] == 0
+        assert any(e["event"] == "stress ended" for e in idle["events"])
+        assert sup._stress_procs == []
     finally:
         _stop(sup, thread, stop)

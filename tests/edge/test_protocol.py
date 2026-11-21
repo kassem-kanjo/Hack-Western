@@ -17,6 +17,7 @@ from darkfleet.edge.protocol import (
     DETECTIONS,
     HEARTBEAT,
     MAX_MSG_BYTES,
+    WAITING_FOR_FRAMES,
     MessageDecoder,
     ProtocolError,
     encode,
@@ -67,6 +68,26 @@ def test_round_trip_heartbeat_and_alert() -> None:
         send_msg(sender, alert)
         assert recv_msg(receiver) == heartbeat
         assert recv_msg(receiver) == alert
+
+
+def test_waiting_heartbeat_carries_state_and_schedule() -> None:
+    sched = {"policy": "SCHED_OTHER", "priority": 0, "nice": 10}
+    heartbeat = make_heartbeat(t=7.0, state=WAITING_FOR_FRAMES, sched=sched)
+
+    assert heartbeat["state"] == WAITING_FOR_FRAMES
+    assert heartbeat["sched"] == sched
+    with socket_pair() as (sender, receiver):
+        send_msg(sender, heartbeat)
+        assert recv_msg(receiver) == heartbeat
+
+
+def test_rejects_bad_heartbeat_state_and_schedule() -> None:
+    with pytest.raises(ProtocolError):
+        validate({"type": HEARTBEAT, "t": 1.0, "state": 3})
+    with pytest.raises(ProtocolError):
+        validate({"type": HEARTBEAT, "t": 1.0, "sched": {"priority": 0}})
+    with pytest.raises(ProtocolError):
+        validate({"type": HEARTBEAT, "t": 1.0, "sched": {"policy": "SCHED_OTHER", "priority": "high"}})
 
 
 # --- decoder ----------------------------------------------------------------
