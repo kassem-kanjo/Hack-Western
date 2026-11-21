@@ -183,3 +183,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** sentinel now checks the live value (#221); run `ruff format --check` with `ruff check` before every push.
 - **Code share since audit 25:** builders/lanes ~80%; Chief: Tiger integration fixes, sentinel, spike verification.
 - **Change for next 30 min:** after each merge that changes data, read one live number in the app and compare it with its source.
+
+## Sat 21 Nov, 18:53 ET (audit 27, covers 18:26-18:53)
+- **Went well:** QNX v2 merged (#223): on the Pi under the same overload, alarms on time 10/27 without the priority guard vs 63/64 with it; evidence log on qnx6 (#224). Hormuz story cards merged (#225): the physics check turned a "10-ship blackout" into "positions corrupted (29 kn needed)". Demo v3 + Devpost (#226). QNX AI-module source verified on the device (libopencv_dnn from repo.oss.qnx.com).
+- **Went wrong:** I told Kassem "~20 ships in 2.5 h, likely jamming" from the spike before the pipeline reproduced it (it found 10 in 1.7 h, and physics said corruption). The DeepSeek docs draft copied that error, called the edge unit C++, and invented a past ranking. I sent Kassem a Patrol screenshot before looking at it.
+- **Fixes:** corrected in cards and docs before merge; Chief reads every image before sending.
+- **Code share since audit 26:** builders/lanes ~85%; Chief: cherry-pick integration, fact-checking docs, device checks.
+- **Change for next 30 min:** a spike's numbers are hypotheses until the product pipeline reproduces them; say "about" and "to be confirmed" to Kassem until then.
