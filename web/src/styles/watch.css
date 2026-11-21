@@ -1370,6 +1370,26 @@
   display: block;
 }
 
+/* Patrol sightings above the alert rows (#220). Hidden until the unit logs one. */
+.watch-sightings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.watch-sightings[hidden] {
+  display: none;
+}
+
+.watch-sightings > li {
+  border-bottom: 1px solid var(--line-1);
+}
+
+.watch-sightings > li:last-child {
+  border-bottom: 0;
+}
+
 /* Focus panel: the three figures a dark alert is about, in one row. */
 .watch-figs {
   display: grid;
