@@ -1,12 +1,16 @@
 # STATUS (live)
 
-Updated: Fri 20 Nov, 23:40 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Sat 21 Nov, 00:45 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
 ## In flight
-- #28 scene times + false-positive filters + re-rank (Haiku lead, DeepSeek coders, branch feat/scene-times).
-- #27 validation: null test + recall (Sonnet lead, DeepSeek coders, worktree .worktrees/validation).
-- #7 edge unit (Haiku lead; WIP backed up on branch wip/overnight).
-- Baltic AIS recorder (since Fri 23:18 ET); health loop every 30 min (scripts/health.sh).
+- #27 rescue test (Brownian bridge, pre-registered) on branch feat/validation-bb.
+- PRs in CI: #41 API (#10), #42 Tiger aggregate (#31), #43 offline basemap (#30), #44 validation (#27). All code by DeepSeek except the validation runner.
+- Baltic AIS recorder (hole 23:48-23:59 during commute); health + audit loop every 30 min.
+
+## Key results tonight
+- Re-rank (#28): of 109 radar-backed gaps, 90 ruled out with a reason, 19 unexplained.
+- Validation (#27): radar-in-prism does NOT beat chance (ratio 1.07, CI 0.91-1.25): prisms too large to be specific. Prism geometry itself is right (truth inside 96-100%).
+- **Decision for Kassem at 9 AM** if the bridge test also fails: story = "clear the false alarms with physics" vs "likelihood-ranked zone".
 
 ## Done (merged)
 #1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
