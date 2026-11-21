@@ -1,0 +1,45 @@
+{
+ "sigma_km_per_sqrt_h": 21.620151989771927,
+ "n_recall_cases": 151,
+ "n_gaps_le_48h": 1258,
+ "a_scorable_gaps": {
+  "real": 89,
+  "k": 50,
+  "shuffled_mean": 86.46,
+  "shuffled_sd": 7.401626958490482,
+  "null_lo": 71.675,
+  "null_hi": 100.32499999999999,
+  "ratio": 1.029377746934999,
+  "p_value": 0.43137254901960786
+ },
+ "b_mean_score": {
+  "real": -20.671008896125336,
+  "shuffled_mean": -21.296268039091398,
+  "null_lo": -22.842141975715876,
+  "null_hi": -19.740277661716245,
+  "p_value": 0.27450980392156865
+ },
+ "c_exceed": {
+  "threshold": -10.707462957088525,
+  "real": 5,
+  "k": 50,
+  "shuffled_mean": 4.3,
+  "shuffled_sd": 1.8322507626258087,
+  "null_lo": 2.0,
+  "null_hi": 8.0,
+  "ratio": 1.1627906976744187,
+  "p_value": 0.43137254901960786,
+  "ratio_lo": 0.27307793460156043,
+  "ratio_hi": 2.393656835265639,
+  "expected_fraction": 0.05,
+  "scorable_real": 89
+ },
+ "d_auc": {
+  "auc": 0.870198675496689,
+  "lo": 0.8443708609271523,
+  "hi": 0.8963576158940398,
+  "n_cases": 151,
+  "n_pairs": 3020
+ },
+ "verdict": "no signal"
+}

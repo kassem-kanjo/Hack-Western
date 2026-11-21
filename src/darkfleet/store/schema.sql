@@ -75,19 +75,39 @@ SELECT create_hypertable('sar_cells', 'day', if_not_exists => TRUE);
 
 -- A gap is attributed to the UTC day it *starts* on; for timestamptz, time_bucket with a
 -- fixed '1 day' width uses a midnight-UTC origin.
+--
+-- Earlier builds grouped this aggregate by region under the names dark_hours/gap_count.
+-- Recreate it when it has the old shape so the definition below is the one in use; an
+-- aggregate that already matches is left untouched, so this block stays idempotent.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'dark_hours_daily'
+          AND column_name = 'dark_hours'
+    ) THEN
+        DROP MATERIALIZED VIEW dark_hours_daily;
+    END IF;
+END
+$$;
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS dark_hours_daily
 WITH (timescaledb.continuous) AS
-SELECT region,
-       time_bucket('1 day', start_ts) AS day,
-       sum(duration_hours) AS dark_hours,
-       count(*) AS gap_count
+SELECT time_bucket('1 day', start_ts) AS day,
+       sum(duration_hours) AS hours,
+       count(*) AS gaps
 FROM gap_events
-GROUP BY region, time_bucket('1 day', start_ts)
+GROUP BY time_bucket('1 day', start_ts)
 WITH NO DATA;
+
+-- Replace the policy (if any) so its offsets always match this schema revision.
+SELECT remove_continuous_aggregate_policy('dark_hours_daily', if_exists => TRUE);
 
 SELECT add_continuous_aggregate_policy(
     'dark_hours_daily',
-    start_offset => NULL,
+    start_offset => INTERVAL '30 days',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour',
     if_not_exists => TRUE

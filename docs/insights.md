@@ -28,3 +28,7 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
    actual pass time, 10 couldn't reach any dot at their class speed, 5 had the only pass outside the gap.
    19 remain unexplained. Evidence: docs/rerank.md. Why it matters: compliance teams drown in alerts; a tool
    that clears 83% of them with a reason each is worth more than one that flags more.
+9. **"Inside the prism" carries almost no information.** A position moved 50-150 km away still lands inside a
+   typical 40 h prism 98.4% of the time. The Brownian bridge fixes localisation (AUC 0.87) but radar near dark
+   ships still matches time-shifted chance (ratio 1.03). Why it matters: many public "radar caught a dark ship"
+   claims may be background traffic; test against a shifted null before accusing anyone.
