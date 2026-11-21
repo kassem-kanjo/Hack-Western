@@ -169,3 +169,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 23:** builders/lanes ~85%; Chief: per-file cache + public mode, conflict resolution on #201, merges.
 - **Rule breaks:** none; merged #202 by hand only after confirming its check had passed before the watcher died.
 - **Change for next 30 min:** launch delegate.sh with `bash` and read the first log line within a minute; keep the laptop on power. Moving the recorder to Vultr removes the single point of failure.
+
+## Sat 21 Nov, 17:58 ET (audit 25, covers 17:25-17:58)
+- **Went well:** V3 landed in four slices (#210 Watch, #211 Hormuz demo view, #212 4-week line + legend, #213 cold open on the strongest story); Pi demo #205, trend API #204, sentinel #209 merged. Kassem's product notes turned straight into builder scope (Hormuz = one finding, one chart, today's satellite pass; Evidence dropped from scope).
+- **Went wrong:** Kassem, not a check, found that Tiger stopped receiving data after one morning load (stale ~8 h) and that the Pi edge unit was down. A reused branch name merged an empty PR (#206). I chained `gh pr create` after a failed `git commit` with `;`.
+- **Fixes:** sentinel.sh every 5 min, no tokens, wakes me on state changes (caught Tiger and the Pi on its first run); Tiger sink lane landing (#208); health retries failed tests once (#214).
+- **Code share since audit 24:** builders/lanes ~85%; Chief: sentinel, health retry, cherry-pick integration, merges.
+- **Change for next 30 min:** every data path gets a freshness check in sentinel the day it is built; branch names carry the time; one && chain from commit to merge, never ;.
