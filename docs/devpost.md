@@ -22,7 +22,7 @@ Every alert says why it is an alert. Powered by Global Fishing Watch.
 
 A recorder holds one aisstream WebSocket across six regions and writes hourly gzip files. Ingest turns those into tracks. One Python engine handles silences, impossible jumps, spoof ghost points, meetings with anchorage context, and an IMO watchlist. A second path pulls Global Fishing Watch gaps, builds the prism and the bridge, and lines them up with Sentinel-1 scene times.
 
-Storage is Tiger Data / TimescaleDB: positions, gaps, encounters and radar cells as hypertables, with continuous aggregates for the daily view. FastAPI serves read-only JSON from a snapshot, so the demo runs offline. The console is Vite, TypeScript, MapLibre and deck.gl on a bundled basemap.
+Storage is Tiger Data / TimescaleDB: positions, gaps, encounters and radar cells as hypertables, with continuous aggregates for the hourly and daily views. FastAPI serves read-only JSON from a snapshot, so the demo runs offline. The console is Vite, TypeScript, MapLibre and deck.gl on a bundled basemap.
 
 AI coding agents (DeepSeek via OpenCode) wrote most of the code in separate lanes, one commit each. Every change was reviewed and run on real recorded data in a browser before merge.
 
@@ -62,7 +62,7 @@ python, fastapi, uvicorn, shapely, pyproj, numpy, httpx, websockets, psycopg, ti
 
 **Most Adventurous (Arc'teryx).** The prize asks for something that enables others to discover the unknown. That is the product: it takes a ship that vanished and gives back the places it could have been and the contacts it could have met. The demo opens on a real region, and the judge can look up any number on screen.
 
-**MLH Best use of Tiger Data.** Our schema is TimescaleDB, not a bolt-on. `positions`, `gap_events`, `encounter_events` and `sar_cells` are hypertables partitioned on time, with primary keys ordered to satisfy Timescale's rule. Two continuous aggregates (`dark_hours_daily` and `sar_weekly`) drive the daily and weekly views, so the dashboard reads a pre-aggregated bucket, not raw pings.
+**MLH Best use of Tiger Data.** Tiger Data (TimescaleDB) is our store, not a bolt-on. Our own AIS recording lives in a `positions` hypertable: 265,250 pings from four regions at the last load. A continuous aggregate (`ais_hourly`) turns them into the per-hour chart on the Global screen, refreshed for the window before each export. Radar cells (25,836 rows) and encounter events (566) sit in their own hypertables, with daily and weekly aggregates for the radar view. One honest gap: Global Fishing Watch logs almost no gap events inside the strait, so our `dark_hours_daily` aggregate is empty there, and the console says nothing rather than draw a zero chart.
 
 **Vultr.** TODO (pending Kassem)
 

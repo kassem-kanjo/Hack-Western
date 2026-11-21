@@ -10,6 +10,7 @@
 
 import type { CaseSummary, CasesResponse } from "../api";
 import { attribution } from "../components/Attribution";
+import { darkHoursBlock } from "../components/DarkHoursChart";
 import { h } from "../components/dom";
 import { evidencePanel } from "../components/EvidencePanel";
 import { hormuzBlock } from "../components/hormuz";
@@ -301,7 +302,17 @@ export function renderOverview(
   draw();
 
   const hormuzSlot = h("div", { class: "hormuz-slot" });
-  const rail = h("aside", { class: "rail" }, list, evidenceSlot, hormuzSlot);
+  // The daily dark-hours aggregate from Tiger Data sits last in the rail; the
+  // block removes itself when the snapshot has no days to draw.
+  const darkHours = darkHoursBlock();
+  const rail = h(
+    "aside",
+    { class: "rail" },
+    list,
+    evidenceSlot,
+    hormuzSlot,
+    darkHours.element,
+  );
 
   root.replaceChildren(
     topBar({
@@ -320,6 +331,7 @@ export function renderOverview(
 
   return {
     destroy(): void {
+      darkHours.destroy();
       hormuz.destroy();
       evidence.destroy();
       map.destroy();

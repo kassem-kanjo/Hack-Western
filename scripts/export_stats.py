@@ -15,12 +15,13 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
 from darkfleet.store.factory import make_repo
 from darkfleet.store.repository import Repository
+from darkfleet.store.sqlite_repo import SqliteRepo
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "data" / "snapshot" / "stats.json"
@@ -41,15 +42,44 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def build_snapshot(repo: Repository, start: date, end: date) -> dict[str, Any]:
-    """Shape the aggregate into the snapshot the site serves."""
+    """Shape the aggregates into the snapshot the site serves.
+
+    The old ``dark_hours_daily`` / ``validation`` keys keep their shape. ``sar_weekly``
+    and ``ais_hourly`` sit next to them; the hourly series is the last 48 buckets that
+    fall inside ``[start, end]``, ending at the latest hour present in the data.
+    ``source`` names the backend that answered.
+    """
     buckets = repo.dark_hours_daily(start, end, refresh=True)
+    weeks = repo.sar_weekly(start, end)
+    window_start = datetime.combine(start, time.min, tzinfo=UTC)
+    window_end = datetime.combine(end, time.min, tzinfo=UTC) + timedelta(days=1)
+    hours = repo.ais_hourly(window_start, window_end)[-48:]
     return {
         "dark_hours_daily": [
             {"day": bucket["day"].isoformat(), "hours": round(bucket["hours"], 3), "gaps": bucket["gaps"]}
             for bucket in buckets
         ],
+        "sar_weekly": [
+            {
+                "week": week["week"].isoformat(),
+                "region": week["region"],
+                "seen": week["seen"],
+                "broadcasting": week["broadcasting"],
+                "dark": week["dark"],
+            }
+            for week in weeks
+        ],
+        "ais_hourly": [{"hour": _iso_hour(bucket["hour"]), "msgs": bucket["msgs"]} for bucket in hours],
+        "source": "sqlite" if isinstance(repo, SqliteRepo) else "tiger",
         "validation": None,
     }
+
+
+def _iso_hour(value: datetime) -> str:
+    """UTC bucket start as the same ``...Z`` form the rest of the API uses."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
