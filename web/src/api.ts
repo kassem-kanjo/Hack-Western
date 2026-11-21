@@ -46,6 +46,8 @@ export interface LensFrame {
   t: string;
   frac: number;
   polygon: GeoPolygon;
+  /** k=2 (≈95%) Brownian-bridge contour, clipped to this frame's lens; null when undrawable. */
+  likely: GeoPolygon | null;
 }
 
 export interface Candidate {
@@ -125,10 +127,16 @@ export interface DarkHoursDay {
 }
 
 export interface Validation {
-  null_ratio: number;
-  null_ci: [number, number];
-  recall: number;
-  n_recall: number;
+  null_ratio: number | null;
+  null_ci: [number, number] | null;
+  null_p: number | null;
+  bridge_auc: number | null;
+  bridge_auc_ci: [number, number] | null;
+  bridge_radar_ratio: number | null;
+  holdout_ratio: number | null;
+  holdout_ci: [number, number] | null;
+  verdict: string | null;
+  source: string | null;
 }
 
 export interface StatsResponse {

@@ -8,6 +8,7 @@ import type { CaseSummary, CasesResponse } from "../api";
 import { attribution } from "../components/Attribution";
 import { caseList } from "../components/CaseList";
 import { h } from "../components/dom";
+import { evidencePanel } from "../components/EvidencePanel";
 import { funnel } from "../components/Funnel";
 import { kpiStrip } from "../components/KpiStrip";
 import { legend } from "../components/Legend";
@@ -104,7 +105,17 @@ export function renderOverview(
     attribution(),
   );
 
-  const rail = h("aside", { class: "rail" }, funnel(counts), caseList(ranked, null));
+  // The evidence panel reads /api/stats itself and hides when the API has no
+  // validation block, so the funnel and case list never wait on it.
+  const evidence = evidencePanel();
+
+  const rail = h(
+    "aside",
+    { class: "rail" },
+    funnel(counts),
+    evidence.element,
+    caseList(ranked, null),
+  );
 
   root.replaceChildren(
     topBar({
@@ -123,6 +134,7 @@ export function renderOverview(
 
   return {
     destroy(): void {
+      evidence.destroy();
       map.destroy();
     },
   };

@@ -67,6 +67,7 @@ export function mountCaseMap(
   const amber = themeColor("--c-gap", "#FFB020");
   const prism = themeColor("--c-prism-stroke", "#A78BFA");
   const prismFill = rgba(prism, 0.16);
+  const likelyFill = themeColor("--c-prism-likely", "rgba(167, 139, 250, 0.35)");
   const noFill = rgba("#000000", 0);
 
   // Frame index is the index into this time-sorted copy, which is also what
@@ -156,6 +157,11 @@ export function mountCaseMap(
     const lens = map.getSource("lens") as maplibregl.GeoJSONSource | undefined;
     lens?.setData(polygonData(frames[index]?.polygon ?? null));
 
+    // The likely contour is part of the same frame: scrub both together so the
+    // brighter shade never lags the lens it sits inside.
+    const likely = map.getSource("likely") as maplibregl.GeoJSONSource | undefined;
+    likely?.setData(polygonData(frames[index]?.likely ?? null));
+
     const radar = map.getSource("radar") as maplibregl.GeoJSONSource | undefined;
     radar?.setData(radarData(index));
   };
@@ -176,6 +182,7 @@ export function mountCaseMap(
       data: polygonData(detail.footprint),
     });
     map.addSource("lens", { type: "geojson", data: polygonData(null) });
+    map.addSource("likely", { type: "geojson", data: polygonData(null) });
     map.addSource("track", { type: "geojson", data: trackData });
     map.addSource("ends", { type: "geojson", data: endsData });
     map.addSource("radar", { type: "geojson", data: radarData(frameIndex) });
@@ -211,6 +218,18 @@ export function mountCaseMap(
       source: "lens",
       paint: {
         "fill-color": prismFill,
+      },
+    });
+
+    // Brighter violet inside the lens: the bridge's most likely position. No
+    // outline on purpose, so it reads as a shade rather than a second boundary.
+    map.addLayer({
+      id: "likely-fill",
+      type: "fill",
+      source: "likely",
+      paint: {
+        "fill-color": likelyFill,
+        "fill-outline-color": noFill,
       },
     });
 
