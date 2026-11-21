@@ -47,3 +47,8 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     narrower and truer.
 13. **Robust numbers change the headline.** Hormuz "not broadcasting" share: mean 51% with thin days, median 41%
     over well-covered days. We publish the median and say which 25 days we dropped and why.
+14. **A real ship-to-ship transfer is usually just refuelling.** The calibrated meeting detector found two real
+    offshore tanker-cargo transfers in our recording: CSL THAMES + FOX SUNRISE off Gothenburg (about 1 m apart,
+    40 min) and SPAR ARIES + CSM HYDRA in Singapore's anchorage (35 min). Both look like bunkering. Why it
+    matters: shadow-fleet STS transfers hide among thousands of routine ones; location and watchlist context,
+    not the transfer itself, are what make one worth a look.
