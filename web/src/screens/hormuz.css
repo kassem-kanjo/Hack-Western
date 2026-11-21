@@ -236,6 +236,24 @@
   margin-top: var(--sp-1);
 }
 
+/* Map key for the cluster's hollow dots (#219). */
+.hz-map-key {
+  position: absolute;
+  left: var(--sp-3);
+  bottom: 34px;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+
+.hz-map-key[hidden] {
+  display: none;
+}
+
 /* Story cards (#219): one click draws the story on the map. */
 .hz-stories {
   display: flex;

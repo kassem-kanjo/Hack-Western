@@ -28,6 +28,7 @@ export interface StoryListed {
   on: Point;
   moved_km: number | null;
   reach_km: number;
+  closer_to_strait_km: number | null;
 }
 
 export interface StoryCluster {
@@ -35,6 +36,11 @@ export interface StoryCluster {
   start: string;
   vessels: number;
   span_hours: number;
+  median_hours: number;
+  max_km: number;
+  median_kn: number | null;
+  min_kn: number | null;
+  raised_cap: number;
   points: { off: Point; on: Point }[];
   centre: Point;
 }
@@ -64,7 +70,7 @@ function circle(centre: Point, radiusKm: number): number[][] {
   return ring;
 }
 
-function point(role: "off" | "on", at: Point): GeoJSON.Feature {
+function point(role: "off" | "on" | "reported", at: Point): GeoJSON.Feature {
   return { type: "Feature", properties: { role }, geometry: { type: "Point", coordinates: [at.lon, at.lat] } };
 }
 
@@ -85,13 +91,20 @@ export function addStoryLayers(map: maplibregl.Map): void {
     filter: ["==", ["geometry-type"], "Polygon"],
     paint: { "line-color": "#C9D6E3", "line-opacity": 0.75, "line-width": 1 },
   });
+  // Tracks: a listed ship's dark passage (state colour) and a false cluster track (grey).
   map.addLayer({
     id: "stories-gap",
     type: "line",
     source: SOURCE,
     filter: ["==", ["geometry-type"], "LineString"],
-    paint: { "line-color": "#F0A33A", "line-width": 1.5, "line-dasharray": [2, 2] },
+    paint: {
+      "line-color": ["match", ["get", "kind"], "false", "#8A98A6", "#F0A33A"],
+      "line-width": 1.5,
+      "line-dasharray": [2, 2],
+    },
   });
+  // Points: 'off' is a listed ship's departure; 'reported' is a cluster's departure, hollow
+  // because the position was not real; 'on' is where the ship came back.
   map.addLayer({
     id: "stories-points",
     type: "circle",
@@ -99,9 +112,9 @@ export function addStoryLayers(map: maplibregl.Map): void {
     filter: ["==", ["geometry-type"], "Point"],
     paint: {
       "circle-radius": 4.5,
-      "circle-color": ["match", ["get", "role"], "off", "#F0A33A", "#E6ECF2"],
-      "circle-stroke-color": "#0C1218",
-      "circle-stroke-width": 1,
+      "circle-color": ["match", ["get", "role"], "off", "#F0A33A", "reported", "#0C1218", "#E6ECF2"],
+      "circle-stroke-color": ["match", ["get", "role"], "reported", "#A9B6C3", "#0C1218"],
+      "circle-stroke-width": ["match", ["get", "role"], "reported", 1.5, 1],
     },
   });
 }
@@ -127,7 +140,7 @@ export function showListed(map: maplibregl.Map, story: StoryListed): void {
   const features: GeoJSON.Feature[] = [
     {
       type: "Feature",
-      properties: {},
+      properties: { kind: "gap" },
       geometry: {
         type: "LineString",
         coordinates: [
@@ -150,7 +163,22 @@ export function showListed(map: maplibregl.Map, story: StoryListed): void {
 
 /** Card 2: every ship in the cluster, off and on, so the shared reappearance spot is visible. */
 export function showCluster(map: maplibregl.Map, cluster: StoryCluster): void {
-  const features: GeoJSON.Feature[] = cluster.points.flatMap((p) => [point("off", p.off), point("on", p.on)]);
+  // Each member: a grey track from its reported departure (hollow) to the spot it came back to.
+  const features: GeoJSON.Feature[] = cluster.points.flatMap((p) => [
+    {
+      type: "Feature",
+      properties: { kind: "false" },
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [p.off.lon, p.off.lat],
+          [p.on.lon, p.on.lat],
+        ],
+      },
+    } as GeoJSON.Feature,
+    point("reported", p.off),
+    point("on", p.on),
+  ]);
   show(
     map,
     features,
@@ -159,6 +187,17 @@ export function showCluster(map: maplibregl.Map, cluster: StoryCluster): void {
       [p.on.lon, p.on.lat],
     ]),
   );
+}
+
+/** The cluster card's text: every number from the cluster, the physics that rules out real voyages. */
+function clusterSentence(c: StoryCluster): string {
+  const head = `${dayLabel(c.day)}: ${c.vessels} ships stopped broadcasting within ${c.span_hours.toFixed(1)} hours.`;
+  const where = ` Their last positions were up to ${Math.round(c.max_km)} km out in the Arabian Sea, and they came back about ${Math.round(c.median_hours)} h later at the same spot off the UAE.`;
+  const speed =
+    c.median_kn === null
+      ? ""
+      : ` Getting there needs ${Math.round(c.median_kn)} knots; these ships can't do that.`;
+  return `${head}${where}${speed} Their positions were corrupted, likely GPS interference, so we don't rank them as hiding.`;
 }
 
 /** One card per listed ship and per cluster, under the headline. Clicking draws it on the map. */
@@ -174,7 +213,11 @@ export function storyCards(
     const name = story.name ?? `MMSI ${story.mmsi}`;
     const shadow = story.lists.includes("mare.shadow") ? "on a shadow-fleet list, " : "";
     const days = Math.floor((Date.parse(story.start) - STRIKE_DAY) / DAY_MS);
-    const moved = story.moved_km === null ? "" : ` It reappeared ${Math.round(story.moved_km)} km from where it went dark.`;
+    // Direction from the two positions; "closer to the strait" only when the data says so.
+    const way = story.on.lon < story.off.lon ? "west" : "east";
+    const closer = (story.closer_to_strait_km ?? 0) > 0 ? ", closer to the strait" : "";
+    const moved =
+      story.moved_km === null ? "" : ` It came back ${Math.round(story.moved_km)} km ${way}${closer}.`;
     const card = h(
       "button",
       { class: "hz-card", type: "button" },
@@ -194,7 +237,7 @@ export function storyCards(
       h(
         "span",
         { class: "hz-card-text" },
-        `${dayLabel(cluster.day)}: ${cluster.vessels} ships went dark within ${cluster.span_hours.toFixed(1)} h and came back at the same spot. That pattern is an outage (likely jamming), so we don't rank them as hiding.`,
+        clusterSentence(cluster),
       ),
     );
     card.addEventListener("click", () => onCluster(cluster));

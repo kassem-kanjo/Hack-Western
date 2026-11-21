@@ -118,6 +118,14 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     attribution(),
   );
 
+  // Labels the cluster's hollow dots on the map (the offline basemap has no text glyphs).
+  const mapKey = h(
+    "p",
+    { class: "hz-map-key", hidden: true },
+    "○ reported position   ● came back here   grey dashes: the false track",
+  );
+  stage.append(mapKey);
+
   const body = h("div", { class: "hz-body" }, h("p", { class: "hz-small" }, "Loading the strait..."));
   const rail = h("aside", { class: "rail hormuz-rail", "aria-label": "The strait" }, body);
 
@@ -230,10 +238,13 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     const cards = storyCards(
       stories,
       (story) => {
+        mapKey.hidden = true;
         if (mapReady) showListed(map, story);
       },
       (cluster) => {
-        if (mapReady) showCluster(map, cluster);
+        if (!mapReady) return;
+        showCluster(map, cluster);
+        mapKey.hidden = false;
       },
     );
     return h(

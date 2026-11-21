@@ -101,7 +101,8 @@ def test_eight_ships_within_the_rule_make_a_cluster() -> None:
     gaps = [gap(i, minutes=i * 10, lat=25.2 + i * 0.01) for i in range(8)]
     clusters = cluster_gaps(gaps)
     assert len(clusters) == 1
-    assert cluster_summary(clusters[0]) == {"vessels": 8, "gaps": 8, "span_hours": 1.17}
+    summary = cluster_summary(clusters[0])
+    assert (summary["vessels"], summary["gaps"], summary["span_hours"]) == (8, 8, 1.17)
 
 
 def test_seven_ships_are_not_enough() -> None:

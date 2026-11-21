@@ -87,6 +87,8 @@ def to_gap(event: GapEvent) -> Gap:
         off_lon=event.off_lon,
         on_lat=event.on_lat,
         on_lon=event.on_lon,
+        implied_kn=event.implied_speed_knots,
+        class_cap_kn=max_speed_knots(event.vessel_type),
     )
 
 
@@ -150,9 +152,7 @@ def build_payload(
             {
                 "day": first.astimezone(UTC).date().isoformat(),
                 "start": _iso(first),
-                "vessels": summary["vessels"],
-                "gaps": summary["gaps"],
-                "span_hours": summary["span_hours"],
+                **summary,
                 "points": [
                     {
                         "off": {"lat": by_id[g.id].off_lat, "lon": by_id[g.id].off_lon},

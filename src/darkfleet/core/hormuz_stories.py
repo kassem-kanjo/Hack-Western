@@ -11,9 +11,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from statistics import median
 from typing import Literal
 
 from darkfleet.core.geo import distance_km
+from darkfleet.core.tracks import Ping
+from darkfleet.core.watch import effective_cap_kn
 
 # An outage cluster: gaps starting within this many hours and off-positions this close.
 CLUSTER_WINDOW_HOURS = 3.0
@@ -33,6 +36,9 @@ class Gap:
     off_lon: float
     on_lat: float
     on_lon: float
+    # GFW's implied speed over the gap (knots), and the class cap for the ship's type.
+    implied_kn: float | None = None
+    class_cap_kn: float = 14.0
 
 
 def _anchor(gap: Gap, anchor: Literal["off", "on"]) -> tuple[float, float]:
@@ -95,12 +101,34 @@ def reach_radius_km(cap_kn: float, gap: Gap) -> float:
     return max(0.0, cap_kn * 1.852 * hours)
 
 
-def cluster_summary(members: Sequence[Gap]) -> dict[str, float | int]:
-    """Counts and spans a card needs. Pure arithmetic over the members."""
+def cluster_summary(members: Sequence[Gap]) -> dict[str, float | int | None]:
+    """Counts, spans and speeds a card needs. Pure arithmetic over the members.
+
+    `median_kn`/`min_kn` are the implied speeds from the reported off and on positions. A ship
+    whose implied speed is above its class cap raised the cap; `raised_cap` counts those, using
+    the core `effective_cap_kn` (a ship whose own speed proves faster than its class cap gets the
+    higher cap, so it is not an outlier by declaration alone).
+    """
     starts = [gap.start for gap in members]
     first, last = min(starts), max(starts)
+    speeds = [gap.implied_kn for gap in members if gap.implied_kn is not None]
+    raised = 0
+    for gap in members:
+        if gap.implied_kn is None:
+            continue
+        track = [
+            Ping(mmsi=0, t=gap.start, lat=gap.off_lat, lon=gap.off_lon, sog=gap.implied_kn),
+            Ping(mmsi=0, t=gap.end, lat=gap.on_lat, lon=gap.on_lon, sog=gap.implied_kn),
+        ]
+        if effective_cap_kn(gap.class_cap_kn, track) > gap.class_cap_kn:
+            raised += 1
     return {
         "vessels": len({gap.vessel_key for gap in members}),
         "gaps": len(members),
         "span_hours": round((last - first).total_seconds() / 3600.0, 2),
+        "median_hours": round(median((g.end - g.start).total_seconds() / 3600.0 for g in members), 2),
+        "max_km": round(max(distance_km(g.off_lat, g.off_lon, g.on_lat, g.on_lon) for g in members), 1),
+        "median_kn": round(median(speeds), 1) if speeds else None,
+        "min_kn": round(min(speeds), 1) if speeds else None,
+        "raised_cap": raised,
     }
