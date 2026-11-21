@@ -57,4 +57,7 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     (a moored ship going quiet is normal), and only 83 of the cuts did; within that scope it found 43 of 83
     (51.8%). Our space-time prism held the hidden route in 62 of 66 masked windows (93.9%). Why it matters: a
     single recall number without its scope can make a sound rule look broken, or a weak one look fine; the
-    51.8% is still low and we are tracing the misses. Source: docs/validation-tracks.md (seed 7).
+    51.8% looked low, so we traced every miss (docs/recall-misses.md): in a later run all 37 in-scope misses fell
+    inside minutes when our own recorder heard nothing (start-up and a restart), and the rule refuses to blame a
+    ship for our outage. Where receivers were up throughout, it found 55 of 55. Source: docs/validation-tracks.md,
+    docs/recall-misses.md (seed 7; the recording grows between runs, so counts differ slightly).
