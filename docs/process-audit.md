@@ -134,3 +134,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 18:** ~95% DeepSeek; Chief: wifi template + helper script, integration.
 - **Rule breaks:** none by me; a credential reached the transcript (user-side).
 - **Change for next 30 min:** for any secret the user must enter, give a script with native prompts, never a one-liner they might edit. w21 (first-pass security review) running; Opus CP3 review at 15:00 confirms its findings.
+
+## Sat 21 Nov, 14:27 ET (audit 20, covers 13:50-14:28)
+- **Went well:** Kassem redirected the UI (one global map, all ships dimmed, suspicious highlighted, click → reach + who it could have met, no paragraphs); a wireframe went out in the same turn and the frozen contract (docs/watch-contract.md, #165) let three lanes build in parallel: core merged (#166, areas spot-checked on known points), pipeline + UI running. First-pass security review (DeepSeek) found 1 High + 5 Medium; fix lane running in parallel on disjoint files.
+- **Went wrong:** the recorder silently hung after the wifi switch (14:15-14:30 hole): its reconnect loop stopped logging; restarted. Pi 5 boot-loops after QNX starts loading: suspects are laptop USB-C power (15 W vs 27 W) and a stale firmware-update file left on the loaner card (renamed, reversible). Earlier Pi instructions cost many turns.
+- **Code share since audit 19:** ~95% DeepSeek; Chief: contract, wifi helper, card diagnosis, recorder restart.
+- **Rule breaks:** none.
+- **Change for next 30 min:** health.sh should flag "file not growing for 5 min" as RED, not only "process alive" (the hang passed as OK). New SSE endpoints must be async (H-1 class).
