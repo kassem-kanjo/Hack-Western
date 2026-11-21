@@ -28,12 +28,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import realtime
+
 _POLL_S = 0.1
 _STARTUP_WAIT_S = 5.0
 _STOP_GRACE_S = 2.0
 _EVENTS_KEEP = 20
 _CONTROL_DIR = "control"
 _KILL_FILE = "kill_detector"
+_STRESS_FILE = "stress_ai"
+_STRESS_MAX_S = 120.0
+_STRESS_MIN_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -50,8 +55,15 @@ class SupervisorConfig:
     deadline_ms: float = 200.0
     cooldown_s: float = 5.0
     heartbeat_timeout_s: float = 2.0
+    # Loading the model takes longer than heartbeat_timeout_s on a Raspberry Pi (OpenCV DNN), and
+    # the detector sends nothing until it is ready; without a grace it was killed mid-load forever.
+    startup_grace_s: float = 20.0
     restart_backoff_s: float = 0.5
     set_priority: bool = True
+    fifo_priority: int = 25  # the supervisor sits below the safety core (30)
+    detector_nice: int = 10  # the detector and the stress workers share this priority
+    stress_workers: int | None = None  # default: one per core
+    stress_seconds: float = 10.0  # default when the stress file is empty
 
     @property
     def socket_path(self) -> str:
@@ -72,6 +84,10 @@ class SupervisorConfig:
     @property
     def kill_signal_path(self) -> str:
         return os.path.join(self.state_dir, _CONTROL_DIR, _KILL_FILE)
+
+    @property
+    def stress_signal_path(self) -> str:
+        return os.path.join(self.state_dir, _CONTROL_DIR, _STRESS_FILE)
 
 
 @dataclass
@@ -100,6 +116,9 @@ class Supervisor:
         self._detector_restart_at: float | None = None  # monotonic time of the next detector start
         self._safety_restart_at: float | None = None
         self._started_wall = time.time()
+        self._sched: dict[str, Any] = realtime.current_schedule()
+        self._stress_procs: list[subprocess.Popen] = []
+        self._stress_until: float | None = None  # wall clock
         os.makedirs(config.state_dir, exist_ok=True)
 
     # --- public -------------------------------------------------------------
@@ -109,6 +128,7 @@ class Supervisor:
         return None if self.detector.proc is None else self.detector.proc.pid
 
     def run(self, stop: threading.Event | None = None, duration_s: float | None = None) -> None:
+        self._apply_priority()
         start = time.monotonic()
         try:
             self._start_safety_core()
@@ -123,6 +143,28 @@ class Supervisor:
         finally:
             self._stop_children()
             self._write_edge_status()
+
+    def _apply_priority(self) -> None:
+        """SCHED_FIFO 25 when the OS allows it; otherwise one log line and carry on."""
+        if not self.config.set_priority:
+            self._sched = realtime.current_schedule()
+            print(
+                f"supervisor priority: not requested ({realtime.describe(self._sched)})",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        elevated, sched = realtime.try_fifo(self.config.fifo_priority)
+        self._sched = sched
+        if elevated:
+            print(f"supervisor priority: {realtime.describe(sched)}", file=sys.stderr, flush=True)
+        else:
+            print(
+                f"supervisor: SCHED_FIFO {self.config.fifo_priority} unavailable "
+                f"({realtime.describe(sched)}); continuing at normal priority",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # --- children -----------------------------------------------------------
 
@@ -179,6 +221,7 @@ class Supervisor:
             cmd += ["--mock"]
         if cfg.model:
             cmd += ["--model", cfg.model]
+        cmd += ["--nice", str(cfg.detector_nice)]
         self.detector.proc = subprocess.Popen(cmd)
         self.detector.started_wall = time.time()
         self._event("detector started", pid=self.detector.proc.pid)
@@ -198,6 +241,8 @@ class Supervisor:
         now_wall = time.time()
 
         self._check_operator_kill()
+        self._check_stress_request()
+        self._reap_stress(now_wall)
 
         # The safety core is trusted and simple; if it dies, bring it back and say so.
         if self.safety.proc is not None and self.safety.proc.poll() is not None:
@@ -262,14 +307,71 @@ class Supervisor:
         proc.wait()
         self._event("detector killed by operator")
 
+    def _check_stress_request(self) -> None:
+        """Consume the operator's stress file: its contents are the number of seconds."""
+        path = self.config.stress_signal_path
+        try:
+            with open(path, encoding="utf-8") as fh:
+                raw = fh.read().strip()
+        except OSError:
+            return
+        try:
+            os.unlink(path)
+        except OSError:
+            return
+        self._start_stress(_stress_seconds(raw, self.config.stress_seconds))
+
+    def _start_stress(self, seconds: float) -> None:
+        """Start one busy-loop worker per core at the detector's nice value."""
+        self._stop_stress()
+        workers = self.config.stress_workers or os.cpu_count() or 1
+        cmd = [
+            sys.executable,
+            "-m",
+            "darkfleet.edge.stress",
+            "--seconds",
+            f"{seconds:.3f}",
+            "--nice",
+            str(self.config.detector_nice),
+        ]
+        for _ in range(max(1, int(workers))):
+            self._stress_procs.append(subprocess.Popen(cmd))
+        self._stress_until = time.time() + seconds
+        self._event("stress started", workers=int(workers), seconds=seconds)
+
+    def _reap_stress(self, now_wall: float) -> None:
+        """Stop the workers once their time is up (or one of them exits early)."""
+        if not self._stress_procs:
+            return
+        expired = self._stress_until is not None and now_wall >= self._stress_until
+        if expired or any(proc.poll() is not None for proc in self._stress_procs):
+            self._stop_stress()
+            self._event("stress ended")
+
+    def _stop_stress(self) -> None:
+        procs, self._stress_procs = self._stress_procs, []
+        self._stress_until = None
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+        for proc in procs:
+            try:
+                proc.wait(timeout=_STOP_GRACE_S)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
     def _silent_for(self, now_wall: float) -> float:
         """Seconds since the detector last sent anything, counting from its own start."""
         status = self._read_safety_status()
         last = status.get("last_msg_wall") if status else None
-        reference = max(self.detector.started_wall, last or 0.0)
-        return now_wall - reference
+        if last is None or last < self.detector.started_wall:
+            # Not heard from since this start: allow the model to load before calling it silent.
+            return max(0.0, now_wall - self.detector.started_wall - self.config.startup_grace_s)
+        return now_wall - last
 
     def _stop_children(self) -> None:
+        self._stop_stress()
         for child in (self.detector, self.safety):
             proc = child.proc
             if proc is None or proc.poll() is not None:
@@ -302,21 +404,29 @@ class Supervisor:
         state = safety.get("state", "UNKNOWN")
         if not detector_alive and state == "OK":
             state = "DEGRADED"  # Safety core may not have noticed yet; the supervisor knows.
+        now_wall = time.time()
+        stress_workers = sum(1 for proc in self._stress_procs if proc.poll() is None)
         return {
             "component": "supervisor",
-            "t_wall": time.time(),
+            "t_wall": now_wall,
             "started_wall": self._started_wall,
             "mode": "mock" if self.config.mock else "camera",
             "state": state,
             "state_reason": safety.get("state_reason"),
             "priority": safety.get("priority"),
+            "priorities": self._priorities(safety),
             "last_alert": safety.get("last_alert"),
             "deadline_ms": safety.get("deadline_ms"),
             "deadline_misses": safety.get("deadline_misses", 0),
+            "deadline_misses_60s": safety.get("deadline_misses_60s", 0),
             "frames_total": safety.get("frames_total", 0),
+            "frames_per_s": safety.get("frames_per_s", 0.0),
+            "latency_p50_ms": safety.get("latency_p50_ms"),
+            "latency_p99_ms": safety.get("latency_p99_ms"),
             "alerts_total": safety.get("alerts_total", 0),
             "last_frame_age_ms": safety.get("last_frame_age_ms"),
             "last_inference_ms": safety.get("last_inference_ms"),
+            "detector_waiting": safety.get("detector_waiting", False),
             "last_recovery_ms": self.stats.last_recovery_ms,
             "recovery_ms_history": self.stats.recovery_ms_history[-20:],
             "detector_restarts": self.stats.detector_restarts,
@@ -324,7 +434,27 @@ class Supervisor:
             "detector_alive": detector_alive,
             "safety_core_pid": None if self.safety.proc is None else self.safety.proc.pid,
             "safety_core_alive": safety_alive,
+            "stress": {
+                "active": self._stress_until is not None and now_wall < self._stress_until,
+                "until": self._stress_until,
+                "workers": stress_workers,
+            },
             "events": self.stats.events,
+        }
+
+    def _priorities(self, safety: dict[str, Any]) -> dict[str, Any]:
+        """The scheduling class each process actually has (detector: as it reported)."""
+        detector = safety.get("detector_sched")
+        if not isinstance(detector, dict) or not detector.get("policy"):
+            detector = {
+                "policy": realtime.SCHED_OTHER,
+                "priority": 0,
+                "nice": self.config.detector_nice,
+            }
+        return {
+            "safety_core": safety.get("sched") or {},
+            "supervisor": self._sched,
+            "detector": detector,
         }
 
     def _write_edge_status(self) -> None:
@@ -333,6 +463,15 @@ class Supervisor:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(obj, fh, sort_keys=True)
         os.replace(tmp, self.config.edge_status_path)
+
+
+def _stress_seconds(raw: str, default: float) -> float:
+    """The stress file holds a number of seconds; anything else means the default."""
+    try:
+        seconds = float(raw) if raw else default
+    except ValueError:
+        seconds = default
+    return min(max(seconds, _STRESS_MIN_S), _STRESS_MAX_S)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -352,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--match-km", type=float, default=2.0)
     parser.add_argument("--deadline-ms", type=float, default=200.0)
+    parser.add_argument("--fifo-priority", type=int, default=25, help="SCHED_FIFO priority to ask for")
+    parser.add_argument("--stress-seconds", type=float, default=10.0, help="default stress duration")
     parser.add_argument("--no-priority", action="store_true")
     parser.add_argument("--duration", type=float, default=None, help="stop after N seconds")
     args = parser.parse_args(argv)
@@ -368,6 +509,8 @@ def main(argv: list[str] | None = None) -> int:
         match_km=args.match_km,
         deadline_ms=args.deadline_ms,
         set_priority=not args.no_priority,
+        fifo_priority=args.fifo_priority,
+        stress_seconds=args.stress_seconds,
     )
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

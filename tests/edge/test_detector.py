@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import math
 import os
 import shutil
@@ -9,13 +10,15 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from darkfleet.edge import detector
-from darkfleet.edge.protocol import DETECTIONS, recv_msg
+from darkfleet.edge.protocol import DETECTIONS, HEARTBEAT, WAITING_FOR_FRAMES, recv_msg
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = "tests/edge/fixtures"
@@ -194,3 +197,67 @@ def test_missing_model_exits_3() -> None:
     assert result.returncode == 3
     assert b"fetch_edge_model.sh" in result.stderr
     assert b"--mock" in result.stderr
+
+
+def test_detector_heartbeats_while_waiting_for_frames(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No frame ever arrives (a net source with no bridge): the detector must still be
+    alive, heartbeating at least twice a second with state "waiting for frames"."""
+    monkeypatch.setattr(
+        detector, "OnnxDetector", lambda _path: type("Model", (), {"detect": lambda *_: []})()
+    )
+    model_file = tmp_path / "model.onnx"
+    model_file.write_bytes(b"not really a model, never loaded")
+
+    sock_dir = tempfile.mkdtemp(prefix="dfw-", dir="/tmp")
+    sock_path = os.path.join(sock_dir, "w.sock")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(sock_path)
+    listener.listen(1)
+    listener.settimeout(10)
+    conn = None
+    thread = None
+    try:
+        args = argparse.Namespace(
+            source="net:0",
+            net_bind="127.0.0.1",
+            socket=sock_path,
+            state_dir=str(tmp_path),
+            mock=False,
+            model=str(model_file),
+            fps=10.0,
+            heartbeat_s=0.1,
+            once=False,
+            nice=0,
+            score_min=0.3,
+        )
+        thread = threading.Thread(target=detector.run, args=(args,), daemon=True)
+        thread.start()
+        conn, _ = listener.accept()
+
+        messages: list[tuple[float, dict]] = []
+        end = time.monotonic() + 2.5
+        while time.monotonic() < end:
+            try:
+                msg = recv_msg(conn, timeout=max(0.05, end - time.monotonic()))
+            except TimeoutError:
+                break
+            if msg is None:
+                break
+            messages.append((time.monotonic(), msg))
+
+        assert len(messages) >= 3, "the detector went silent while the source was quiet"
+        heartbeats = [msg for _, msg in messages if msg["type"] == HEARTBEAT]
+        assert len(heartbeats) >= 3
+        assert all(hb.get("state") == WAITING_FOR_FRAMES for hb in heartbeats)
+        assert heartbeats[0]["sched"]["nice"] == 0  # args.nice is 0 in this test
+        gaps = [later - earlier for (earlier, _), (later, _) in zip(messages, messages[1:], strict=False)]
+        assert max(gaps) < 1.0, f"heartbeat gap {max(gaps):.2f}s is far beyond the wait budget"
+    finally:
+        if conn is not None:
+            conn.close()
+        listener.close()
+        if thread is not None:
+            thread.join(timeout=5)
+        shutil.rmtree(sock_dir, ignore_errors=True)

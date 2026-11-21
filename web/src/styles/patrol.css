@@ -149,8 +149,33 @@
   white-space: nowrap;
 }
 
-/* ---------- events ---------- */
+/* ---------- real-time detail: one line per fact, no prose ---------- */
 
+.patrol-detail {
+  display: grid;
+  gap: 2px;
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--c-line);
+}
+
+.patrol-line {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-body);
+  color: var(--c-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Amber, never red: load is a demo condition, not a failure. */
+.patrol-line.is-amber {
+  color: var(--c-degraded);
+}
+
+.patrol-line[hidden] {
+  display: none;
+}
+
+/* ---------- events ---------- */
 .patrol-h {
   margin: var(--sp-2) 0 var(--sp-2);
   font-size: var(--fs-label);
@@ -225,6 +250,28 @@
   color: var(--c-bg);
   font-size: var(--fs-body);
   font-weight: var(--fw-medium);
+}
+
+.patrol-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* Outlined, beside the filled kill: a second demo action, not a second alert. */
+.patrol-stress {
+  padding: 8px 16px;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+
+.patrol-stress[hidden] {
+  display: none;
+}
+
+.patrol-stress:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
 .patrol-kill:hover {
@@ -328,6 +375,16 @@
   }
 
   .patrol-kill {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .patrol-actions {
+    width: 100%;
+  }
+
+  .patrol-stress {
     width: 100%;
     justify-content: center;
     min-height: 44px;

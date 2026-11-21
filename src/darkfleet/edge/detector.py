@@ -24,7 +24,14 @@ from typing import Any
 
 import numpy as np
 
-from darkfleet.edge.protocol import make_detections, make_heartbeat, send_msg
+from darkfleet.edge import realtime
+from darkfleet.edge.protocol import (
+    HEARTBEAT,
+    WAITING_FOR_FRAMES,
+    make_detections,
+    make_heartbeat,
+    send_msg,
+)
 from darkfleet.edge.sources import (
     FrameSource,
     decode_frame,
@@ -41,6 +48,9 @@ STRIDES = (8, 16, 32)
 NMS_IOU = 0.45
 CONNECT_TIMEOUT_S, CONNECT_RETRY_S, SLEEP_SLICE_S = 10.0, 0.05, 0.05
 MOCK_SYNTHETIC_FRAMES = 12
+# A frame wait must return this often so a heartbeat can go out while the source is
+# quiet. The supervisor kills a detector that is silent for heartbeat_timeout_s (2 s).
+FRAME_WAIT_S = 0.5
 
 # Annotated frames for the console. At most one every ANNOTATE_EVERY frames, plus any frame
 # that produced a detection, so the demo always shows boxes rather than a stale still.
@@ -172,21 +182,34 @@ class OnnxDetector:
 
 
 class Link:
-    """Sends messages and keeps heartbeats flowing through paced sleeps."""
+    """Sends messages and keeps heartbeats flowing through paced sleeps.
 
-    def __init__(self, sock: socket.socket, heartbeat_s: float) -> None:
+    The first heartbeat also carries this process's real scheduling class, so the
+    supervisor can report it in ``edge_status.json`` without reading /proc.
+    """
+
+    def __init__(self, sock: socket.socket, heartbeat_s: float, sched: dict[str, Any] | None = None) -> None:
         self._sock, self._heartbeat_s = sock, heartbeat_s
+        self._sched = sched
+        self._sched_sent = False
         self._last_sent = time.monotonic()
 
     def send(self, msg: dict[str, Any]) -> None:
+        if msg.get("type") == HEARTBEAT and self._sched is not None and not self._sched_sent:
+            msg = {**msg, "sched": self._sched}
+            self._sched_sent = True
         send_msg(self._sock, msg)
         self._last_sent = time.monotonic()
+
+    def beat(self, state: str | None = None) -> None:
+        """A liveness heartbeat; ``state`` says why no frame is arriving."""
+        self.send(make_heartbeat(state=state))
 
     def pause(self, seconds: float) -> None:
         end = time.monotonic() + seconds
         while True:
             if time.monotonic() - self._last_sent >= self._heartbeat_s:
-                self.send(make_heartbeat())
+                self.beat()
             left = end - time.monotonic()
             if left <= 0:
                 return
@@ -280,6 +303,9 @@ class FrameWriter:
 
 
 def run(args: argparse.Namespace) -> int:
+    # The supervisor may hand over its SCHED_FIFO; the detector is untrusted and must
+    # give it back before taking its low nice value.
+    realtime.drop_realtime()
     level = "default"
     try:
         if args.nice > 0:
@@ -287,7 +313,8 @@ def run(args: argparse.Namespace) -> int:
             level = f"nice+{args.nice}"
     except OSError:
         pass
-    print(f"detector priority: {level}", file=sys.stderr)
+    sched = realtime.current_schedule()
+    print(f"detector priority: {level} ({realtime.describe(sched)})", file=sys.stderr)
 
     if not args.mock and not Path(args.model).is_file():
         print(
@@ -321,7 +348,7 @@ def run(args: argparse.Namespace) -> int:
                 return 2
             time.sleep(CONNECT_RETRY_S)
 
-    link = Link(sock, args.heartbeat_s)
+    link = Link(sock, args.heartbeat_s, sched)
     interval = 1.0 / args.fps if args.fps > 0 else 0.0
     frame_id = 0
     index = 0
@@ -338,12 +365,14 @@ def run(args: argparse.Namespace) -> int:
                 img = base_frame
             else:
                 assert source is not None and model is not None
-                capture = source.read()
+                capture = source.read(FRAME_WAIT_S)
                 if capture is None:
                     if args.once:
                         return 0
                     source.restart()
-                    link.pause(max(interval, SLEEP_SLICE_S))
+                    # The source is quiet, not the detector: say so and keep the link warm.
+                    link.beat(WAITING_FOR_FRAMES)
+                    link.pause(SLEEP_SLICE_S)
                     continue
                 t_capture, frame = capture
                 img = decode_frame(frame)

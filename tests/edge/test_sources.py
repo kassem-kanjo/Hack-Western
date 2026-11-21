@@ -212,6 +212,36 @@ def test_net_source_enforces_a_total_frame_deadline(monkeypatch: pytest.MonkeyPa
         source.close()
 
 
+def test_net_source_short_wait_keeps_a_partial_frame_for_the_next_call() -> None:
+    """The detector waits 0.5 s at a time and heartbeats in between: a frame split
+    across two waits must still arrive whole."""
+    source = sources.NetSource(0, host="127.0.0.1")
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5) as client:
+            client.sendall(sources.FRAME_HEADER.pack(len(JPEG)) + JPEG[:10])
+            started = time.monotonic()
+            assert source.read(0.2) is None, "a partial frame is not a frame"
+            assert time.monotonic() - started < 0.5
+            assert source._conn is not None, "a short wait must not drop the peer"
+            client.sendall(JPEG[10:])
+            frame = source.read(0.5)
+        assert frame is not None
+        assert frame[1] == JPEG
+    finally:
+        source.close()
+
+
+def test_net_source_short_wait_returns_within_the_budget() -> None:
+    source = sources.NetSource(0, host="127.0.0.1")
+    try:
+        with socket.create_connection(("127.0.0.1", source.port), timeout=5):
+            started = time.monotonic()
+            assert source.read(0.2) is None
+            assert 0.1 < time.monotonic() - started < 1.0
+    finally:
+        source.close()
+
+
 def test_image_dimensions_reads_jpeg_and_png_headers() -> None:
     assert sources.image_dimensions(_jpeg_header(640, 480)) == (640, 480)
     png = (FIXTURES / "frame_00.png").read_bytes()

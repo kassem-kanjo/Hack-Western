@@ -27,6 +27,10 @@ HEARTBEAT = "HEARTBEAT"
 ALERT = "ALERT"
 MESSAGE_TYPES = frozenset({DETECTIONS, HEARTBEAT, ALERT})
 
+# A heartbeat may say why no frame is coming. "waiting for frames" is the detector
+# telling the supervisor it is alive but its source has not delivered anything yet.
+WAITING_FOR_FRAMES = "waiting for frames"
+
 _BOX_KEYS = ("x", "y", "w", "h")
 
 
@@ -51,8 +55,18 @@ def make_detections(
     return msg
 
 
-def make_heartbeat(t: float | None = None) -> dict[str, Any]:
-    msg = {"type": HEARTBEAT, "t": float(time.monotonic() if t is None else t)}
+def make_heartbeat(
+    t: float | None = None,
+    state: str | None = None,
+    sched: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A liveness beat. ``state`` is advisory ("waiting for frames"); ``sched`` is the
+    detector's real scheduling class, sent once so the status file can report it."""
+    msg: dict[str, Any] = {"type": HEARTBEAT, "t": float(time.monotonic() if t is None else t)}
+    if state is not None:
+        msg["state"] = str(state)
+    if sched is not None:
+        msg["sched"] = dict(sched)
     validate(msg)
     return msg
 
@@ -97,6 +111,15 @@ def validate(msg: Any) -> None:
                 _require_number(box, key)
     elif mtype == HEARTBEAT:
         _require_number(msg, "t")
+        if "state" in msg and not isinstance(msg["state"], str):
+            raise ProtocolError("heartbeat state must be a string")
+        if "sched" in msg:
+            sched = msg["sched"]
+            if not isinstance(sched, dict) or not isinstance(sched.get("policy"), str):
+                raise ProtocolError("heartbeat sched needs a string policy")
+            _require_number(sched, "priority")
+            if "nice" in sched:
+                _require_number(sched, "nice")
     elif mtype == ALERT:
         if not isinstance(msg.get("kind"), str):
             raise ProtocolError("alert kind must be a string")

@@ -30,11 +30,12 @@ import stat
 import sys
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from . import protocol
+from . import protocol, realtime
 
 STATE_OK = "OK"
 STATE_DEGRADED = "DEGRADED"
@@ -44,6 +45,10 @@ _EARTH_RADIUS_KM = 6371.0088
 _KM_PER_DEG = 110.0  # Deliberately a little small: the lat/lon pre-filter must never reject a true neighbour.
 _TICK_S = 0.05
 _SOCKET_PATH_MAX = 100  # AF_UNIX paths are limited to ~104 bytes on macOS.
+# Statistical windows. One minute matches the console's "Deadline misses (60 s)";
+# frames_per_s is a short window so a stalled camera shows up almost immediately.
+_STATS_WINDOW_S = 60.0
+_FRAME_RATE_WINDOW_S = 1.0
 
 
 @dataclass(frozen=True)
@@ -59,8 +64,7 @@ class CoreConfig:
     silence_factor: float = 3.0
     alert_cooldown_s: float = 5.0
     status_every_s: float = 0.1
-    fifo_priority: int = 10
-    nice_delta: int = -5
+    fifo_priority: int = 30  # real-time class on QNX; refused on macOS and logged once
     set_priority: bool = True
 
     @property
@@ -111,26 +115,6 @@ def load_ais_snapshot(path: str | None) -> list[AisVessel]:
     return vessels
 
 
-def raise_priority(fifo_priority: int, nice_delta: int) -> str:
-    """Try SCHED_FIFO, then a negative nice value, then nothing. Returns what was applied.
-
-    macOS has no SCHED_FIFO and refuses negative nice for non-root users, so on the laptop
-    this usually returns "default:0". On the Pi (root in the service) it returns "fifo:N".
-    """
-    fifo = getattr(os, "SCHED_FIFO", None)
-    if fifo is not None:
-        try:
-            os.sched_setscheduler(0, fifo, os.sched_param(fifo_priority))
-            return f"fifo:{fifo_priority}"
-        except (OSError, AttributeError):
-            pass
-    try:
-        new_nice = os.nice(nice_delta)
-        return f"nice:{new_nice}"
-    except OSError:
-        return "default:0"
-
-
 class SafetyCore:
     """Pure decision logic. No sockets, no files: `run` does the I/O around it."""
 
@@ -151,7 +135,13 @@ class SafetyCore:
         self.last_msg_wall: float | None = None  # wall clock of the last message, for the supervisor
         self.last_frame_wall: float | None = None  # wall clock of the last DETECTIONS
         self.last_inference_ms: float | None = None
+        self.detector_waiting = False  # the last heartbeat said "waiting for frames"
+        self.detector_sched: dict[str, Any] | None = None  # the detector's own scheduling class
         self.transitions: list[dict[str, Any]] = []
+        # Rolling statistics: safety-check latency, frame arrivals and deadline misses.
+        self._latency_ms: deque[tuple[float, float]] = deque()
+        self._frame_at: deque[float] = deque()
+        self._miss_at: deque[float] = deque()
         self._last_msg_mono: float | None = None
         self._last_alert_mono: float | None = None
         # Starting in OK with no message yet: the silence clock starts at the first tick.
@@ -165,10 +155,12 @@ class SafetyCore:
 
     def on_connect(self, now: float) -> None:
         self.detector_connected = True
+        self.detector_waiting = False
         self._last_msg_mono = now
 
     def on_disconnect(self, now: float) -> None:
         self.detector_connected = False
+        self.detector_waiting = False
         self._set_state(STATE_DEGRADED, "detector link lost", now)
 
     def tick(self, now: float) -> None:
@@ -185,16 +177,31 @@ class SafetyCore:
         self.last_msg_wall = time.time()
         if self.state != STATE_OK:
             self._set_state(STATE_OK, "detector messages resumed", now)
+        if msg["type"] == protocol.HEARTBEAT:
+            # Liveness only, but it may also say the source is quiet and carry the
+            # detector's real scheduling class (sent once, by the first heartbeat).
+            self.detector_waiting = msg.get("state") == protocol.WAITING_FOR_FRAMES
+            sched = msg.get("sched")
+            if isinstance(sched, dict):
+                self.detector_sched = sched
+            return []
         if msg["type"] != protocol.DETECTIONS:
-            return []  # HEARTBEAT is liveness only; ALERT from a peer is not ours to act on.
+            return []  # ALERT from a peer is not ours to act on.
 
+        started = time.perf_counter()
+        self.detector_waiting = False
         self.frames_total += 1
         self.last_frame_wall = self.last_msg_wall
         self.last_frame_age_ms = (now - msg["t_capture"]) * 1000.0
         self.last_inference_ms = (msg["t_done"] - msg["t_capture"]) * 1000.0
         if now - msg["t_capture"] > self.config.deadline_s:
             self.deadline_misses += 1
-        return self._evaluate(msg, now)
+            self._miss_at.append(now)
+        records = self._evaluate(msg, now)
+        self._frame_at.append(now)
+        self._latency_ms.append((now, (time.perf_counter() - started) * 1000.0))
+        self._prune(now)
+        return records
 
     def note_protocol_error(self) -> None:
         self.protocol_errors += 1
@@ -257,8 +264,38 @@ class SafetyCore:
             self.transitions + [{"t_wall": self.state_since_wall, "state": state, "reason": reason}]
         )[-20:]
 
-    def status(self, *, priority: str, ais_error: str | None, now_wall: float) -> dict[str, Any]:
+    def _prune(self, now: float) -> None:
+        """Drop samples older than the statistics window (called on every frame/status)."""
+        for series in (self._frame_at, self._miss_at):
+            while series and now - series[0] > _STATS_WINDOW_S:
+                series.popleft()
+        while self._latency_ms and now - self._latency_ms[0][0] > _STATS_WINDOW_S:
+            self._latency_ms.popleft()
+
+    def _stats(self, now: float) -> dict[str, Any]:
+        """Per-second and per-minute numbers the console shows for real-time behaviour."""
+        self._prune(now)
+        recent_frames = sum(1 for at in self._frame_at if now - at <= _FRAME_RATE_WINDOW_S)
+        latencies = [ms for _, ms in self._latency_ms]
+        return {
+            "frames_per_s": round(recent_frames / _FRAME_RATE_WINDOW_S, 1),
+            "latency_p50_ms": _percentile(latencies, 0.50),
+            "latency_p99_ms": _percentile(latencies, 0.99),
+            "latency_samples": len(latencies),
+            "deadline_misses_60s": len(self._miss_at),
+        }
+
+    def status(
+        self,
+        *,
+        priority: str,
+        ais_error: str | None,
+        now_wall: float,
+        now_mono: float | None = None,
+        sched: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         cfg = self.config
+        now = time.monotonic() if now_mono is None else now_mono
         return {
             "component": "safety_core",
             "pid": os.getpid(),
@@ -267,13 +304,17 @@ class SafetyCore:
             "state_reason": self.state_reason,
             "state_since_wall": self.state_since_wall,
             "priority": priority,
+            "sched": sched or {},
             "detector_connected": self.detector_connected,
+            "detector_waiting": self.detector_waiting,
+            "detector_sched": self.detector_sched,
             "frames_total": self.frames_total,
             "last_msg_wall": self.last_msg_wall,
             "last_frame_wall": self.last_frame_wall,
             "deadline_ms": round(cfg.deadline_s * 1000),
             "silence_ms": round(cfg.silence_s * 1000),
             "deadline_misses": self.deadline_misses,
+            **self._stats(now),
             "protocol_errors": self.protocol_errors,
             "last_frame_age_ms": _round_or_none(self.last_frame_age_ms),
             "last_inference_ms": _round_or_none(self.last_inference_ms),
@@ -288,6 +329,15 @@ class SafetyCore:
 
 def _round_or_none(value: float | None) -> float | None:
     return None if value is None else round(value, 1)
+
+
+def _percentile(values: list[float], fraction: float) -> float | None:
+    """Nearest-rank percentile (no interpolation, so a p99 is always a real sample)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = min(len(ordered) - 1, max(0, math.ceil(fraction * len(ordered)) - 1))
+    return round(ordered[rank], 3)
 
 
 class _AlertLog:
@@ -366,10 +416,25 @@ def run(
     on_ready: Callable[[SafetyCore], None] | None = None,
 ) -> SafetyCore:
     """Serve the detector socket until `stop` is set or `duration_s` passes. Returns the core."""
-    priority = (
-        raise_priority(config.fifo_priority, config.nice_delta) if config.set_priority else "not requested"
-    )
-    print(f"safety core priority: {priority}", file=sys.stderr, flush=True)
+    if config.set_priority:
+        elevated, sched = realtime.try_fifo(config.fifo_priority)
+        if elevated:
+            priority = realtime.describe(sched)
+            print(f"safety core priority: {priority}", file=sys.stderr, flush=True)
+        else:
+            priority = realtime.describe(sched)
+            print(
+                f"safety core: SCHED_FIFO {config.fifo_priority} unavailable "
+                f"({priority}); continuing at normal priority",
+                file=sys.stderr,
+                flush=True,
+            )
+    else:
+        sched = realtime.current_schedule()
+        priority = "not requested"
+        print(
+            f"safety core priority: not requested ({realtime.describe(sched)})", file=sys.stderr, flush=True
+        )
 
     ais = _AisCache(config.ais_path)
     ais.refresh()
@@ -382,6 +447,7 @@ def run(
     start = time.monotonic()
     core.start(start)
     last_status = 0.0
+    now = start
     if on_ready is not None:
         on_ready(core)
     try:
@@ -410,7 +476,13 @@ def run(
                 last_status = now
                 _write_json_atomic(
                     config.status_path,
-                    core.status(priority=priority, ais_error=ais.error, now_wall=time.time()),
+                    core.status(
+                        priority=priority,
+                        ais_error=ais.error,
+                        now_wall=time.time(),
+                        now_mono=now,
+                        sched=sched,
+                    ),
                 )
     finally:
         if client is not None:
@@ -422,7 +494,13 @@ def run(
             pass
         _write_json_atomic(
             config.status_path,
-            core.status(priority=priority, ais_error=ais.error, now_wall=time.time()),
+            core.status(
+                priority=priority,
+                ais_error=ais.error,
+                now_wall=time.time(),
+                now_mono=now,
+                sched=sched,
+            ),
         )
     return core
 

@@ -394,6 +394,30 @@ export interface EdgeEvent {
 }
 
 /**
+ * Scheduling class of one edge process, as the supervisor reported it. On QNX a
+ * trusted process may hold SCHED_FIFO; everywhere else it is SCHED_OTHER with a nice value.
+ */
+export interface EdgeSchedule {
+  policy?: string;
+  priority?: number;
+  nice?: number;
+}
+
+/** `status.priorities`: the three processes, each with the policy it actually got. */
+export interface EdgePriorities {
+  safety_core?: EdgeSchedule | null;
+  supervisor?: EdgeSchedule | null;
+  detector?: EdgeSchedule | null;
+}
+
+/** `status.stress`: the demo load test, while it runs. */
+export interface EdgeStress {
+  active: boolean;
+  until?: number | null;
+  workers?: number;
+}
+
+/**
  * `GET /api/edge/status`: the supervisor's status JSON plus the two fields the
  * console needs (`controls`, `frame_available`). `source` is "pi" when the API
  * relayed the Pi and "local" when it read the laptop's status file.
@@ -409,6 +433,17 @@ export interface EdgeStatus {
   deadline_misses: number;
   frames_total: number;
   alerts_total: number;
+  /** Alerts processed per second over the last second (safety core). */
+  frames_per_s?: number | null;
+  /** Safety-check latency percentiles in milliseconds (last minute of frames). */
+  latency_p50_ms?: number | null;
+  latency_p99_ms?: number | null;
+  /** Deadline misses inside the last 60 s, alongside the lifetime total. */
+  deadline_misses_60s?: number | null;
+  /** True while the detector is alive but its source has no frame yet. */
+  detector_waiting?: boolean;
+  priorities?: EdgePriorities | null;
+  stress?: EdgeStress | null;
   /** Alert shape is owned by the safety core; the patrol screen shows the count only. */
   last_alert: unknown;
   last_frame_age_ms: number | null;
@@ -424,10 +459,12 @@ export interface EdgeStatus {
   error?: string;
 }
 
-/** `POST /api/edge/kill` (202): the supervisor accepted the kill request. */
+/** `POST /api/edge/kill` or `POST /api/edge/stress` (202): the request was accepted. */
 export interface EdgeKillResponse {
   ok: boolean;
   requested_at: number;
+  target?: string;
+  seconds?: number;
 }
 
 /** Newest supervisor status, with controls and frame availability. */
@@ -443,15 +480,24 @@ export function edgeFrameUrl(t: number): string {
   return `/api/edge/frame.jpg?t=${Math.round(t)}`;
 }
 
-/** Ask the supervisor to kill the (untrusted) detector; 403/409 throw. */
+/** Ask the supervisor to kill the (untrusted) detector; 403/502 throw. */
 export async function killEdgeDetector(signal?: AbortSignal): Promise<EdgeKillResponse> {
-  const res = await fetch("/api/edge/kill", {
+  return postEdgeControl("kill", signal);
+}
+
+/** Ask the supervisor to simulate the AI saturating every core for ten seconds. */
+export async function stressEdgeDetector(signal?: AbortSignal): Promise<EdgeKillResponse> {
+  return postEdgeControl("stress", signal);
+}
+
+async function postEdgeControl(name: string, signal?: AbortSignal): Promise<EdgeKillResponse> {
+  const res = await fetch(`/api/edge/${name}`, {
     method: "POST",
     headers: { Accept: "application/json" },
     signal,
   });
   if (!res.ok) {
-    throw new Error(`POST /api/edge/kill failed: HTTP ${res.status}`);
+    throw new Error(`POST /api/edge/${name} failed: HTTP ${res.status}`);
   }
   return (await res.json()) as EdgeKillResponse;
 }
