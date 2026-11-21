@@ -158,6 +158,34 @@ def test_safety_core_keeps_answering_status_while_detector_is_dead(state_dir):
         _stop(sup, thread, stop)
 
 
+def test_operator_kill_file_kills_and_restarts_the_detector(state_dir):
+    sup, thread, stop = _start(state_dir)
+    try:
+        _wait_frames(state_dir, 5)
+        old_pid = sup.detector_pid
+        assert old_pid is not None
+
+        control_dir = os.path.join(state_dir, "control")
+        os.makedirs(control_dir, exist_ok=True)
+        kill_file = os.path.join(control_dir, "kill_detector")
+        with open(kill_file, "w", encoding="utf-8") as fh:
+            fh.write("1")
+
+        recovered = _wait(
+            lambda: _edge(state_dir) if _edge(state_dir).get("last_recovery_ms") is not None else None,
+            timeout=10,
+            label="operator kill recovery",
+        )
+        assert any(e["event"] == "detector killed by operator" for e in recovered["events"])
+        assert recovered["detector_restarts"] >= 1
+        assert recovered["detector_alive"] is True
+        assert recovered["last_recovery_ms"] < 5000
+        assert sup.detector_pid != old_pid
+        assert not os.path.exists(kill_file)  # the supervisor consumes it exactly once
+    finally:
+        _stop(sup, thread, stop)
+
+
 def test_mock_run_reports_alerts_and_writes_alert_log(state_dir):
     # Mock boats appear in 2 of every 3 frames, with no AIS cache: alerts must be raised.
     sup, thread, stop = _start(state_dir, cooldown_s=0.0)

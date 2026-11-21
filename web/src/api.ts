@@ -224,3 +224,81 @@ export function fetchLiveEvents(
 export function fetchLiveVessels(region: string, signal?: AbortSignal): Promise<LiveVessel[]> {
   return getJson<LiveVessel[]>(`/api/live/${encodeURIComponent(region)}/vessels`, signal);
 }
+
+// ---- Edge unit (src/darkfleet/api/edge.py; contract for issue #36) ----
+
+/**
+ * One supervisor event. `t_wall` is Unix seconds (the supervisor writes it);
+ * the API may also expose an ISO `t`. Extra keys are ignored, not trusted.
+ */
+export interface EdgeEvent {
+  event: string;
+  t_wall?: number;
+  t?: string;
+  pid?: number | null;
+  code?: number | null;
+  recovery_ms?: number | null;
+}
+
+/**
+ * `GET /api/edge/status`: the supervisor's status JSON plus the two fields the
+ * console needs (`controls`, `frame_available`). `source` is "pi" when the API
+ * relayed the Pi and "local" when it read the laptop's status file.
+ */
+export interface EdgeStatus {
+  state: string;
+  state_reason?: string | null;
+  detector_alive: boolean;
+  detector_pid: number | null;
+  detector_restarts: number;
+  last_recovery_ms: number | null;
+  deadline_ms: number | null;
+  deadline_misses: number;
+  frames_total: number;
+  alerts_total: number;
+  /** Alert shape is owned by the safety core; the patrol screen shows the count only. */
+  last_alert: unknown;
+  last_frame_age_ms: number | null;
+  last_inference_ms: number | null;
+  events: EdgeEvent[];
+  /** "local" | "pi" (kept as string so an unknown producer cannot break the screen). */
+  source: string;
+  /** True only when EDGE_DEMO_CONTROLS=1: the kill button is allowed. */
+  controls: boolean;
+  /** True while the API can serve a frame at /api/edge/frame.jpg. */
+  frame_available: boolean;
+  /** Present when the API answered 200 but has no status file at all. */
+  error?: string;
+}
+
+/** `POST /api/edge/kill` (202): the supervisor accepted the kill request. */
+export interface EdgeKillResponse {
+  ok: boolean;
+  requested_at: number;
+}
+
+/** Newest supervisor status, with controls and frame availability. */
+export function fetchEdgeStatus(signal?: AbortSignal): Promise<EdgeStatus> {
+  return getJson<EdgeStatus>("/api/edge/status", signal);
+}
+
+/**
+ * URL of the latest annotated frame. `t` is a cache-buster on top of the API's
+ * `Cache-Control: no-store`, so a 4 fps refresh can never show an older frame.
+ */
+export function edgeFrameUrl(t: number): string {
+  return `/api/edge/frame.jpg?t=${Math.round(t)}`;
+}
+
+/** Ask the supervisor to kill the (untrusted) detector; 403/409 throw. */
+export async function killEdgeDetector(signal?: AbortSignal): Promise<EdgeKillResponse> {
+  const res = await fetch("/api/edge/kill", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error(`POST /api/edge/kill failed: HTTP ${res.status}`);
+  }
+  return (await res.json()) as EdgeKillResponse;
+}

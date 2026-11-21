@@ -154,6 +154,24 @@ def test_mock_end_to_end_over_unix_socket() -> None:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def test_frame_writer_writes_latest_jpg(tmp_path: Path) -> None:
+    cv2 = pytest.importorskip("cv2")
+    frame = np.zeros((480, 1280, 3), dtype=np.uint8)
+    boxes = [{"cls": "boat", "score": 0.87, "x": 100.0, "y": 80.0, "w": 80.0, "h": 40.0}]
+
+    writer = detector.FrameWriter(str(tmp_path))
+    assert writer.enabled
+    writer.write(frame, boxes)
+
+    path = tmp_path / "latest.jpg"
+    assert path.is_file()
+    assert not (tmp_path / "latest.jpg.tmp").exists()
+    img = cv2.imread(str(path))
+    assert img is not None
+    assert img.shape[1] == detector.MAX_FRAME_WIDTH  # a 1280 px source is scaled down to 640
+    assert path.stat().st_size > 0
+
+
 def test_missing_model_exits_3() -> None:
     result = subprocess.run(
         [

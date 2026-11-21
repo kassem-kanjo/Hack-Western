@@ -40,6 +40,14 @@ NMS_IOU = 0.45
 CONNECT_TIMEOUT_S, CONNECT_RETRY_S, SLEEP_SLICE_S = 10.0, 0.05, 0.05
 MOCK_SYNTHETIC_FRAMES = 12
 
+# Annotated frames for the console. At most one every ANNOTATE_EVERY frames, plus any frame
+# that produced a detection, so the demo always shows boxes rather than a stale still.
+LATEST_FRAME_NAME = "latest.jpg"
+MAX_FRAME_WIDTH = 640
+JPEG_QUALITY = 80
+ANNOTATE_EVERY = 2
+_DEFAULT_FRAME_HW = (360, 640, 3)
+
 Box = dict[str, Any]
 
 
@@ -160,6 +168,92 @@ class Link:
             time.sleep(min(left, SLEEP_SLICE_S))
 
 
+class FrameWriter:
+    """Keeps ``<state-dir>/latest.jpg`` current: boxes drawn, width <= 640, written atomically.
+
+    cv2 is optional. When it cannot be imported (a ``--mock`` run on a board without OpenCV)
+    the writer is simply disabled and nothing is written. Drawing and encoding happen after
+    the DETECTIONS message is sent, so a slow disk cannot inflate `last_inference_ms`.
+    """
+
+    def __init__(self, state_dir: str) -> None:
+        self.dir = Path(state_dir)
+        self.path = self.dir / LATEST_FRAME_NAME
+        try:
+            import cv2
+        except ImportError:  # no OpenCV: annotated frames are not available on this unit
+            self._cv2: Any = None
+        else:
+            self._cv2 = cv2
+
+    @property
+    def enabled(self) -> bool:
+        return self._cv2 is not None
+
+    def blank(self) -> np.ndarray:
+        """A dark synthetic frame for ``--mock``, where the source supplies no pixels."""
+        assert self._cv2 is not None
+        return np.full(_DEFAULT_FRAME_HW, 24, dtype=np.uint8)
+
+    def annotate(self, img: np.ndarray, boxes: list[Box]) -> np.ndarray:
+        cv2 = self._cv2
+        assert cv2 is not None
+        out = img.copy()
+        for box in boxes:
+            x, y = int(round(box["x"])), int(round(box["y"]))
+            w, h = int(round(box["w"])), int(round(box["h"]))
+            colour = (0, 220, 0) if box.get("cls") == "boat" else (0, 170, 255)
+            cv2.rectangle(out, (x, y), (x + w, y + h), colour, 2)
+            label = f"{box.get('cls', 'object')} {float(box.get('score', 0.0)):.2f}"
+            ty = y - 6 if y > 14 else y + h + 16
+            cv2.putText(out, label, (x, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.45, colour, 1, cv2.LINE_AA)
+        return self._fit_width(out)
+
+    def _fit_width(self, img: np.ndarray) -> np.ndarray:
+        cv2 = self._cv2
+        assert cv2 is not None
+        h, w = img.shape[:2]
+        if w <= MAX_FRAME_WIDTH:
+            return img
+        new_h = max(1, round(h * MAX_FRAME_WIDTH / w))
+        return cv2.resize(img, (MAX_FRAME_WIDTH, new_h), interpolation=cv2.INTER_AREA)
+
+    def write(self, img: np.ndarray, boxes: list[Box]) -> None:
+        """Annotate and atomically replace ``latest.jpg``; never raise into the frame loop."""
+        cv2 = self._cv2
+        if cv2 is None:
+            return
+        ok, encoded = cv2.imencode(
+            ".jpg", self.annotate(img, boxes), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
+        )
+        if not ok:
+            return
+        tmp = str(self.path) + ".tmp"
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            with open(tmp, "wb") as fh:
+                fh.write(encoded.tobytes())
+            os.replace(tmp, self.path)
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    def benchmark(self) -> None:
+        """Time one annotated write once at start so the per-frame cost is visible in the log."""
+        if self._cv2 is None:
+            return
+        boxes: list[Box] = [{"cls": "boat", "score": 0.90, "x": 100.0, "y": 80.0, "w": 80.0, "h": 40.0}]
+        start = time.perf_counter()
+        self.write(self.blank(), boxes)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        print(
+            f"detector: annotated frames -> {self.path} ({elapsed_ms:.1f} ms/frame)",
+            file=sys.stderr,
+        )
+
+
 def run(args: argparse.Namespace) -> int:
     level = "default"
     try:
@@ -182,6 +276,12 @@ def run(args: argparse.Namespace) -> int:
     source: FrameSource | None = None if args.mock else open_source(args.source)
     model = None if args.mock else OnnxDetector(args.model)
 
+    state_dir = args.state_dir or os.path.dirname(os.path.abspath(args.socket))
+    writer = FrameWriter(state_dir)
+    if writer.enabled:
+        writer.benchmark()
+    base_frame = writer.blank() if writer.enabled else None
+
     deadline = time.monotonic() + CONNECT_TIMEOUT_S
     while True:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -201,6 +301,7 @@ def run(args: argparse.Namespace) -> int:
     index = 0
     try:
         while True:
+            img: np.ndarray | None = None
             if frames is not None:
                 t_capture = time.monotonic()
                 if index >= len(frames):
@@ -208,6 +309,7 @@ def run(args: argparse.Namespace) -> int:
                         return 0
                     index = 0
                 boxes = frames[index][1]
+                img = base_frame
             else:
                 assert source is not None and model is not None
                 capture = source.read()
@@ -218,9 +320,12 @@ def run(args: argparse.Namespace) -> int:
                     link.pause(max(interval, SLEEP_SLICE_S))
                     continue
                 t_capture, frame = capture
-                boxes = model.detect(decode_frame(frame), args.score_min)
+                img = decode_frame(frame)
+                boxes = model.detect(img, args.score_min)
             t_done = time.monotonic()
             link.send(make_detections(frame_id, t_capture, t_done, boxes))
+            if img is not None and (frame_id % ANNOTATE_EVERY == 0 or boxes):
+                writer.write(img, boxes)
             frame_id += 1
             index += 1
             if frames is not None and index >= len(frames) and args.once:
@@ -243,6 +348,11 @@ def main(argv: list[str] | None = None) -> int:
         help="dir:<path>, camera:<index> or net:<port> (a plain path means a directory)",
     )
     parser.add_argument("--socket", required=True, help="safety-core Unix socket")
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="where latest.jpg is written (default: the socket's directory)",
+    )
     parser.add_argument("--mock", action="store_true", help="no camera, no model, no cv2/onnxruntime")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--fps", type=float, default=10.0)
