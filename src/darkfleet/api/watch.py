@@ -12,15 +12,16 @@ than an empty contract-shaped object, so the UI can say "not built yet" honestly
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 router = APIRouter(tags=["watch"])
@@ -77,17 +78,36 @@ def get_watch() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=NOT_BUILT) from exc
 
 
+# Async on purpose: a sync generator with time.sleep pins one threadpool thread per open
+# stream, so a handful of idle tabs could starve the API (CP3 security review, H-1).
+MAX_STREAMS = 50
+_open_streams = 0
+
+
 @router.get("/api/watch/stream")
-def stream_watch() -> StreamingResponse:
+async def stream_watch(request: Request) -> StreamingResponse:
     """SSE: an ``update`` event whenever watch.json changes, keepalives between builds."""
+    if _open_streams >= MAX_STREAMS:
+        raise HTTPException(status_code=503, detail="too many watch streams")
     return StreamingResponse(
-        event_stream(),
+        _counted(event_stream(request)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-def event_stream() -> Iterator[str]:
+async def _counted(frames: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Track open streams so the cap above holds; always decrements, even on disconnect."""
+    global _open_streams
+    _open_streams += 1
+    try:
+        async for frame in frames:
+            yield frame
+    finally:
+        _open_streams -= 1
+
+
+async def event_stream(request: Request | None = None) -> AsyncIterator[str]:
     """Poll the snapshot's mtime every 5 s and emit only on change.
 
     Split out so a test can consume one tick without running a server. The first event is sent
@@ -100,7 +120,9 @@ def event_stream() -> Iterator[str]:
     # Prime the connection (and, in tests, the mtime baseline) before the first poll.
     yield ": keepalive\n\n"
     while True:
-        time.sleep(POLL_SECONDS)
+        await asyncio.sleep(POLL_SECONDS)
+        if request is not None and await request.is_disconnected():
+            return
         current = _mtime_ns(path)
         if current is not None and current != last_mtime:
             last_mtime = current

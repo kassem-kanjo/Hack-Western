@@ -8,11 +8,14 @@ one, so this module still imports on a QNX board without OpenCV.
 
 ``--source`` accepts ``dir:<path>``, ``camera:<index>`` and ``net:<port>``. A
 plain path means a directory, which keeps the original detector command line
-working.
+working. A ``net:`` listener binds loopback unless the detector is given
+``--net-bind``, and optionally requires ``EDGE_NET_TOKEN`` as the first frame.
 """
 
 from __future__ import annotations
 
+import os
+import secrets
 import socket
 import struct
 import time
@@ -26,9 +29,24 @@ IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp"})
 # Same header as protocol.py: 4-byte big-endian unsigned length.
 FRAME_HEADER = struct.Struct("!I")
 MAX_FRAME_BYTES = 8 << 20  # a 640x480 JPEG is tens of KiB; cap a hostile peer
+# The token rides in the same length-prefixed framing as a frame; it is short.
+MAX_TOKEN_BYTES = 4096
+DEFAULT_NET_BIND = "127.0.0.1"  # opt in to 0.0.0.0 with --net-bind / EDGE_NET_BIND
+NET_TOKEN_ENV = "EDGE_NET_TOKEN"
+# One frame must arrive within this total budget, not merely within a per-recv timeout:
+# a peer sending one byte every 0.9 s would otherwise hold the detector forever.
+FRAME_DEADLINE_S = 2.0
+# cv2.imdecode allocates from the image header, so a tiny hostile file can claim a huge
+# bitmap. Refuse oversized headers before OpenCV ever sees the bytes.
+MAX_IMAGE_DIMENSION = 4096
 _ACCEPT_TIMEOUT_S = 0.2
 _RECV_TIMEOUT_S = 1.0
 _RECV_CHUNK = 1 << 16
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_JPEG_SOI = b"\xff\xd8"
+# Start-Of-Frame markers carry the true dimensions; C4/C8/CC are not SOF markers.
+_SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF})
 
 FrameData = np.ndarray | bytes
 Frame = tuple[float, FrameData]
@@ -134,11 +152,17 @@ class NetSource:
     second connection while a frame is half-read would corrupt the stream.
     A disconnect drops the connection and the next ``read`` accepts a new one,
     so the bridge can reconnect without restarting the detector.
+
+    The listener defaults to loopback and must be opened deliberately with
+    ``--net-bind``. When ``EDGE_NET_TOKEN`` is set, a connection's first framed
+    message must be that token or it is dropped before any frame is read.
     """
 
-    def __init__(self, port: int, host: str = "0.0.0.0") -> None:
+    def __init__(self, port: int, host: str = DEFAULT_NET_BIND, *, token: str | None = None) -> None:
         if not 0 <= port <= 65535:
             raise ValueError(f"port out of range: {port}")
+        raw_token = token if token is not None else os.environ.get(NET_TOKEN_ENV, "")
+        self._token = raw_token.encode("utf-8") if raw_token else None
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind((host, port))
@@ -146,6 +170,7 @@ class NetSource:
         self._sock.settimeout(_ACCEPT_TIMEOUT_S)
         self.port: int = self._sock.getsockname()[1]
         self._conn: socket.socket | None = None
+        self._authenticated = False
 
     def read(self) -> Frame | None:
         """One complete JPEG frame. None means no client, a timeout or a dropped peer."""
@@ -153,8 +178,11 @@ class NetSource:
             if not self._accept():
                 return None
             assert self._conn is not None
+            deadline = time.monotonic() + FRAME_DEADLINE_S
             try:
-                header = self._recv_exact(FRAME_HEADER.size)
+                if not self._authenticated and not self._authenticate(deadline):
+                    continue  # the peer was dropped; a reconnect may already be queued
+                header = self._recv_exact(FRAME_HEADER.size, deadline)
                 if header is None:
                     if self._conn is None:
                         continue  # peer disconnected; a reconnect may already be queued
@@ -163,7 +191,7 @@ class NetSource:
                 if length == 0 or length > MAX_FRAME_BYTES:
                     self._drop()
                     continue
-                payload = self._recv_exact(length)
+                payload = self._recv_exact(length, deadline)
                 if payload is None:
                     if self._conn is None:
                         continue
@@ -172,6 +200,27 @@ class NetSource:
             except OSError:
                 self._drop()
                 return None
+
+    def _authenticate(self, deadline: float) -> bool:
+        """Consume the token message; a missing or wrong token drops the connection."""
+        if self._token is None:
+            self._authenticated = True
+            return True
+        header = self._recv_exact(FRAME_HEADER.size, deadline)
+        if header is None:
+            return False
+        (length,) = FRAME_HEADER.unpack(header)
+        if length == 0 or length > MAX_TOKEN_BYTES:
+            self._drop()
+            return False
+        payload = self._recv_exact(length, deadline)
+        if payload is None:
+            return False
+        if not secrets.compare_digest(payload, self._token):
+            self._drop()
+            return False
+        self._authenticated = True
+        return True
 
     def _accept(self) -> bool:
         if self._conn is not None:
@@ -184,14 +233,25 @@ class NetSource:
             return False
         conn.settimeout(_RECV_TIMEOUT_S)
         self._conn = conn
+        self._authenticated = False
         return True
 
-    def _recv_exact(self, n: int) -> bytes | None:
+    def _recv_exact(self, n: int, deadline: float) -> bytes | None:
+        """Read ``n`` bytes without ever exceeding the frame's total deadline."""
         assert self._conn is not None
         chunks: list[bytes] = []
         remaining = n
         while remaining > 0:
-            chunk = self._conn.recv(min(remaining, _RECV_CHUNK))
+            left = deadline - time.monotonic()
+            if left <= 0:
+                self._drop()
+                return None
+            self._conn.settimeout(min(_RECV_TIMEOUT_S, left))
+            try:
+                chunk = self._conn.recv(min(remaining, _RECV_CHUNK))
+            except TimeoutError:
+                self._drop()
+                return None
             if not chunk:
                 self._drop()
                 return None
@@ -203,6 +263,7 @@ class NetSource:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        self._authenticated = False
 
     def restart(self) -> None:
         """Keep the connection: reconnecting is the bridge's job, not the detector's."""
@@ -261,23 +322,79 @@ def parse_source_spec(spec: str) -> SourceSpec:
     return SourceSpec("dir", value)
 
 
-def open_source(spec: str) -> FrameSource:
+def open_source(spec: str, *, net_bind: str | None = None) -> FrameSource:
     """Build the source named by a ``--source`` argument."""
     parsed = parse_source_spec(spec)
     if parsed.kind == "dir":
         return DirSource(parsed.path)
     if parsed.kind == "camera":
         return CameraSource(parsed.index)
-    return NetSource(parsed.port)
+    return NetSource(parsed.port, net_bind or DEFAULT_NET_BIND)
+
+
+def image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Header-only ``(width, height)`` for a JPEG or PNG, or None if it cannot be read."""
+    if data.startswith(_JPEG_SOI):
+        return _jpeg_dimensions(data)
+    if data.startswith(PNG_SIGNATURE):
+        return _png_dimensions(data)
+    return None
+
+
+def _jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Walk JPEG markers to the first SOF segment; never trust the payload length."""
+    index = 2
+    size = len(data)
+    while index + 4 <= size:
+        if data[index] != 0xFF:
+            return None
+        marker = data[index + 1]
+        if marker == 0xFF:  # fill byte
+            index += 1
+            continue
+        if marker in (0x01, 0xD8) or 0xD0 <= marker <= 0xD7:  # no length field
+            index += 2
+            continue
+        segment = int.from_bytes(data[index + 2 : index + 4], "big")
+        if segment < 2:
+            return None
+        if marker in _SOF_MARKERS:
+            if index + 9 > size:
+                return None
+            height = int.from_bytes(data[index + 5 : index + 7], "big")
+            width = int.from_bytes(data[index + 7 : index + 9], "big")
+            return width, height
+        index += 2 + segment  # skip the segment's payload
+    return None
+
+
+def _png_dimensions(data: bytes) -> tuple[int, int] | None:
+    """IHDR is always the first chunk: signature, length, type, width, height."""
+    if len(data) < 24 or data[12:16] != b"IHDR":
+        return None
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    return width, height
 
 
 def decode_frame(frame: FrameData) -> np.ndarray:
-    """Return a BGR image, decoding JPEG bytes only when the source sent bytes."""
+    """Return a BGR image, decoding JPEG/PNG bytes only after checking their dimensions."""
     if isinstance(frame, np.ndarray):
         return frame
+    dimensions = image_dimensions(frame)
+    if dimensions is None:
+        raise ValueError("cannot read frame dimensions")
+    width, height = dimensions
+    if width <= 0 or height <= 0:
+        raise ValueError(f"invalid frame dimensions {width}x{height}")
+    if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+        raise ValueError(
+            f"frame dimensions {width}x{height} exceed {MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}"
+        )
     import cv2
 
-    img = cv2.imdecode(np.frombuffer(frame, dtype=np.uint8), cv2.IMREAD_COLOR)
+    # Reduced decode halves each side: cheap, and the detector letterboxes to 416 anyway.
+    img = cv2.imdecode(np.frombuffer(frame, dtype=np.uint8), cv2.IMREAD_REDUCED_COLOR_2)
     if img is None:
-        raise ValueError("cannot decode JPEG frame")
+        raise ValueError("cannot decode frame")
     return img

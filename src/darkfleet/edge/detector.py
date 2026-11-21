@@ -6,7 +6,9 @@ safety core over a Unix socket. `--mock` needs no camera, model, cv2 or
 onnxruntime.
 
 `--source` is `dir:<path>`, `camera:<index>` or `net:<port>`; a plain path is
-still read as a directory.
+still read as a directory. A network source listens on 127.0.0.1 unless
+`--net-bind HOST` (or `EDGE_NET_BIND`) opens it, and requires `EDGE_NET_TOKEN`
+as the bridge's first message when that variable is set.
 """
 
 from __future__ import annotations
@@ -296,7 +298,8 @@ def run(args: argparse.Namespace) -> int:
         return 3
 
     frames = mock_frames(args.source) if args.mock else None
-    source: FrameSource | None = None if args.mock else open_source(args.source)
+    net_bind = args.net_bind or os.environ.get("EDGE_NET_BIND") or None
+    source: FrameSource | None = None if args.mock else open_source(args.source, net_bind=net_bind)
     model = None if args.mock else OnnxDetector(args.model)
 
     state_dir = args.state_dir or os.path.dirname(os.path.abspath(args.socket))
@@ -369,6 +372,11 @@ def main(argv: list[str] | None = None) -> int:
         "--source",
         required=True,
         help="dir:<path>, camera:<index> or net:<port> (a plain path means a directory)",
+    )
+    parser.add_argument(
+        "--net-bind",
+        default=None,
+        help="address for net:<port> to listen on (default 127.0.0.1; EDGE_NET_BIND also works)",
     )
     parser.add_argument("--socket", required=True, help="safety-core Unix socket")
     parser.add_argument(

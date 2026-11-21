@@ -12,17 +12,18 @@ recorder cache) and nothing else needs configuring at show time.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import time
 import zlib
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from darkfleet.core.tracks import Ping
@@ -38,6 +39,39 @@ SUMMARY_HIDDEN = frozenset({"events", "vessels"})
 HEARTBEAT_SECONDS = 5.0
 POSITIONS_PER_TICK = 200
 GZIP_WBITS = 16 + zlib.MAX_WBITS  # 16 selects the gzip container instead of raw zlib
+# Each open SSE stream holds one async generator, not a worker thread. The cap still bounds
+# per-client memory and the AIS tail work, and is enforced when the route is entered.
+MAX_CONCURRENT_STREAMS = 50
+# One tick reads at most this much compressed data, so a busy hour file cannot be slurped
+# whole (once per client) into RAM.
+MAX_TICK_READ_BYTES = 1 << 20
+
+_active_streams = 0
+
+
+def reset_stream_slots() -> None:
+    """Drop the per-process stream count; tests must not inherit a leaked slot."""
+    global _active_streams
+    _active_streams = 0
+
+
+def active_streams() -> int:
+    """How many SSE streams this process is currently serving."""
+    return _active_streams
+
+
+def _claim_stream_slot() -> bool:
+    """Reserve one stream slot, or refuse when the process is already at the cap."""
+    global _active_streams
+    if _active_streams >= MAX_CONCURRENT_STREAMS:
+        return False
+    _active_streams += 1
+    return True
+
+
+def _release_stream_slot() -> None:
+    global _active_streams
+    _active_streams = max(0, _active_streams - 1)
 
 
 def data_dir() -> Path:
@@ -200,37 +234,84 @@ def get_vessel(region: str, mmsi: int) -> dict[str, Any]:
 
 
 @router.get("/{region}/stream")
-def stream_region(region: str) -> StreamingResponse:
+async def stream_region(region: str, request: Request) -> StreamingResponse:
     """SSE: a heartbeat every 5 s plus positions appended to the recorder since the last tick.
 
     This is the only long-lived call; history stays on the snapshot endpoints, so the stream
-    never replays the past and a reconnecting browser cannot duplicate the map.
+    never replays the past and a reconnecting browser cannot duplicate the map. The stream is
+    an async generator: sleeping here never occupies an anyio worker thread, so idle viewers
+    cannot starve the rest of the API.
     """
     _payload_for(region)  # fail unknown regions before the response headers are sent
+    if not _claim_stream_slot():
+        raise HTTPException(status_code=503, detail="too many live streams")
     return StreamingResponse(
-        event_stream(region),
+        _SlottedStream(event_stream(region, request)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-def event_stream(region: str) -> Iterator[str]:
-    """Yield SSE frames forever; split out so tests can consume one tick without a server.
+class _SlottedStream:
+    """An SSE iterator that releases its process-wide slot exactly once.
+
+    The release lives here rather than in an async-generator ``finally`` because a generator
+    that was never started never runs one, and Starlette may cancel the response task instead
+    of closing it. Every ending — normal stop, cancellation, error, or ``aclose`` — therefore
+    goes through :meth:`release`, so a disconnecting client cannot leak a slot.
+    """
+
+    def __init__(self, inner: AsyncIterator[str]) -> None:
+        self._inner = inner
+        self._released = False
+
+    def __aiter__(self) -> _SlottedStream:
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            return await anext(self._inner)
+        except StopAsyncIteration:
+            self.release()
+            raise
+        except BaseException:
+            # A cancelled or errored response is over; do not leave the slot behind.
+            self.release()
+            raise
+
+    async def aclose(self) -> None:
+        self.release()
+        await self._inner.aclose()  # type: ignore[attr-defined]
+
+    def release(self) -> None:
+        if not self._released:
+            self._released = True
+            _release_stream_slot()
+
+
+async def event_stream(region: str, request: Request | None = None) -> AsyncIterator[str]:
+    """Yield SSE frames until the client disconnects; split out so tests need no server.
 
     The first tick emits only a heartbeat and primes the tail at the current end of the
     recorder file. Positions therefore mean "appended while this client was connected".
+    ``request`` may be omitted (tests): without it the stream runs until cancelled.
     """
     tail = _GzipTail()
     primed = False
     while True:
+        if request is not None and await request.is_disconnected():
+            return
         yield _frame({"type": "heartbeat", "t": int(time.time())})
         root = os.environ.get("DARKFLEET_AIS_DIR")
         if root:
-            positions = tail.poll(Path(root) / region, emit=primed)
+            # Bounded file I/O runs off the event loop; it is a short hop, never a held thread.
+            positions = await asyncio.to_thread(tail.poll, Path(root) / region, emit=primed)
             if positions:
                 yield _frame({"type": "positions", "items": positions})
         primed = True
-        time.sleep(HEARTBEAT_SECONDS)
+        if request is not None and await request.is_disconnected():
+            return
+        await asyncio.sleep(HEARTBEAT_SECONDS)
 
 
 def _frame(payload: dict[str, Any]) -> str:
@@ -265,9 +346,10 @@ class _GzipTail:
     """Incrementally read one growing gzip recording, stopping cleanly at a truncated tail.
 
     The recorder appends through gzip, so at any instant the final deflate block can be
-    half-written. Complete lines before that point are still useful, so a decode error is
-    remembered and the next tick re-reads from byte zero instead of ending the stream.
-    ``_emitted`` lets that resync skip lines the client already received.
+    half-written. Complete lines before that point are still useful, so one decode error per
+    hour file is remembered and the following ticks re-read from byte zero in bounded chunks,
+    skipping the lines the client already received (``_emitted``). A second error does not
+    restart that re-read: a hostile/corrupt file must not make every tick walk the whole file.
     """
 
     def __init__(self) -> None:
@@ -276,7 +358,10 @@ class _GzipTail:
         self._pending = b""
         self._emitted = 0
         self._decompressor: Any = _decompressor()
-        self._resync = False
+        # Byte offset the in-progress resync re-reads up to; None when reading new bytes.
+        self._resync_target: int | None = None
+        self._resync_used = False
+        self._skip = 0  # lines still to drop while re-reading the already-delivered prefix
 
     def poll(self, directory: Path, *, emit: bool) -> list[dict[str, Any]]:
         """Return up to ``POSITIONS_PER_TICK`` new positions from the newest recording file.
@@ -296,22 +381,26 @@ class _GzipTail:
             return []
         if size < self._offset:
             self._reset(path)  # the recorder replaced/truncated the file under us
-        reread = self._resync
-        if reread:
-            self._resync = False
-            self._offset = 0
-            self._pending = b""
-            self._decompressor = _decompressor()
-        if size <= self._offset:
+        if self._resync_target is not None and self._offset >= self._resync_target:
+            self._finish_resync()
+        rereading = self._resync_target is not None
+        limit = MAX_TICK_READ_BYTES
+        if rereading:
+            limit = min(limit, self._resync_target - self._offset)
+        if limit <= 0 or size <= self._offset:
             return []
         try:
             with path.open("rb") as handle:
                 handle.seek(self._offset)
-                raw = handle.read()
+                raw = handle.read(min(limit, size - self._offset))
         except OSError:
             return []
+        if not raw:
+            return []
         self._offset += len(raw)
-        complete = self._consume(raw, reread=reread)
+        complete = self._consume(raw, drop=self._skip if rereading else 0)
+        if rereading and self._offset >= (self._resync_target or 0):
+            self._finish_resync()
         if not emit:
             return []
         items: list[dict[str, Any]] = []
@@ -328,16 +417,32 @@ class _GzipTail:
         self._pending = b""
         self._emitted = 0
         self._decompressor = _decompressor()
-        self._resync = False
+        self._resync_target = None
+        self._resync_used = False
+        self._skip = 0
 
-    def _consume(self, raw: bytes, *, reread: bool) -> list[bytes]:
-        """Decompress appended bytes and return the lines not yet handed to the stream.
+    def _finish_resync(self) -> None:
+        self._resync_target = None
+        self._skip = 0
 
-        A normal incremental read produces only new lines. After a deflate error the next
-        tick re-reads from byte zero, so ``reread`` makes us skip the prefix already sent.
-        """
+    def _schedule_resync(self) -> None:
+        """Plan one re-read from byte zero, or just recover the decoder after a later error."""
+        self._pending = b""  # the half-decoded line is not trustworthy after a deflate error
+        self._decompressor = _decompressor()
+        if self._resync_used or self._resync_target is not None:
+            # Once per hour file: never loop back to byte 0 again, just keep the offset.
+            self._finish_resync()
+            return
+        self._resync_used = True
+        self._resync_target = max(self._offset, 1)
+        self._skip = self._emitted
+        self._offset = 0
+
+    def _consume(self, raw: bytes, *, drop: int = 0) -> list[bytes]:
+        """Decompress bytes and return the complete lines not already handed to the stream."""
         out = bytearray()
         data = raw
+        failed = False
         while data:
             if self._decompressor.eof:
                 # The recorder starts a new gzip member when it reopens the file; gzip files
@@ -346,20 +451,22 @@ class _GzipTail:
             try:
                 out.extend(self._decompressor.decompress(data))
             except zlib.error:
-                self._resync = True
+                failed = True
                 break
             data = self._decompressor.unused_data
         self._pending += bytes(out)
         parts = self._pending.split(b"\n")
         self._pending = parts[-1]  # a partial line waits for the next tick
         complete = parts[:-1]
-        if reread:
-            fresh = complete[self._emitted :]
-            self._emitted = len(complete)
-        else:
-            fresh = complete
-            self._emitted += len(complete)
-        return fresh
+        if drop:
+            dropped = min(drop, len(complete))
+            complete = complete[dropped:]
+            self._skip = drop - dropped
+        self._emitted += len(complete)
+        if failed:
+            # Count this tick's lines before planning the re-read, so the resync skips them.
+            self._schedule_resync()
+        return complete
 
 
 def _position_item(line: bytes) -> dict[str, Any] | None:
