@@ -64,3 +64,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 8:** ~85% DeepSeek; Chief: router wiring, caption copy (script v2), spoofing strictness (offset + teleported-only), wording fixes from the review.
 - **Rule breaks:** time estimate (third time).
 - **Change for next 30 min:** UI briefs that add routes must include main.ts (router) in the file list; copy for captions comes from docs/demo-script.md verbatim (Chief owns words); never type a time, run `date`.
+
+## Sat 21 Nov, 08:55 ET (audit 10, covers 07:54-08:55)
+- **Went well:** four lanes landed (README, architecture, replay #85, 10 m coastline #134); README numbers fact-checked against the snapshot before merge; replay and vessel card gated in real Chrome with zero console errors; CP1 briefing sent.
+- **Went wrong:** PR #137 merged while its CI check was still pending: `gh pr checks --watch` returned before the check registered. CI then passed on the PR and on main, so no harm, but the gate was skipped. A stray copy into the main checkout blocked a pull.
+- **Code share since audit 9:** ~90% DeepSeek; Chief: README fact-check edits, briefing, integration.
+- **Rule breaks:** merge before green CI (once).
+- **Change for next 30 min:** merge only after `gh run watch <id> --exit-status` returns 0 for the PR's run; never copy into the main checkout (worktrees only). Follow-up from the gate: #138 (replay chips should follow the playhead).
