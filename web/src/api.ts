@@ -7,6 +7,9 @@
  */
 
 import type { LiveEvent, LiveRegion, LiveSummary, LiveVessel } from "./model/live";
+// The sample watch snapshot is a local asset (no CDN): Vite rewrites this to the
+// emitted file in a build and serves the source file in dev.
+import watchSampleUrl from "./fixtures/watch.sample.json?url";
 
 export type LonLat = [number, number];
 
@@ -223,6 +226,156 @@ export function fetchLiveEvents(
 /** Latest fix per vessel for one region. */
 export function fetchLiveVessels(region: string, signal?: AbortSignal): Promise<LiveVessel[]> {
   return getJson<LiveVessel[]>(`/api/live/${encodeURIComponent(region)}/vessels`, signal);
+}
+
+// ---- Watch (docs/watch-contract.md; issue #86) ----
+
+/** The five suspicious kinds the watch snapshot can carry. */
+export type WatchAlertKind = "dark" | "spoof" | "jump" | "meeting" | "sanctioned_stop";
+export type WatchAlertStatus = "ongoing" | "ended";
+export type WatchAreaKind = "listening" | "watched";
+export type WatchlistTag = "sanctioned" | "shadow_fleet" | null;
+
+/** A listening area (we record here) or a watched area (we care here). */
+export interface WatchArea {
+  id: string;
+  name: string;
+  kind: WatchAreaKind;
+  /** [lon_min, lat_min, lon_max, lat_max] */
+  bbox: [number, number, number, number];
+}
+
+/** Latest position of one hull heard in the last two hours. */
+export interface WatchShip {
+  mmsi: number;
+  name: string | null;
+  lat: number;
+  lon: number;
+  t: string;
+  sog: number;
+  class: string;
+  watchlist: WatchlistTag;
+  alert_ids: string[];
+}
+
+/** The fix an alert starts from. */
+export interface WatchFix {
+  lat: number;
+  lon: number;
+  t: string;
+  sog: number;
+  cog: number;
+}
+
+/** The fix the ship reappeared at (dark gaps with a known end). */
+export interface WatchNextFix {
+  lat: number;
+  lon: number;
+  t: string;
+}
+
+/** One hull that was near the reach area while the alert was live. */
+export interface WatchContact {
+  mmsi: number;
+  name: string | null;
+  watchlist: WatchlistTag;
+  lat: number;
+  lon: number;
+  t: string;
+  min_dist_km: number;
+  stopped: boolean;
+  could_meet: boolean;
+}
+
+export interface WatchAlert {
+  id: string;
+  kind: WatchAlertKind;
+  status: WatchAlertStatus;
+  mmsi: number;
+  name: string | null;
+  area_id: string | null;
+  severity: number;
+  /** Short, already-written phrase (at most six words). */
+  label: string;
+  t_start: string;
+  t_end: string | null;
+  last: WatchFix;
+  next: WatchNextFix | null;
+  speed_cap_kn: number;
+  contacts: WatchContact[];
+  /** Kind-specific numbers; never parsed as markup. */
+  evidence: Record<string, unknown>;
+}
+
+export interface WatchCounts {
+  ships: number;
+  alerts: number;
+  hidden_routine: number;
+}
+
+/** `GET /api/watch` (docs/watch-contract.md). */
+export interface WatchResponse {
+  generated_at: string;
+  refresh_s: number;
+  areas: WatchArea[];
+  ships: WatchShip[];
+  alerts: WatchAlert[];
+  counts: WatchCounts;
+}
+
+/**
+ * One SSE message on `/api/watch/stream`. `generated_at` is null when the frame
+ * carried no usable JSON: the event still means "the snapshot changed".
+ */
+export type WatchUpdate = (generatedAt: string | null) => void;
+
+export interface WatchStream {
+  close(): void;
+}
+
+/**
+ * The sample snapshot used by `?fixture`: a real-shape replay of the watch
+ * contract, so the screen can be opened with the API down (or on the demo
+ * laptop before the recorder has run). Emitted by Vite as a local asset.
+ */
+export function watchFixtureUrl(): string {
+  return watchSampleUrl;
+}
+
+/** The latest watch snapshot: the world view, every ship, every suspicious alert. */
+export function fetchWatch(signal?: AbortSignal): Promise<WatchResponse> {
+  return getJson<WatchResponse>("/api/watch", signal);
+}
+
+/**
+ * Subscribe to snapshot changes. The server sends `event: update` whenever
+ * watch.json is rewritten (5 s mtime poll); EventSource reconnects on its own,
+ * so a dropped stream is not an error state here.
+ */
+export function watchStream(onUpdate: WatchUpdate): WatchStream {
+  if (typeof EventSource === "undefined") return { close(): void {} };
+
+  const source = new EventSource("/api/watch/stream");
+  const handler = (event: Event): void => {
+    let generatedAt: string | null = null;
+    const data = (event as MessageEvent<unknown>).data;
+    if (typeof data === "string") {
+      try {
+        const parsed = JSON.parse(data) as { generated_at?: unknown };
+        generatedAt = typeof parsed.generated_at === "string" ? parsed.generated_at : null;
+      } catch {
+        // Not JSON: the frame still says the file changed.
+      }
+    }
+    onUpdate(generatedAt);
+  };
+  source.addEventListener("update", handler);
+  return {
+    close(): void {
+      source.removeEventListener("update", handler);
+      source.close();
+    },
+  };
 }
 
 // ---- Edge unit (src/darkfleet/api/edge.py; contract for issue #36) ----
