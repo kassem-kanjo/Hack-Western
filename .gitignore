@@ -1,0 +1,21 @@
+# secrets
+.env
+.env.*
+!.env.example
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# node
+node_modules/
+dist/
+.vite/
+# data caches and models (large / regenerable)
+data/cache/
+*.onnx
+# os
+.DS_Store
+# agent scratch
+.worktrees/
