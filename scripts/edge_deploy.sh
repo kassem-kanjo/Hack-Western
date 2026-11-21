@@ -116,8 +116,8 @@ copy_file "$MODEL_SRC" "$REMOTE_DIR/models/yolox_nano.onnx"
 # --- readiness --------------------------------------------------------------
 
 echo "== readiness on $TARGET =="
-if ! ssh "${SSH_OPTS[@]}" "$TARGET" 'uname -a; python3 --version; python3 -c "import onnxruntime"'; then
-    echo "readiness check failed; install python3 onnxruntime and opencv-python-headless on the Pi" >&2
+if ! ssh "${SSH_OPTS[@]}" "$TARGET" 'uname -a; python3 --version; python3 -c "import numpy, cv2; import importlib.util as u; print(\"numpy\", numpy.__version__, \"cv2\", cv2.__version__, \"(onnxruntime or OpenCV DNN will run the model)\")"'; then
+    echo "readiness check failed; on the Pi run: sudo apk add python3-numpy python3-opencv (python3-onnxruntime optional)" >&2
     exit 5
 fi
 

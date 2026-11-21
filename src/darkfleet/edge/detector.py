@@ -127,11 +127,34 @@ def mock_frames(source: str) -> list[tuple[str, list[Box]]]:
 
 
 class OnnxDetector:
-    def __init__(self, model_path: str) -> None:
-        import onnxruntime as ort
+    """YOLOX-nano on onnxruntime, or on OpenCV's DNN engine when onnxruntime can't load.
 
-        self._session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
-        self._input_name = self._session.get_inputs()[0].name
+    The fallback exists because QNX's python3-onnxruntime 1.24.4-r0 (repo.oss.qnx.com, 8.0.x)
+    ships without its compiled pybind module, so `import onnxruntime` fails on the Pi; OpenCV
+    4.12 from the same repository runs the same ONNX graph. `engine` names the one in use.
+    """
+
+    def __init__(self, model_path: str) -> None:
+        self._session = None
+        self._net = None
+        try:
+            import onnxruntime as ort
+
+            self._session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+            self._input_name = self._session.get_inputs()[0].name
+            self.engine = f"onnxruntime {ort.__version__}"
+        except ImportError:
+            import cv2
+
+            self._net = cv2.dnn.readNetFromONNX(str(model_path))
+            self.engine = f"opencv-dnn {cv2.__version__}"
+        print(f"detector: inference engine {self.engine}", file=sys.stderr)
+
+    def _run(self, blob: np.ndarray) -> np.ndarray:
+        if self._session is not None:
+            return self._session.run(None, {self._input_name: blob})[0]
+        self._net.setInput(blob)
+        return self._net.forward()
 
     def detect(self, img: np.ndarray, score_min: float) -> list[Box]:
         import cv2
@@ -142,7 +165,7 @@ class OnnxDetector:
         canvas = np.full((INPUT_SIZE, INPUT_SIZE, 3), PAD_VALUE, dtype=np.uint8)
         canvas[:new_h, :new_w] = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         blob = canvas.transpose(2, 0, 1)[None].astype(np.float32)
-        output = self._session.run(None, {self._input_name: blob})[0]
+        output = self._run(blob)
         return decode_yolox(np.asarray(output)[0], ratio, score_min)
 
 
