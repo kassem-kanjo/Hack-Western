@@ -1,0 +1,1 @@
+- [OpenCode worker patterns](opencode-worker-patterns.md) — delegate.sh worked for scaffold; uv not on worker PATH; apply diff.patch then run gate yourself
