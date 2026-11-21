@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 15:35 ET · next checkpoint: CP1 decisions from Kassem · plan: docs/plan.md v3 · briefing: docs/briefings/cp1-sat-morning.md
+Updated: Sat 21 Nov, 16:00 ET · next checkpoint: CP1 decisions from Kassem · plan: docs/plan.md v3 · briefing: docs/briefings/cp1-sat-morning.md
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
@@ -22,6 +22,7 @@ Vultr sign-up (deploy + recorder off the laptop) · MLH codes (Entire, GoDaddy) 
 optional: free Copernicus account (own radar ship detection, #90).
 
 ## Done (merged)
+Sat 21 Nov, 16:00 ET: external Opus audit (scores 4-8; verdict: deep engine, app undersold it). Fixed: sanctions labels from exact IMO only (#189; 113 → 16 ships, 12 alerts). Hormuz 2-year radar series (475 days, in Tiger) shows not-broadcasting share 21-30% in 2025 → 61-72% Mar-Jun 2026, coinciding with the 28 Feb 2026 strikes and strait closure (35 sourced events in data/research/hormuz_events.json); unvalidated until the control-area test (#188). Running: Watch builder (nav, Hormuz view, live motion), Pi builder (sub-second recovery, real detection), satellite builder (own Sentinel-1 detection), lanes #182-#186, #188, #190.
 Sat 21 Nov, 15:35 ET V2: Watch screen (global map, analyst style, live 5-min alerts, trails, Hormuz radar alert) #171 #174 #177; Mac app #175 #176; security fixes #172; QNX: OpenCV DNN fallback #169, qnxcam #173, real-time priorities + stress #178; false-alarm rules #179. Running: Pi camera into pipeline (w30), Patrol demo screen (w31), rule wiring + freshness (w32). Then QA pass, CP3 review, Kassem reviews V2.
 Sat 21 Nov, 14:50 ET: QNX Pi 5 online (Hack Western 13 wifi, key SSH); edge unit deployed and running on QNX with OpenCV DNN (#169). Open: detector heartbeat while waiting for network frames; webcam on the Pi. UI V3 Watch screen: core merged (#166), UI + pipeline on branch integ/wave22-ui, alert tuning in review. Security fixes lane running. Recorder watchdog added.
 Story approved by Kassem (Sat 21 Nov, 13:09 ET): Hormuz, then live Baltic, then Patrol unit (decision 0002). QNX Pi 5 + webcam in hand; edge unit tested on laptop (#157); Pi needs wifi before deploy.
