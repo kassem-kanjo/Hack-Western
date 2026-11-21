@@ -20,7 +20,7 @@ We tested our own method before trusting it.
 - Locating a dark ship works: the Brownian-bridge model puts the true position above a displaced one with **AUC 0.87** (0.844 to 0.896).
 - We never accuse on radar alone. Physics clears most cases with a stated reason: stationary, outside the lens at the satellite's real pass time, out of reach at class speed, or a pass outside the gap.
 - The held-out test outside Brazil was inconclusive (4 real against 5.7 shifted), not evidence of a signal.
-- On our own Baltic tracks: when we hide a stretch of a real ship's route, the space-time prism holds the hidden route in **62 of 66** windows (93.9%), and the jump and clone rules fire about once per 86 vessel-days on clean tracks.
+- On our own Baltic tracks: when we hide a stretch of a real ship's route, the space-time prism holds the hidden route in **62 of 66** windows (93.9%), and the jump and clone rules fired once in 87.1 vessel-days of clean tracks.
 - The silence rule only claims ships that were underway and only while our receivers were hearing the area. Every gap it missed in testing fell inside minutes when our own recorder heard nothing; where receivers were up, it found **55 of 55** (`docs/recall-misses.md`).
 
 Full method, numbers and caveats: `docs/validation.md`, `docs/validation-tracks.md`.
