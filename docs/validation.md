@@ -135,3 +135,82 @@ Recall by gap type:
 - A land mask and radar fetched around shifted prisms would allow the spatial shuffle.
 
 Data: Global Fishing Watch (CC BY-NC 4.0). Powered by Global Fishing Watch.
+
+## Experiment 2: Brownian-bridge model (pre-registered 2026-11-21, before the run)
+
+Hypothesis: the binary prism is too large to be specific (Test 2 above: it contains a position moved 50 to 150 km 98.4% of the time), but a Brownian-bridge movement model (Horne et al. 2007, Ecology 88:2354) is specific, so radar cells that score high under it beat chance.
+
+Model. Ship seen at A (time t0) and B (t1), T hours apart. At time t with tau = (t - t0)/T the mean position is the geodesic interpolation from A to B and the variance per axis is sigma^2 * tau * (1 - tau) * T km^2 (sigma in km per square-root hour; variance floored at 1 km^2 at the ends). The density is truncated to the prism by giving -infinity to any point outside the exact lens at that time (the normalising constant of the truncation is ignored; it is a per-gap constant).
+
+Steps, fixed in advance:
+1. Fit sigma once by maximum likelihood on the synthetic recall cases of Test 2 only (known position of the ship at the time of its middle event; closed form sigma^2 = sum(d_i^2 / w_i) / (2n), where d is the distance of the true position from the bridge mean and w = tau(1 - tau)T). Radar is not used for fitting. The fit ignores truncation.
+2. For each real gap of 48 hours or less in the 15 radar cells, score = the maximum over its unmatched radar cells of the bridge log-density, taking each cell's best value over the 30-minute sample times of its scene day at which the cell centre is inside the lens. Cells are tested by centre point against the exact lens (not the 0.01 degree box used in Test 1), so counts differ slightly from Test 1.
+3. Null: the same score with each gap shifted by 7 to 21 days, K = 50 shuffles, same shift rule as Test 1. Reported: (a) the number of gaps with any scorable cell, real vs shuffled; (b) the mean score over scorable gaps, real vs the 50 shuffled means; (c) the number of real gaps whose score exceeds the 95th percentile of the pooled shuffled scores, against the count expected by chance (the mean over shuffles of the same count, about 5% of scorable gaps); (d) recall-side check: AUC of the true position's bridge log-density against 20 positions displaced 50 to 150 km at random per case (bootstrap interval over cases). Within one case the ranking depends only on distance from the bridge mean, so the AUC does not depend on sigma.
+4. Verdict: signal if the interval of the count ratio in (c) excludes 1 or the p-value of (b) or (c) is below 0.05 and the AUC interval in (d) excludes 0.5; otherwise no signal. Both outcomes are reported as they come out; no parameter is changed after seeing results.
+
+### Results (Experiment 2)
+Fitted sigma = 21.62 km per square-root hour from 151 recall cases. Gaps of 48 hours or less in the 15 radar cells: 1,258. K = 50 shifted-prism shuffles.
+
+| Measure | Real | Shifted (mean, 95% range) | Ratio or p |
+| --- | --- | --- | --- |
+| Gaps with a scorable radar cell | 89 | 86.5 (71.7 to 100.3) | ratio 1.03, p 0.431 |
+| Mean best log-density over scorable gaps | -20.67 | -21.30 (-22.84 to -19.74) | p 0.275 |
+| Gaps above the null 95th percentile (-10.71) | 5 | 4.3 (2.0 to 8.0); 5% of scorable gaps = 4.5 | ratio 1.16 (0.27 to 2.39), p 0.431 |
+
+Recall-side check: the true position's bridge density beats a position displaced 50 to 150 km in 87.0% of 3,020 pairs (AUC 0.870, 95% interval 0.844 to 0.896, 151 cases).
+
+Verdict: no signal. (Rule from the pre-registration: signal needs the count ratio interval above 1 or p < 0.05 on the mean score or the count, and the AUC interval above 0.5.)
+
+Reading: the hypothesis is half right. The bridge is specific about where a ship is (AUC 0.87 against displaced positions, where the binary prism scored 98.4% for displaced points), but the radar cells it finds in dark-gap prisms score the same as cells found in time-shifted prisms (5 gaps above the null 95th percentile against 4.3 expected). A specific model does not create a signal the data lacks. Deviations from the pre-registration: 151 recall cases were used for the fit (the 146 of Test 1 excluded 5 whose polygon union failed; the bridge scoring uses exact point-in-lens tests and does not hit that error); the GEOS error in `core/prism.py` (issue #45) was left unfixed.
+
+## Experiment 3: held-out test outside Brazil (pre-registered 2026-11-21, before any data was fetched)
+
+Why. Test 1 showed the excess over shifted prisms, if any, sits outside the two Brazilian oil-field cells (14 vs 9.8, 18 vs 13.5, 8 vs 5.4 shifted). That was seen after the fact, so it needs new data.
+
+Hypothesis. Outside the Brazilian offshore oil-field cells, dark gaps have more unmatched radar inside their prism than time-shifted gaps.
+
+Fixed in advance:
+- Data: GFW AIS-gap events from 2026-05-01 to 2026-08-14 (never used in Tests 1 or 2 or Experiment 2). Unmatched radar fetched per cell for 2026-04-10 to 2026-09-04 (the gap window plus the largest shift of 21 days each side). The radar days 15 Aug to 4 Sep were fetched earlier for other gaps in Test 1; no hypothesis was tested on them.
+- Cells (5 x 5 degree, written as south-west corner lat, lon; the 15 cells of the region scan minus the two Brazilian ones): (40,170), (0,165), (-20,-80), (5,-50), (10,-170), (40,155), (40,175), (-35,95), (-35,100), (40,150), (-20,170), (10,-50), (-20,-130). Removed: (-30,-45) and (-25,-45). All gaps whose midpoint falls in these cells are used, with no re-ranking by count.
+- Filters: non-gear vessels, gap 6 to 96 hours, moving gaps only (off and on at least 5 km apart), radar cells at the same coordinates on 3 or more days in the fetched range dropped.
+- Test: the day-lens test and the K = 50 shifts of 7 to 21 whole days exactly as in Test 1 (same code, `scripts/validate_holdout.py` reusing `scripts/validate.py`).
+- Primary metric: real count of gaps with at least one candidate cell divided by the mean shifted count, with a gap-bootstrap 95% interval. Signal if and only if the interval's lower bound is above 1.
+- Secondary (reported, not decisive): the Experiment 2 procedure unchanged (sigma = 21.62 from `data/validation/bridge_results.json`, gaps of 48 hours or less, scoring rule and count above the null 95th percentile, no moving or recurring-cell filter), signal under the Experiment 2 rule on the count ratio interval or the mean-score p-value.
+- No other analysis counts. Budget: at most 1,500 live GFW requests. Whatever the result, it is reported as it comes out; if there are too few gaps with any radar to say anything, the verdict is "inconclusive", not "signal".
+
+### Results (Experiment 3)
+Live GFW requests: 567. 100,330 gap events in 2026-05-01 to 2026-08-14; 133 non-gear gaps of 6 to 96 h have their midpoint in the 13 cells, of which 123 are moving gaps. 4 of the 13 cells have any radar in the window.
+
+| Cell | Gaps | Radar cells fetched |
+| --- | --- | --- |
+| 40..45N, 170..175E | 1 | 0 |
+| 0..5N, 165..170E | 23 | 0 |
+| -20..-15N, -80..-75E | 48 | 334 |
+| 5..10N, -50..-45E | 3 | 99 |
+| 10..15N, -170..-165E | 0 | 0 |
+| 40..45N, 155..160E | 8 | 0 |
+| 40..45N, 175..180E | 4 | 0 |
+| -35..-30N, 95..100E | 26 | 0 |
+| -35..-30N, 100..105E | 5 | 0 |
+| 40..45N, 150..155E | 8 | 80 |
+| -20..-15N, 170..175E | 4 | 6 |
+| 10..15N, -50..-45E | 1 | 0 |
+| -20..-15N, -130..-125E | 2 | 0 |
+
+Primary (day-lens, moving gaps, recurring radar cells dropped, K = 50 shifts of 7 to 21 days):
+
+| Real | Shifted mean (95% range) | Ratio (gap-bootstrap 95% interval) | p |
+| --- | --- | --- | --- |
+| 4 | 5.7 (3.0 to 9.8) | 0.70 (0.15 to 1.37) | 0.863 |
+
+Primary verdict: inconclusive (fewer than 20 real hits).
+
+Secondary, bridge score (Experiment 2 procedure, 118 gaps of 48 h or less, 1 with a scorable cell):
+
+- Scorable gaps: 1 real vs 3.1 shifted.
+- Mean best log-density: -19.22 real vs -22.87 shifted, p 0.255.
+- Gaps above the null 95th percentile (-10.58): 0 real vs 0.1 expected; ratio 0.00 (0.00 to 0.00), p 1.000.
+
+Secondary verdict: no signal.
+
+Reading: the held-out test is underpowered, not negative evidence of anything. The 13 cells were picked from the Aug to Nov gap counts, and in May to August they held only 133 qualifying gaps (123 moving); 9 of the 13 cells had no radar in the window at all, and 4 real hits is below the 20 the pre-registration treats as enough to say anything. The point estimate (4 real vs 5.7 shifted, ratio 0.70, interval 0.15 to 1.37) does not support the Test 1 post-hoc excess, but cannot rule it out. The "fewer than 20 real hits" threshold for "inconclusive" was fixed in the runner before the run but not written in the pre-registration text above; it is stated here. A decisive version needs the cells chosen from the holdout period's own gap counts (a new pre-registration) or a longer window.

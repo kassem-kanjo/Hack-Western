@@ -1,0 +1,120 @@
+{
+ "events_total": 100330,
+ "cells": [
+  {
+   "cell": "40..45N, 170..175E",
+   "gaps": 1,
+   "sar_cells": 0
+  },
+  {
+   "cell": "0..5N, 165..170E",
+   "gaps": 23,
+   "sar_cells": 0
+  },
+  {
+   "cell": "-20..-15N, -80..-75E",
+   "gaps": 48,
+   "sar_cells": 334
+  },
+  {
+   "cell": "5..10N, -50..-45E",
+   "gaps": 3,
+   "sar_cells": 99
+  },
+  {
+   "cell": "10..15N, -170..-165E",
+   "gaps": 0,
+   "sar_cells": 0
+  },
+  {
+   "cell": "40..45N, 155..160E",
+   "gaps": 8,
+   "sar_cells": 0
+  },
+  {
+   "cell": "40..45N, 175..180E",
+   "gaps": 4,
+   "sar_cells": 0
+  },
+  {
+   "cell": "-35..-30N, 95..100E",
+   "gaps": 26,
+   "sar_cells": 0
+  },
+  {
+   "cell": "-35..-30N, 100..105E",
+   "gaps": 5,
+   "sar_cells": 0
+  },
+  {
+   "cell": "40..45N, 150..155E",
+   "gaps": 8,
+   "sar_cells": 80
+  },
+  {
+   "cell": "-20..-15N, 170..175E",
+   "gaps": 4,
+   "sar_cells": 6
+  },
+  {
+   "cell": "10..15N, -50..-45E",
+   "gaps": 1,
+   "sar_cells": 0
+  },
+  {
+   "cell": "-20..-15N, -130..-125E",
+   "gaps": 2,
+   "sar_cells": 0
+  }
+ ],
+ "requests_live": 567,
+ "primary": {
+  "n_gaps_kept_in_cells": 133,
+  "n_gaps_tested": 123,
+  "real": 4,
+  "k": 50,
+  "shuffled_mean": 5.72,
+  "shuffled_sd": 1.9063802648699744,
+  "null_lo": 3.0,
+  "null_hi": 9.774999999999999,
+  "ratio": 0.6993006993006993,
+  "p_value": 0.8627450980392157,
+  "ratio_lo": 0.15051381998582564,
+  "ratio_hi": 1.372575953458306,
+  "interpretation": "not distinguishable from chance (interval includes 1)"
+ },
+ "primary_verdict": "inconclusive (fewer than 20 real hits)",
+ "secondary_bridge": {
+  "n_gaps_le_48h": 118,
+  "scorable_real": 1,
+  "scorable_gaps": {
+   "real": 1,
+   "k": 50,
+   "shuffled_mean": 3.1,
+   "shuffled_sd": 1.2330483215451478,
+   "null_lo": 1.0,
+   "null_hi": 5.0,
+   "ratio": 0.3225806451612903,
+   "p_value": 1.0
+  },
+  "mean_score": {
+   "real": -19.218225699494475,
+   "shuffled_mean": -22.873453500967372,
+   "p_value": 0.2549019607843137
+  },
+  "exceed": {
+   "threshold": -10.58434707103215,
+   "real": 0,
+   "k": 50,
+   "shuffled_mean": 0.1,
+   "shuffled_sd": 0.30304576336566325,
+   "null_lo": 0.0,
+   "null_hi": 1.0,
+   "ratio": 0.0,
+   "p_value": 1.0,
+   "ratio_lo": 0.0,
+   "ratio_hi": 0.0
+  },
+  "verdict": "no signal"
+ }
+}
