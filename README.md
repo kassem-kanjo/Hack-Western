@@ -2,6 +2,8 @@
 
 Finds ships that hide, using physics: where a ship could have been, whether it could really have got there, and whether radar saw it.
 
+![Four unrelated ships jumping to the same point on land near St Petersburg and back: a spoofed position caught by physics](docs/media/hero.png)
+
 ## What it found
 
 - **The Strait of Hormuz.** On a typical well-covered day, **41%** of the vessels radar sees around the strait have no matching location broadcast. That is the median over **59 well-covered days**, 15 August to 15 November. Source: `docs/briefings/cp1-sat-morning.md`, `docs/insights.md`.
@@ -18,15 +20,17 @@ We tested our own method before trusting it.
 - Locating a dark ship works: the Brownian-bridge model puts the true position above a displaced one with **AUC 0.87** (0.844 to 0.896).
 - We never accuse on radar alone. Physics clears most cases with a stated reason: stationary, outside the lens at the satellite's real pass time, out of reach at class speed, or a pass outside the gap.
 - The held-out test outside Brazil was inconclusive (4 real against 5.7 shifted), not evidence of a signal.
+- On our own Baltic tracks: when we hide a stretch of a real ship's route, the space-time prism holds the hidden route in **62 of 66** windows (93.9%), and the jump and clone rules fire about once per 86 vessel-days on clean tracks.
+- The silence rule only claims ships that were underway and only while our receivers were hearing the area. Every gap it missed in testing fell inside minutes when our own recorder heard nothing; where receivers were up, it found **55 of 55** (`docs/recall-misses.md`).
 
-Full method, numbers and caveats: `docs/validation.md`.
+Full method, numbers and caveats: `docs/validation.md`, `docs/validation-tracks.md`.
 
 ## How it works
 
 - **Recorder.** One aisstream WebSocket, six regions, hourly gzip files.
 - **Engine.** Silences with local coverage, impossible jumps, spoofing ghost points, meetings with anchorage context, IMO watchlist.
 - **Global investigation.** Global Fishing Watch gaps, a space-time prism plus Brownian bridge, and Sentinel-1 scene times.
-- **Storage.** Tiger Data / TimescaleDB, with continuous aggregates for the daily view.
+- **Storage.** Tiger Data / TimescaleDB: our recorded positions (265,250 at the last load), radar cells and encounters as hypertables; an hourly continuous aggregate drives the recording chart on the Global screen.
 - **API.** FastAPI, read-only JSON, snapshot mode for an offline demo.
 - **Console.** Vite + TypeScript + MapLibre, offline basemap, presentation mode.
 
