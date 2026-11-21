@@ -97,3 +97,41 @@ per field if a file is missing, and is `null` as a whole in the API fallback.
 
 ## GET /api/live/silences (optional, Baltic)  ·  GET /api/edge/status (optional, QNX)
 Shapes defined in their issues (#19, #14) if those survive the cut.
+
+## GET /api/hormuz/unseen  ·  GET /api/hormuz/history
+Snapshot reads for the Global screen's Hormuz block, served verbatim from
+`data/snapshot/hormuz_unseen.json` and `data/snapshot/hormuz_history.json`. Both answer
+`404 {"detail": "snapshot missing: <file>"}` when the file was never built.
+
+`/api/hormuz/unseen` — radar saw this many vessels per day, and this many were not broadcasting:
+```json
+{ "region": "HORMUZ",
+  "period": { "start": "2026-08-15", "end": "2026-11-15" },
+  "daily": [ { "day": "2026-08-15", "seen": 64, "broadcasting": 46, "dark": 18, "dark_share": 0.28125 } ],
+  "grid": [ { "lat": 23.55, "lon": 58.65, "n": 1 } ],
+  "summary": { "days": 84, "seen_total": 36933, "dark_total": 19082,
+               "dark_share_mean": 0.453, "dark_share_ci": [0.410, 0.502],
+               "busiest_day": "2026-11-12" },
+  "source": "Global Fishing Watch SAR vessel detections (Sentinel-1)",
+  "caveats": [ "Radar misses vessels under ~25 m", "'Dark' means no AIS match, not wrongdoing" ] }
+```
+`grid`: one cell per 0.1° square with at least one unmatched (dark) radar detection; `n` is
+that cell's count. Newer snapshots may add `summary.headline_share`, `summary.median` and
+`summary.iqr` (the robust daily share and its spread); the UI prefers them and falls back to
+`dark_share_mean`.
+
+`/api/hormuz/history` — GFW encounters and loitering events, plus the ranked hotspots:
+```json
+{ "region": "HORMUZ",
+  "period": { "start": "2026-08-15", "end": "2026-11-15" },
+  "encounters": [ { "id": "...", "start": "...Z", "end": "...Z", "lat": 23.69, "lon": 58.18,
+                    "vessel": { "name": "...", "mmsi": "...", "flag": "OMN", "type": "fishing" },
+                    "median_distance_km": 0.031, "median_speed_kn": 0.001, "other": {...} } ],
+  "loitering": [ { "id": "...", "start": "...Z", "end": "...Z", "lat": 25.71, "lon": 56.89,
+                   "hours": 597.2, "vessel": {...}, "distance_from_shore_km": 42.0 } ],
+  "counts": { "encounters": 38, "loitering": 6864, "total": 6902 },
+  "hotspots": [ { "lat": 24.85, "lon": 56.85, "n": 155 } ],
+  "source": "Powered by Global Fishing Watch, v3 events API (...)",
+  "caveats": [ "GFW events are AIS-based: ships with AIS off are not in this layer" ] }
+```
+`hotspots` are the ten busiest 0.1° cells of loitering events, `n` = events in the cell.

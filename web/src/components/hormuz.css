@@ -1,0 +1,168 @@
+/* Hormuz rail block (#88/#89). Tokens only: violet radar cells, blue rim,
+   white loitering rings, amber reserved for the overview hero. */
+
+.hormuz h3 {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-1);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hormuz-period {
+  margin: 0 0 var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.hormuz-lede {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  color: var(--c-text-1);
+}
+
+.hormuz-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+
+.hormuz-chart .grid {
+  stroke: var(--c-line);
+  stroke-width: 1;
+}
+
+.hormuz-chart .axis {
+  fill: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hormuz-chart .area {
+  fill: var(--c-prism-fill);
+}
+
+.hormuz-chart .band {
+  fill: var(--c-prism-fill);
+}
+
+.hormuz-chart .line {
+  fill: none;
+  stroke: var(--c-sar);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hormuz-chart .ref {
+  stroke: var(--c-prism-stroke);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.hormuz-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.hormuz-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.hormuz-toggle .key {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.hormuz-toggle[data-layer="radar"] .key {
+  background: var(--c-prism-stroke);
+  box-shadow: inset 0 0 0 1.5px var(--c-sar);
+}
+
+.hormuz-toggle[data-layer="hotspots"] .key {
+  border: 1.5px solid var(--c-text-1);
+}
+
+.hormuz-toggle:hover:not(:disabled) {
+  border-color: var(--c-text-2);
+}
+
+.hormuz-toggle[aria-pressed="true"] {
+  background: var(--c-panel-raised);
+  border-color: var(--c-text-2);
+  color: var(--c-text-1);
+}
+
+.hormuz-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hormuz-toggle:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.hormuz-key {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.hormuz-caveats {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--c-line);
+  font-size: var(--fs-label);
+}
+
+.hormuz-caveats summary {
+  color: var(--c-text-2);
+  cursor: pointer;
+}
+
+.hormuz-caveats summary:hover {
+  color: var(--c-text-1);
+}
+
+.hormuz-caveats ul {
+  margin: var(--sp-2) 0 0 18px;
+  padding: 0;
+  color: var(--c-text-2);
+}
+
+.hormuz-caveats li {
+  margin-bottom: 4px;
+}
+
+.hormuz-caveats .source {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-text-3);
+}
+
+.hormuz-error {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--c-text-3);
+}
