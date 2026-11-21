@@ -1,0 +1,54 @@
+/* Screen layout for the two routes. Structure only: colours, type and spacing
+   all come from tokens.css / console.css. */
+
+/* Case file: map fills the stage, the 230px timeline (console.css) is the
+   auto-sized second row. */
+.stage-case {
+  display: grid;
+  grid-template-rows: 1fr auto;
+}
+
+/* Positioning context for the map and its overlay chips/legend/attribution. */
+.map-area {
+  position: relative;
+  min-height: 0;
+}
+
+/* Map chips clear the topbar on the case view and the KPI strip on the
+   overview, so the offset is set per stage rather than once globally. */
+.stage .map-chips {
+  position: absolute;
+  top: 16px;
+}
+
+.stage-overview .map-chips {
+  top: 116px; /* KPI strip height plus a gap */
+}
+
+.map-chips a.chip-pill {
+  color: var(--c-text-2);
+  text-decoration: none;
+}
+
+.chip-pill.is-gap {
+  color: var(--c-gap);
+  border-color: var(--c-gap);
+}
+
+/* MapLibre needs a sized, absolutely positioned container to pan inside. */
+.stage-overview .map,
+.map-area #map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Loading / empty line, used in flow so it never floats over a map. */
+.empty {
+  padding: var(--sp-5);
+  color: var(--c-text-3);
+}
+
+/* console.css draws the banner but leaves the inset to the container. */
+.banner {
+  margin: var(--sp-4) var(--sp-5);
+}
