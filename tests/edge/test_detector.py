@@ -234,6 +234,7 @@ def test_detector_heartbeats_while_waiting_for_frames(
             nice=0,
             score_min=0.3,
             input_size=416,
+            rt_priority=0,
             standby=False,
         )
         thread = threading.Thread(target=detector.run, args=(args,), daemon=True)

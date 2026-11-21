@@ -223,7 +223,7 @@ def test_mock_run_reports_alerts_and_writes_alert_log(state_dir):
             timeout=10,
             label="first alert",
         )
-        assert status["last_alert"]["kind"] == "VESSEL NOT BROADCASTING"
+        assert status["last_alert"]["kind"] == "not_on_ais"
         alerts_path = os.path.join(state_dir, "alerts.jsonl")
         assert os.path.getsize(alerts_path) > 0
     finally:

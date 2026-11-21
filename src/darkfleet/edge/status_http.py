@@ -35,6 +35,8 @@ from urllib.parse import parse_qs, urlsplit
 STATUS_PATH = "/edge_status.json"
 FRAME_PATH = "/latest.jpg"
 DECISION_PATH = "/latest_decision.json"
+AB_PATH = "/ab_result.json"
+AB_NAME = "ab_result.json"
 LATEST_FRAME_NAME = "latest.jpg"
 DECISION_NAME = "latest_decision.json"
 DEFAULT_BIND = "127.0.0.1"
@@ -65,6 +67,7 @@ class _StatusServer(ThreadingHTTPServer):
         # Fixed sibling paths, never derived from the request.
         self.latest_path = status_path.parent / LATEST_FRAME_NAME
         self.decision_path = status_path.parent / DECISION_NAME
+        self.ab_path = status_path.parent / AB_NAME
         self.control_dir = status_path.parent / CONTROL_DIR
         self.token = token.encode("utf-8") if token else None
         self.last_control: dict[str, float] = {}  # route -> monotonic time of the last write
@@ -156,6 +159,8 @@ class _StatusHandler(BaseHTTPRequestHandler):
             self._serve_frame(send_body)
         elif route == DECISION_PATH:
             self._serve_decision(send_body)
+        elif route == AB_PATH:
+            self._serve_json_file(self.server.ab_path, send_body)  # type: ignore[attr-defined]
         else:
             self._send(_NOT_FOUND, b'{"error":"not found"}', send_body)
 
@@ -189,6 +194,16 @@ class _StatusHandler(BaseHTTPRequestHandler):
             self._send(_NOT_FOUND, b'{"error":"no frame"}', send_body)
             return
         self._send(200, body, send_body, "image/jpeg")
+
+    def _serve_json_file(self, path: Path, send_body: bool) -> None:
+        """A small JSON file next to the status file (the A/B result), validated before serving."""
+        try:
+            body = path.read_bytes()
+            json.loads(body)
+        except (OSError, ValueError):
+            self._send(_NOT_FOUND, b'{"error":"not available"}', send_body)
+            return
+        self._send(200, body, send_body, "application/json")
 
     def _serve_decision(self, send_body: bool) -> None:
         """The per-frame decision, validated like the status file so half a write is never served."""

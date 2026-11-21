@@ -68,6 +68,20 @@ def try_fifo(priority: int) -> tuple[bool, dict[str, Any]]:
     return True, current_schedule()
 
 
+def try_rr(priority: int) -> tuple[bool, dict[str, Any]]:
+    """Ask for ``SCHED_RR`` at ``priority`` (the AI and the camera helper sit below the core)."""
+    setter = getattr(os, "sched_setscheduler", None)
+    rr = getattr(os, "SCHED_RR", None)
+    param_cls = getattr(os, "sched_param", None)
+    if setter is None or rr is None or param_cls is None:
+        return False, current_schedule()
+    try:
+        setter(0, rr, param_cls(priority))
+    except (OSError, AttributeError, ValueError):
+        return False, current_schedule()
+    return True, current_schedule()
+
+
 def drop_realtime() -> dict[str, Any]:
     """Return the calling process to ``SCHED_OTHER`` at priority 0.
 

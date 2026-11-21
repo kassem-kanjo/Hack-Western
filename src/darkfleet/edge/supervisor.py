@@ -61,7 +61,17 @@ class SupervisorConfig:
     restart_backoff_s: float = 0.5
     set_priority: bool = True
     fifo_priority: int = 25  # the supervisor sits below the safety core (30)
-    detector_nice: int = 10  # the detector and the stress workers share this priority
+    detector_nice: int = 10  # the detector's ordinary-class priority when it is not guarded
+    # Priority guard (QNX fixed-priority scheduling; this image has no adaptive partitioning):
+    # safety core FIFO 30 > supervisor FIFO 25 > camera helper RR 15 > AI RR 12 > everything else (8).
+    # The AI must stay BELOW the camera helper: at RR 20 its spinning OpenCV threads starved the
+    # camera service on the Pi and the stream stopped after 3 frames (measured).
+    # guard=False puts the core, the AI and the camera at the default class: the A/B baseline.
+    guard: bool = True
+    detector_rt: int = 12
+    camera_rt: int = 15
+    stress_nice: int = 0  # the "runaway load" runs at the ordinary default priority
+    act_led: bool = False  # drive the Pi 5 ACT LED from the decision file
     stress_workers: int | None = None  # default: one per core
     stress_seconds: float = 10.0  # default when the stress file is empty
     # QNX webcam: "<unit>:<path>" spawns the qnxcam helper at the detector's priority.
@@ -124,6 +134,7 @@ class Supervisor:
         self.safety = _Child("safety_core")
         self.detector = _Child("detector")
         self.standby = _Child("standby")
+        self.indicator = _Child("indicator")
         self._standby_retry_at = 0.0
         self.camera = _Child("qnxcam")
         self.stats = _Stats()
@@ -151,6 +162,7 @@ class Supervisor:
             self._wait_for_socket()
             self._start_camera()
             self._start_detector()
+            self._start_indicator()
             while stop is None or not stop.is_set():
                 if duration_s is not None and time.monotonic() - start >= duration_s:
                     break
@@ -216,12 +228,13 @@ class Supervisor:
         ]
         if cfg.ais:
             cmd += ["--ais", cfg.ais]
-        if not cfg.set_priority:
+        if not cfg.set_priority or not cfg.guard:
             cmd += ["--no-priority"]
         # A socket file left by a killed run would look "ready" to _wait_for_socket. Remove it first.
         if os.path.exists(cfg.socket_path) and stat.S_ISSOCK(os.stat(cfg.socket_path).st_mode):
             os.unlink(cfg.socket_path)
-        self.safety.proc = subprocess.Popen(cmd)
+        # Unguarded baseline: give back the supervisor's SCHED_FIFO so the core is just another process.
+        self.safety.proc = subprocess.Popen(cmd, preexec_fn=None if cfg.guard else _low_priority_preexec(0))
         self.safety.started_wall = time.time()
         self._event("safety_core started", pid=self.safety.proc.pid)
 
@@ -245,6 +258,8 @@ class Supervisor:
         if cfg.model:
             cmd += ["--model", cfg.model]
         cmd += ["--nice", str(cfg.detector_nice), "--input-size", str(cfg.input_size)]
+        if cfg.guard and cfg.detector_rt > 0:
+            cmd += ["--rt-priority", str(cfg.detector_rt)]
         if standby:
             cmd += ["--standby"]
         return cmd
@@ -275,6 +290,22 @@ class Supervisor:
         self.standby.proc = None
         self._event("standby promoted", pid=proc.pid)
         return True
+
+    def _start_indicator(self) -> None:
+        """The ACT LED follows the decision file from its own low-priority process."""
+        if not self.config.act_led:
+            return
+        cmd = [
+            sys.executable,
+            "-m",
+            "darkfleet.edge.indicator",
+            "--decision",
+            self.config.decision_path,
+        ]
+        self.indicator.proc = subprocess.Popen(
+            cmd, preexec_fn=_low_priority_preexec(self.config.detector_nice)
+        )
+        self._event("indicator started", pid=self.indicator.proc.pid)
 
     def _standby_ready(self) -> bool:
         """True once the standby has loaded and warmed the model (it writes a marker file)."""
@@ -318,7 +349,10 @@ class Supervisor:
         binary = os.path.expanduser(cfg.qnxcam_bin)
         cmd = [binary, str(unit), path, f"{cfg.fps:g}"]
         try:
-            self.camera.proc = subprocess.Popen(cmd, preexec_fn=_low_priority_preexec(cfg.detector_nice))
+            self.camera.proc = subprocess.Popen(
+                cmd,
+                preexec_fn=_low_priority_preexec(cfg.detector_nice, cfg.camera_rt if cfg.guard else 0),
+            )
         except OSError as exc:
             self.camera.proc = None
             self._camera_restart_at = time.monotonic() + cfg.restart_backoff_s
@@ -460,7 +494,7 @@ class Supervisor:
             "--seconds",
             f"{seconds:.3f}",
             "--nice",
-            str(self.config.detector_nice),
+            str(self.config.stress_nice),
         ]
         for _ in range(max(1, int(workers))):
             self._stress_procs.append(subprocess.Popen(cmd))
@@ -500,7 +534,7 @@ class Supervisor:
 
     def _stop_children(self) -> None:
         self._stop_stress()
-        for child in (self.detector, self.standby, self.camera, self.safety):
+        for child in (self.indicator, self.detector, self.standby, self.camera, self.safety):
             proc = child.proc
             if proc is None or proc.poll() is not None:
                 continue
@@ -556,6 +590,7 @@ class Supervisor:
             "last_frame_age_ms": safety.get("last_frame_age_ms"),
             "last_inference_ms": safety.get("last_inference_ms"),
             "safety_tick": safety.get("safety_tick"),
+            "alarm": safety.get("alarm"),
             "detector_waiting": safety.get("detector_waiting", False),
             "last_recovery_ms": self.stats.last_recovery_ms,
             "recovery_ms_history": self.stats.recovery_ms_history[-20:],
@@ -618,13 +653,19 @@ def parse_qnxcam(spec: str) -> tuple[int, str]:
     return int(unit_text), path
 
 
-def _low_priority_preexec(nice: int):
-    """Give the camera helper back any inherited SCHED_FIFO, then lower its nice value."""
+def _low_priority_preexec(nice: int, rt: int = 0):
+    """Give the camera helper back any inherited SCHED_FIFO, then lower its nice value.
+
+    With ``rt`` it takes SCHED_RR at that priority instead: the camera is an input the lookout
+    cannot do without, so a runaway load must not starve it (stale frames would raise BLIND).
+    """
 
     def _preexec() -> None:
         realtime.drop_realtime()
         try:
-            if nice > 0:
+            if rt > 0:
+                realtime.try_rr(rt)
+            elif nice > 0:
                 os.nice(nice)
         except OSError:
             pass
@@ -653,6 +694,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--input-size", type=int, default=416, help="detector network input (320 on the Pi)")
+    parser.add_argument(
+        "--no-guard",
+        action="store_true",
+        help="A/B baseline: safety core, AI and camera at the default class (no priority guard)",
+    )
+    parser.add_argument("--act-led", action="store_true", help="drive the Pi 5 ACT LED from the alarm state")
     parser.add_argument("--no-standby", action="store_true", help="cold-restart the detector instead")
     parser.add_argument("--match-km", type=float, default=2.0)
     parser.add_argument("--deadline-ms", type=float, default=200.0)
@@ -673,6 +720,9 @@ def main(argv: list[str] | None = None) -> int:
         fps=args.fps,
         input_size=args.input_size,
         standby=not args.no_standby,
+        guard=not args.no_guard,
+        detector_nice=0 if args.no_guard else 10,
+        act_led=args.act_led,
         match_km=args.match_km,
         deadline_ms=args.deadline_ms,
         set_priority=not args.no_priority,

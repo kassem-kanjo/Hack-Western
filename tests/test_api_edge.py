@@ -522,3 +522,13 @@ def test_remote_controls_are_refused_without_a_token(client, monkeypatch: pytest
     monkeypatch.delenv("EDGE_STATUS_TOKEN", raising=False)
     assert client.post("/api/edge/kill", headers=CONTROL).status_code == 403
     assert client.post("/api/edge/stress", headers=CONTROL).status_code == 403
+
+
+def test_ab_is_404_until_a_result_exists_then_served(client: TestClient, local_status: Path) -> None:
+    assert client.get("/api/edge/ab").status_code == 404
+    (local_status.parent / "ab_result.json").write_text(
+        '{"ran_at": "2026-11-21T23:00:00Z", "unguarded": {"late": 3}, "guarded": {"late": 0}}',
+        encoding="utf-8",
+    )
+    body = client.get("/api/edge/ab").json()
+    assert body["guarded"]["late"] == 0 and body["unguarded"]["late"] == 3
