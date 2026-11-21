@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+# Frame decoding needs OpenCV, which ships in the `edge` extra only (CI runs without it).
+pytest.importorskip("cv2")
+
 from darkfleet.edge import sources
 
 MAGIC = 0x4D414351
