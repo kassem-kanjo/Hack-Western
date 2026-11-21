@@ -1,18 +1,25 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 00:37 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Sat 21 Nov, 04:03 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
-## In flight (handover: Claude usage limit reached)
-- #11 console UI: Haiku lead + DeepSeek coders in .worktrees/console on branch feat/console (not merged; verify screenshots vs design/png before PR).
-- Baltic AIS recorder running (scripts/record_ais.py); health/audit cron is session-only.
+## In flight (overnight build, plan v3 + decisions 0001/0002)
+- **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
+  Coverage per 5 min: Baltic ~3,700 msgs, Malaysia EOPL ~310, Black Sea ~100, Hormuz ~7, Laconia/Red Sea 0.
+- **Story:** Hormuz leads with satellite radar + GFW history; live engine runs on Malaysia EOPL (Iranian-oil
+  transfer hub) and the Baltic. Tabs: Global · Live · Patrol unit.
+- **DeepSeek lanes running:** #95 kinematics calibration, #94 meeting calibration, #79 region pipeline,
+  #80 live API, #88 Hormuz unseen fleet, #89 Hormuz history.
+- **Next:** UI V1 (live screen + event detail + nav, per design/v2), then UI V2 (presentation mode,
+  explainers, replay). CP2 Opus + security review once UI V1 lands.
 
-## Next (in order)
-1. CP1 9 AM: Kassem decides docs/decisions/0001-demo-story.md (Chief recommends A).
-2. Review + PR feat/console (#11); then #52 bridge heat map + validation panel; #12 scoring + #26 sanctions.
-3. #45 GEOS fix; #19 Baltic gaps (optional); #15 deploy (needs Vultr sign-up); #36 edge on Pi (cut at noon if no Pi).
+## Engine wave 1 (merged, #93): first real-data findings (Baltic, 5 h, 107,818 pings, 3,751 ships)
+- 17 sanctioned + 2 shadow-fleet vessels matched by IMO, sailing in the Baltic.
+- A cloned identity: MMSI 630001188 reports from St Petersburg and 49 km north, alternating over 3 h.
+- Silences need local coverage (#95); meetings were mostly moored ships in ports (#94).
 
-## Key results tonight
-- Funnel 5,624 → 109 → 19 (90 ruled out with reasons). Validation: radar-in-prism = chance (1.07, bridge 1.03, held-out inconclusive); bridge localisation AUC 0.87.
+## Waiting on Kassem (morning, ~2 min each)
+Vultr sign-up (deploy + recorder off the laptop) · MLH codes (Entire, GoDaddy) into .env · QNX Pi by noon ·
+optional: free Copernicus account (own radar ship detection, #90).
 
 ## Done (merged)
 #1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
