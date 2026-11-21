@@ -32,3 +32,8 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
    typical 40 h prism 98.4% of the time. The Brownian bridge fixes localisation (AUC 0.87) but radar near dark
    ships still matches time-shifted chance (ratio 1.03). Why it matters: many public "radar caught a dark ship"
    claims may be background traffic; test against a shifted null before accusing anyone.
+10. **A name is not an identity.** The sanctions join matched 7 of 109 cases by name; 5 were generic names
+    (LISBOA, MARIA, PORTO, RIO GRANDE) that almost certainly belong to different ships. One, FU YUAN YU 7869,
+    matches an OFAC SDN entry by name and hull number, but GFW's registry has no IMO for its MMSI and shows it
+    once broadcast as "60658". Why it matters: screening tools that match on names flood analysts; ours
+    separates strong from weak matches and says when identity is unconfirmed.
