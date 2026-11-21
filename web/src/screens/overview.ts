@@ -1,0 +1,114 @@
+/**
+ * Overview screen: the whole snapshot at once. KPI strip over the map, ranked
+ * case list and funnel in the rail. Pure layout; every number comes from the
+ * frozen API response, not from local maths.
+ */
+
+import type { CaseStatus, CaseSummary, CasesResponse } from "../api";
+import { attribution } from "../components/Attribution";
+import { caseList } from "../components/CaseList";
+import { h } from "../components/dom";
+import { funnel } from "../components/Funnel";
+import { kpiStrip } from "../components/KpiStrip";
+import { legend } from "../components/Legend";
+import { topBar } from "../components/TopBar";
+import { fmtInt } from "../format";
+import { mountOverviewMap } from "../map/overviewMap";
+
+const STATUS_RANK: Record<CaseStatus, number> = {
+  candidate: 0,
+  ruled_out: 1,
+  plain: 2,
+};
+
+/**
+ * Analyst order: cases that are still unexplained first, then the ones physics
+ * ruled out, then everything with no evidence. Within a status the case with
+ * the most radar passes wins, then the longest gap.
+ *
+ * `sort` is stable in ES2019+, so full ties keep the order the API returned.
+ * The input array is copied because sorting in place would mutate the cached
+ * response shared by both screens.
+ */
+export function rankCases(cases: CaseSummary[]): CaseSummary[] {
+  return [...cases].sort(
+    (a, b) =>
+      STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+      b.n_candidates - a.n_candidates ||
+      b.hours - a.hours,
+  );
+}
+
+/**
+ * KPI and funnel numbers.
+ *
+ * `withRadar` is deliberately the number of listed cases: `totals.with_candidates`
+ * in the snapshot reads 99, which disagrees with the frozen demo script (109),
+ * so the listed rows are the source of truth for what the console shows.
+ */
+export function funnelCounts(
+  cases: CaseSummary[],
+  gapsScanned: number,
+): { gapsScanned: number; withRadar: number; unexplained: number; ruledOut: number } {
+  return {
+    gapsScanned,
+    withRadar: cases.length,
+    unexplained: cases.filter((c) => c.status === "candidate").length,
+    ruledOut: cases.filter((c) => c.status === "ruled_out").length,
+  };
+}
+
+/** The case the topbar "Case file" tab opens: the top-ranked unexplained one. */
+export function bestCandidateId(ranked: CaseSummary[]): string | null {
+  const best = ranked.find((c) => c.status === "candidate");
+  return best ? best.id : null;
+}
+
+/** Paint the overview into `root` (the #app element). */
+export function renderOverview(
+  root: HTMLElement,
+  data: CasesResponse,
+): { destroy(): void } {
+  const ranked = rankCases(data.cases);
+  const counts = funnelCounts(data.cases, data.totals.gaps_scanned);
+  const best = bestCandidateId(ranked);
+
+  const mapDiv = h("div", { id: "map", class: "map" });
+
+  const stage = h(
+    "section",
+    { class: "stage stage-overview" },
+    kpiStrip(counts),
+    h(
+      "div",
+      { class: "map-chips" },
+      h("span", { class: "chip-pill" }, h("span", { class: "k" }, "Region"), " Global snapshot"),
+      h("span", { class: "chip-pill" }, `Showing all ${fmtInt(ranked.length)} radar cases`),
+    ),
+    mapDiv,
+    legend("overview"),
+    attribution(),
+  );
+
+  const rail = h("aside", { class: "rail" }, funnel(counts), caseList(ranked, null));
+
+  root.replaceChildren(
+    topBar({
+      active: "overview",
+      mode: "SNAPSHOT",
+      generatedAt: data.generated_at,
+      caseHref: best !== null ? `#/case/${encodeURIComponent(best)}` : null,
+    }),
+    h("main", { class: "main" }, stage, rail),
+  );
+
+  // Mount after the container is attached: MapLibre measures the element when it
+  // is created and would otherwise size itself to a detached 0 x 0 node.
+  const map = mountOverviewMap(mapDiv, ranked);
+
+  return {
+    destroy(): void {
+      map.destroy();
+    },
+  };
+}
