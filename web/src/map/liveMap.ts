@@ -69,9 +69,15 @@ export interface LiveMapHandle {
   /**
    * events are ALREADY filtered and in list order. selected is one of them, or null.
    * `numbered` is how many leading events carry their list row number (1..n); the
-   * rest are drawn smaller and unnumbered.
+   * rest are drawn smaller and unnumbered. `fadeIn` fades in the markers that were
+   * not in the previous call: the replay clock has just passed their start.
    */
-  setEvents(events: LiveEvent[], selected: LiveEvent | null, numbered?: number): void;
+  setEvents(
+    events: LiveEvent[],
+    selected: LiveEvent | null,
+    numbered?: number,
+    fadeIn?: boolean,
+  ): void;
   /** Zoom to the event (zoom 8 to 9 around its position). Use jumpTo under reduced motion. */
   focusEvent(event: LiveEvent): void;
   /**
@@ -355,6 +361,11 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
   let hovered: LiveEvent | null = null;
 
   let markers: MarkerRefs[] = [];
+
+  /** What the last setEvents call drew, so replay can tell which markers are new. */
+  let drawnEvents = new Set<LiveEvent>();
+  /** Events entering in the rebuild now in progress; empty outside a rebuild. */
+  let entering = new Set<LiveEvent>();
 
   let selectedLabel: HTMLElement | null = null;
   let selectedLngLat: [number, number] | null = null;
@@ -891,6 +902,16 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
   }
 
   /**
+   * A marker the replay clock has just reached fades in once. Under reduced
+   * motion it simply appears: the marker is the information, the fade only says
+   * that it is new.
+   */
+  function markEntering(group: SVGGElement, event: LiveEvent): void {
+    if (!entering.has(event) || prefersReducedMotion()) return;
+    group.classList.add("is-entering");
+  }
+
+  /**
    * A faint dot for every event outside the list: its kind's colour, half
    * opacity, no tail, no number and no label. Still a click target, just a
    * smaller one than a ranked marker.
@@ -899,6 +920,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     if (!KNOWN_KINDS.has(event.kind)) return null;
 
     const group = svgEl("g", { class: `live-marker is-dot is-${event.kind}` });
+    markEntering(group, event);
     group.append(
       svgEl("circle", {
         cx: 0,
@@ -935,6 +957,7 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     if (!KNOWN_KINDS.has(event.kind)) return null;
 
     const group = svgEl("g", { class: `live-marker is-${event.kind}` });
+    markEntering(group, event);
 
     let primary: [number, number] = [event.lon, event.lat];
     let secondary: [number, number] | null = null;
@@ -1184,15 +1207,32 @@ export function mountLiveMap(opts: LiveMapOptions): LiveMapHandle {
     updateSelectedLabel();
   }
 
-  function setEvents(next: LiveEvent[], nextSelected: LiveEvent | null, numbered?: number): void {
+  function setEvents(
+    next: LiveEvent[],
+    nextSelected: LiveEvent | null,
+    numbered?: number,
+    fadeIn = false,
+  ): void {
     if (destroyed) return;
     const count = numbered === undefined ? DEFAULT_NUMBERED : Math.max(0, numbered);
+    const changed = !sameEvents(events, next);
     const needsRebuild =
-      count !== numberedCount || !sameEvents(events, next) || markers.length === 0;
+      count !== numberedCount || changed || markers.length === 0;
+
+    // Only a replay arrival fades: an event the previous frame did not draw.
+    const fresh = new Set<LiveEvent>();
+    if (fadeIn && changed) {
+      for (const event of next) if (!drawnEvents.has(event)) fresh.add(event);
+    }
+
     events = next;
     numberedCount = count;
     selected = nextSelected;
+    entering = fresh;
     if (needsRebuild) rebuildMarkers();
+    entering = new Set();
+    if (changed) drawnEvents = new Set(next);
+
     updateSelectedLabel();
     positionOverlays();
   }

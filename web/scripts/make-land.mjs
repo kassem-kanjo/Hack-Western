@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// Regenerates public/basemap/land.geojson from world-atlas@2.0.2 (land-50m TopoJSON,
-// derived from Natural Earth, public domain) using topojson-client.
+// Regenerates the offline basemap coastlines from world-atlas@2.0.2 (derived from
+// Natural Earth, public domain) using topojson-client:
+//
+//   public/basemap/land.geojson      land-50m, the whole-world default.
+//   public/basemap/land-10m.geojson  land-10m, simplified enough to stay under
+//                                    6 MB, shown only from zoom 6 in.
 //
 // Usage: npm run make-land
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -12,15 +16,27 @@ const require = createRequire(import.meta.url);
 const { feature } = require("topojson-client");
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const topologyPath = require.resolve("world-atlas/land-50m.json");
-const outputPath = resolve(scriptDir, "..", "public", "basemap", "land.geojson");
+const basemapDir = resolve(scriptDir, "..", "public", "basemap");
 
-const topology = JSON.parse(await readFile(topologyPath, "utf8"));
-const land = feature(topology, topology.objects.land);
-const collection =
-  land.type === "FeatureCollection"
-    ? land
-    : { type: "FeatureCollection", features: [land] };
+const DATASETS = [
+  {
+    topology: "world-atlas/land-50m.json",
+    output: "land.geojson",
+    // Natural Earth's own 1:50m vertices, rounded to ~1 m: exactly the file the
+    // 50m coastline has always shipped, so regenerating it stays a no-op.
+    decimals: 5,
+    tolerances: [0],
+  },
+  {
+    topology: "world-atlas/land-10m.json",
+    output: "land-10m.geojson",
+    // Coarser rounding (0.0001 deg is still ~11 m) buys vertices back for the
+    // shape, and the first tolerance whose file fits the budget wins.
+    decimals: 4,
+    budget: 6_000_000,
+    tolerances: [0.0005, 0.001, 0.002, 0.003, 0.005, 0.008, 0.012, 0.02, 0.03, 0.05, 0.08],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Antimeridian repair.
@@ -31,6 +47,8 @@ const collection =
 // world. Unwrap each ring into a continuous longitude, cut it at +/-180 and
 // close every part along the meridian. Rings around a pole are closed through
 // the pole instead, so the seam stays at the edge of the map.
+// Both resolutions go through this same repair, so the two coastlines meet at
+// the dateline identically.
 // ---------------------------------------------------------------------------
 
 const MERIDIAN = 180;
@@ -242,26 +260,163 @@ function splitGeometry(geometry) {
   geometry.coordinates = polygons.flatMap((rings) => splitPolygon(rings));
 }
 
-for (const featureItem of collection.features) splitGeometry(featureItem.geometry);
+// ---------------------------------------------------------------------------
+// Simplification (1:10m only).
+//
+// Douglas-Peucker in lon/lat degrees. One degree is a different distance at the
+// equator and at the pole, but the tolerance is a shape knob for a downloaded
+// file, not a spatial measurement, so the simpler planar version is enough.
+// ---------------------------------------------------------------------------
 
-// Round coordinates to ~10 m so the committed file stays small without visibly
-// changing the 1:50m coastline.
-const round = (value) => Math.round(value * 1e5) / 1e5;
-const roundGeometry = (geometry) => {
+/** Squared distance from point p to the segment ab. */
+function segmentDistSq(p, a, b) {
+  let x = a[0];
+  let y = a[1];
+  let dx = b[0] - x;
+  let dy = b[1] - y;
+  if (dx !== 0 || dy !== 0) {
+    const t = ((p[0] - x) * dx + (p[1] - y) * dy) / (dx * dx + dy * dy);
+    if (t > 1) {
+      x = b[0];
+      y = b[1];
+    } else if (t > 0) {
+      x += dx * t;
+      y += dy * t;
+    }
+  }
+  dx = p[0] - x;
+  dy = p[1] - y;
+  return dx * dx + dy * dy;
+}
+
+/** Douglas-Peucker on an open path; both ends are always kept. */
+function simplifyPath(points, tolerance) {
+  if (tolerance <= 0 || points.length < 3) return points;
+  const tolSq = tolerance * tolerance;
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  // Never dissolve the pole closure: those vertices are long meridian steps
+  // back to the pole, not coastline, and folding them into one edge would leave
+  // a line running most of the way around the world.
+  for (let i = 0; i < points.length; i += 1) {
+    if (Math.abs(points[i][1]) >= 89.9) keep[i] = 1;
+  }
+
+  // Iterative stack: island rings can carry a hundred thousand vertices.
+  const stack = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [first, last] = stack.pop();
+    let farthest = -1;
+    let farthestDist = 0;
+    for (let i = first + 1; i < last; i += 1) {
+      const dist = segmentDistSq(points[i], points[first], points[last]);
+      if (dist > farthestDist) {
+        farthestDist = dist;
+        farthest = i;
+      }
+    }
+    if (farthest !== -1 && farthestDist > tolSq) {
+      keep[farthest] = 1;
+      stack.push([first, farthest], [farthest, last]);
+    }
+  }
+
+  const out = [];
+  for (let i = 0; i < points.length; i += 1) {
+    if (keep[i] === 1) out.push(points[i]);
+  }
+  return out;
+}
+
+/** A ring needs three distinct corners; anything smaller is dropped, not drawn as a line. */
+function simplifyRing(ring, tolerance) {
+  if (tolerance <= 0) return ring;
+  const points = simplifyPath(openRing(ring), tolerance);
+  return points.length < 3 ? [] : closeRing(points);
+}
+
+function simplifyGeometry(geometry, tolerance) {
+  if (tolerance <= 0 || !geometry.coordinates) return;
+  const polygons = geometry.coordinates
+    .map((rings) => rings.map((ring) => simplifyRing(ring, tolerance)).filter((ring) => ring.length > 0))
+    .filter((rings) => rings.length > 0 && rings[0].length >= 4);
+  geometry.coordinates = polygons;
+}
+
+// ---------------------------------------------------------------------------
+// Build.
+// ---------------------------------------------------------------------------
+
+async function buildTopology(topologyPath, tolerance, decimals) {
+  const topology = JSON.parse(await readFile(topologyPath, "utf8"));
+  const land = feature(topology, topology.objects.land);
+  const collection =
+    land.type === "FeatureCollection"
+      ? land
+      : { type: "FeatureCollection", features: [land] };
+
+  for (const featureItem of collection.features) {
+    splitGeometry(featureItem.geometry);
+  }
+
+  // Simplify after the antimeridian cut, so both resolutions share the same
+  // seam and no simplification step can reintroduce a jump across the world.
+  for (const featureItem of collection.features) {
+    simplifyGeometry(featureItem.geometry, tolerance);
+  }
+
+  // Round coordinates so the committed file stays small. 1e5 is ~1 m (the 50m
+  // coastline never needed more), 1e4 is ~11 m for the 1:10m file.
+  const scale = 10 ** decimals;
+  const round = (value) => Math.round(value * scale) / scale;
+  const roundGeometry = (geometry) => {
+    if (!geometry.coordinates) return;
+    const walk = (node) =>
+      typeof node[0] === "number" ? [round(node[0]), round(node[1])] : node.map(walk);
+    geometry.coordinates = geometry.coordinates.map(walk);
+  };
+  for (const featureItem of collection.features) roundGeometry(featureItem.geometry);
+
+  return collection;
+}
+
+/** Drop points that rounding folded onto their neighbour (10m only). */
+function dedupeGeometry(geometry) {
   if (!geometry.coordinates) return;
-  const walk = (node) =>
-    typeof node[0] === "number"
-      ? [round(node[0]), round(node[1])]
-      : node.map(walk);
-  geometry.coordinates = geometry.coordinates.map(walk);
-};
-for (const featureItem of collection.features) roundGeometry(featureItem.geometry);
+  geometry.coordinates = geometry.coordinates
+    .map((rings) => rings.map((ring) => dedupe(openRing(ring))))
+    .filter((rings) => rings.length > 0 && rings[0].length >= 3)
+    .map((rings) => rings.map(closeRing));
+}
 
-await mkdir(dirname(outputPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(collection)}\n`);
+async function writeDataset(dataset) {
+  const topologyPath = require.resolve(dataset.topology);
+  const outputPath = resolve(basemapDir, dataset.output);
 
-console.log(
-  `wrote ${outputPath} (${collection.features.length} feature(s), ${(
-    (await readFile(outputPath)).length / 1e6
-  ).toFixed(2)} MB)`,
-);
+  let text = "";
+  let chosen = dataset.tolerances[0];
+  for (const tolerance of dataset.tolerances) {
+    const collection = await buildTopology(topologyPath, tolerance, dataset.decimals);
+    if (tolerance > 0) {
+      for (const featureItem of collection.features) dedupeGeometry(featureItem.geometry);
+    }
+    text = `${JSON.stringify(collection)}\n`;
+    chosen = tolerance;
+    if (dataset.budget === undefined || Buffer.byteLength(text) < dataset.budget) break;
+  }
+
+  await mkdir(basemapDir, { recursive: true });
+  await writeFile(outputPath, text);
+
+  const detail =
+    chosen > 0 ? `, simplified at ${chosen} deg` : "";
+  console.log(
+    `wrote ${outputPath} (${(Buffer.byteLength(text) / 1e6).toFixed(2)} MB${detail})`,
+  );
+}
+
+for (const dataset of DATASETS) {
+  await writeDataset(dataset);
+}
