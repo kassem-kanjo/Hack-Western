@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 08:50 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v3 · briefing: docs/briefings/cp1-sat-morning.md
+Updated: Sat 21 Nov, 08:55 ET · next checkpoint: CP1 decisions from Kassem · plan: docs/plan.md v3 · briefing: docs/briefings/cp1-sat-morning.md
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
@@ -22,6 +22,7 @@ Vultr sign-up (deploy + recorder off the laptop) · MLH codes (Entire, GoDaddy) 
 optional: free Copernicus account (own radar ship detection, #90).
 
 ## Done (merged)
+UI V2: replay slider (#85) + 10 m coastline, snapshot-relative last seen (#134) merged in #137 (08:54). Open follow-up #138.
 #1 scaffold · #2 #3 core prisms · #4 #6 data layer (Tiger Data: 6,049 SAR cells, 18 encounters) ·
 #8 design · #9 research · #20 region scan (109 of 5,624 gaps with radar in prism) · #21 CI fix ·
 plan v2.1 after Opus Auditor review · #29 API schema frozen.
