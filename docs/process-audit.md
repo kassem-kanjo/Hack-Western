@@ -141,3 +141,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 19:** ~95% DeepSeek; Chief: contract, wifi helper, card diagnosis, recorder restart.
 - **Rule breaks:** none.
 - **Change for next 30 min:** health.sh should flag "file not growing for 5 min" as RED, not only "process alive" (the hang passed as OK). New SSE endpoints must be async (H-1 class).
+
+## Sat 21 Nov, 15:35 ET (audit 21, covers 14:35-15:35)
+- **Went well:** V2 largely merged: Watch screen restyled as an analyst tool (#174), Mac app (#175/#176), trails + Hormuz radar alert (#177), QNX real-time (#178), false-alarm core rules (#179), qnxcam (#173). Testing on the real Pi found three bugs no test could: QNX rejects SCHED_OTHER priority 0 so children kept SCHED_FIFO and "stress" starved the board; model load exceeded the 2 s heartbeat (endless restarts); and the end-to-end deadline metric is the wrong proof for real-time. QNX camera API reached without SDK headers by reading the layout from QNX's own debug symbols.
+- **Went wrong:** `scripts/numbers.py` shadowed Python's stdlib `numbers` for every script in scripts/ (latent since #155; surfaced when new code imported decimal) — renamed. The desktop app shipped importing "pywebview" instead of module "webview" (tests mocked the import) — caught by launching the built app. My agent graph showed an invented "26 lanes" figure; corrected.
+- **Code share since audit 20:** ~85% DeepSeek; Chief: QNX priority/grace fixes, qnxcam.c, Pi deploy/test, app import fix, integration.
+- **Rule breaks:** an unverified number in a user-facing widget (corrected in the same reply).
+- **Change for next 30 min:** every lane that adds a launcher or app gets one real launch before merge, not only mocked tests; numbers in widgets come from a command run in the same turn. CP3 (Opus review) moves to after V2 QA so it reviews the final V2.
