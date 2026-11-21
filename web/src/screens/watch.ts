@@ -225,6 +225,30 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
   });
 }
 
+/** Set once per page load: the cold-open lens never repeats after the reader has chosen. */
+let lensUsed = false;
+
+/**
+ * The story a cold open shows when nothing is happening now, strongest first:
+ * the newest earlier dark alert that had a sanctioned ship able to meet it, then
+ * the newest sanctioned stop, then the newest spoof. Null when something is
+ * ongoing (the list already leads with it).
+ */
+function pickLens(snapshot: WatchResponse): WatchAlert | null {
+  if (snapshot.alerts.some((alert) => alert.status === "ongoing")) return null;
+  const earlier = sortedAlerts(snapshot.alerts);
+  return (
+    earlier.find(
+      (alert) =>
+        alert.kind === "dark" &&
+        alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned"),
+    ) ??
+    earlier.find((alert) => alert.kind === "sanctioned_stop") ??
+    earlier.find((alert) => alert.kind === "spoof") ??
+    null
+  );
+}
+
 /** The camera opens on the first alert's area; the world view stays one crumb away. */
 function openingBox(snapshot: WatchResponse): [number, number, number, number] | null {
   const first = sortedAlerts(snapshot.alerts).find((alert) => alert.area_id !== null);
@@ -1768,7 +1792,16 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     }
     paintStatus(Date.now());
 
-    const initial = pending ?? { alertId: selectedId, areaId: selectedAreaId };
+    let initial = pending ?? { alertId: selectedId, areaId: selectedAreaId };
+    // A cold open with nothing running shows one story, not an empty map: the lens picks it.
+    if (initial.alertId === null && initial.areaId === null && !lensUsed) {
+      const lens = pickLens(snapshot);
+      if (lens !== null) {
+        lensUsed = true;
+        initial = { alertId: lens.id, areaId: null };
+        history.replaceState(null, "", watchHref(lens.id));
+      }
+    }
     selectedId = initial.alertId;
     selectedAreaId = initial.areaId;
     if (selectedId !== null && !snapshot.alerts.some((alert) => alert.id === selectedId)) selectedId = null;
