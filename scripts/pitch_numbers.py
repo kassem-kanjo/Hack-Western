@@ -1,6 +1,6 @@
 """Collect every number the pitch, README and Devpost quote into one sheet.
 
-    uv run python scripts/numbers.py [--snapshot-dir data/snapshot]
+    uv run python scripts/pitch_numbers.py [--snapshot-dir data/snapshot]
         [--validation data/validation/tracks_results.json]
         [--out-md out/numbers.md] [--out-json out/numbers.json]
 

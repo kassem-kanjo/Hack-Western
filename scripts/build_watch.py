@@ -19,7 +19,10 @@ This script imports those helpers and adds only what the watch contract needs:
   unknown-type hulls; a contact only counts as ``could_meet`` when its representative ping was
   stopped, offshore and outside a routine anchorage; ``sanctioned_stop`` only for stops that
   lasted 30 minutes and happened offshore or inside a watched area;
-* the ``sanctioned_stop`` rule, which needs the sanctions join and the anchorage table.
+* the ``sanctioned_stop`` rule, which needs the sanctions join and the anchorage table;
+* the ``trail`` each alert carries (the ship's last six hours of fixes, capped at 60 points);
+* the ``radar_unmatched`` alert, read from ``data/snapshot/hormuz_unseen.json`` and always
+  credited "Powered by Global Fishing Watch"; a missing file simply adds no radar alert.
 
 ``--explain`` prints, per alert kind, how many candidates each of those rules removed without
 changing the snapshot.
@@ -36,18 +39,23 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import os
+import statistics
 import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as dtime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-# Running this file directly puts ``scripts/`` first on ``sys.path``, where the repo's own
-# ``scripts/numbers.py`` shadows the standard-library module numpy imports at startup. Drop that
-# entry: the only sibling this script needs (build_live.py) is loaded by explicit path below.
+# Running this file directly puts ``scripts/`` first on ``sys.path``, so any sibling named like a
+# standard-library module shadows it (we had ``scripts/numbers.py``, since renamed pitch_numbers.py,
+# which broke numpy/decimal). Kept as a guard: the only sibling this script needs (build_live.py) is
+# loaded by explicit path below.
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if sys.path and Path(sys.path[0] or ".").resolve() == _SCRIPT_DIR:
     sys.path.pop(0)
@@ -100,13 +108,35 @@ _last_hours = _build_live._last_hours
 _meeting_context = _build_live._meeting_context
 _merge_info = _build_live._merge_info
 _run_silences = _build_live._run_silences
-_write_json = _build_live._write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_AIS = Path("data/cache/ais")
 DEFAULT_OUT = Path("data/snapshot")
 DEFAULT_LAND = Path("web/public/basemap/land.geojson")
 DEFAULT_SANCTIONS = Path("data/sanctions/maritime.csv")
+DEFAULT_UNSEEN = Path("data/snapshot/hormuz_unseen.json")
+"""Radar-vs-AIS snapshot produced by ``scripts/build_unseen_fleet.py``."""
+
+RADAR_AREA_ID = "HORMUZ_STRAIT"
+"""The unseen-fleet snapshot covers the Hormuz region, and only that watched box."""
+
+RADAR_SEVERITY = 0.9
+"""A radar fleet that is half invisible is strong evidence, short of a confirmed finding."""
+
+RADAR_MAX_CELLS = 200
+"""Unmatched-detection cells carried in the alert's evidence, to keep the file small."""
+
+GFW_ATTRIBUTION = "Powered by Global Fishing Watch"
+"""The credit the contract requires on every view that shows radar detections."""
+
+TRAIL_BEFORE_HOURS = 6
+"""A trail starts this long before an alert's ``t_start`` and ends at the alert itself."""
+
+TRAIL_AFTER_HOURS = 2
+"""For an ended alert, the reappearance points up to this long after ``t_end``."""
+
+TRAIL_MAX_POINTS = 60
+"""Hard cap on a trail, so a fast hull with minute reports cannot bloat watch.json."""
 
 REFRESH_SECONDS = 300
 """The loop interval the UI advertises; also written to the snapshot as ``refresh_s``."""
@@ -312,6 +342,77 @@ def _last_ping(track: Sequence[Ping], when: datetime) -> Ping | None:
         if ping.t <= when and (best is None or ping.t > best.t):
             best = ping
     return best
+
+
+def _decimate(points: Sequence[Ping], limit: int = TRAIL_MAX_POINTS) -> list[Ping]:
+    """Keep at most ``limit`` points, always including both ends, evenly spaced in between.
+
+    Selecting by index rather than by distance keeps the work O(n) after the window has been
+    taken and makes the result independent of how the track list happens to be ordered. Both
+    endpoints survive, which matters: the first point is where the hull came from and the last
+    is where it was last seen before (or just after) the alert.
+    """
+    if len(points) <= limit:
+        return list(points)
+    last = len(points) - 1
+    picks = sorted({round(index * last / (limit - 1)) for index in range(limit)})
+    return [points[index] for index in picks]
+
+
+def _trail(track: Sequence[Ping], start: datetime, end: datetime | None) -> list[list[Any]]:
+    """The ship's recent path as ``[[lon, lat, "t"], ...]``, in time order.
+
+    Six hours before the alert's ``t_start`` say where the hull came from; for an ended alert,
+    up to two hours after ``t_end`` say where it reappeared. Five decimal places are about a
+    metre, far finer than AIS itself, and keep the compact rows short.
+    """
+    if not track:
+        return []
+    begin = start - timedelta(hours=TRAIL_BEFORE_HOURS)
+    points = [ping for ping in track if begin <= ping.t <= start]
+    if end is not None:
+        after_end = end + timedelta(hours=TRAIL_AFTER_HOURS)
+        points.extend(ping for ping in track if end < ping.t <= after_end)
+    points.sort(key=lambda ping: ping.t)
+    return [[round(ping.lon, 5), round(ping.lat, 5), _iso(ping.t)] for ping in _decimate(points)]
+
+
+def _dumps(value: Any, level: int = 0) -> str:
+    """Pretty-print like ``json.dumps(indent=2)``, keeping scalar-only arrays on one line.
+
+    ``indent=2`` puts every number of every trail point and radar cell on its own line, which
+    triples the cost of the two new fields and blows the 40 % size budget. An array made only
+    of numbers and strings (a bbox, a trail point, a density cell) has no structure worth
+    indenting, so it stays inline; dicts and nested arrays keep the usual two-space layout.
+    Values and key order are exactly those of ``json.dumps``, so readers see the same JSON.
+    """
+    pad = "  " * level
+    inner = pad + "  "
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        rows = [f"{inner}{json.dumps(key)}: {_dumps(item, level + 1)}" for key, item in value.items()]
+        return "{\n" + ",\n".join(rows) + "\n" + pad + "}"
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "[]"
+        if all(not isinstance(item, (dict, list, tuple)) for item in value):
+            return "[" + ", ".join(json.dumps(item) for item in value) + "]"
+        rows = [f"{inner}{_dumps(item, level + 1)}" for item in value]
+        return "[\n" + ",\n".join(rows) + "\n" + pad + "]"
+    return json.dumps(value)
+
+
+def _write_watch_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write the snapshot atomically, like ``build_live._write_json``, but with compact rows.
+
+    The sibling writer indents nested numbers for every other snapshot; watch.json alone carries
+    thousands of trail and cell coordinates, and the compact rows keep the file light.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(_dumps(payload) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _watchlisted_could_meet(
@@ -556,6 +657,7 @@ def _alert_payload(
         "next": {"lat": next_fix.lat, "lon": next_fix.lon, "t": _iso(next_fix.t)} if next_fix else None,
         "speed_cap_kn": cap_kn,
         "contacts": contacts,
+        "trail": _trail(tracks.get(mmsi, []), event.start, event.end),
         "evidence": event.evidence,
     }
     return payload, involved
@@ -673,6 +775,7 @@ def _sanctioned_stops(
                 "next": None,
                 "speed_cap_kn": round(max_speed_knots(cls), 3),
                 "contacts": [],
+                "trail": _trail(track, first.t, None if ongoing else ping.t),
                 "evidence": {
                     "sog": ping.sog,
                     "class": cls,
@@ -691,6 +794,151 @@ def _is_suspicious(payload: dict[str, Any], involved: bool) -> bool:
     if involved:
         return True
     return payload["kind"] in {"dark", "meeting", "sanctioned_stop"} and payload["area_id"] in WATCHED_IDS
+
+
+def _strait_centroid() -> tuple[float, float]:
+    """The centre of the Hormuz watched box: the radar alert has no per-vessel position."""
+    for area in WATCHED:
+        if area["id"] == RADAR_AREA_ID:
+            min_lon, min_lat, max_lon, max_lat = area["bbox"]
+            return ((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0)
+    raise KeyError(f"{RADAR_AREA_ID} missing from core.areas.WATCHED")
+
+
+def _unseen_path(unseen: Path | None) -> Path | None:
+    """Use the given unseen snapshot, falling back to the repo-relative default.
+
+    ``--loop`` and direct ``build()`` calls may run from any working directory, so a relative
+    default is resolved against the repository root rather than the caller's cwd.
+    """
+    if unseen is None:
+        return None
+    path = Path(unseen)
+    if path.is_file():
+        return path
+    if not path.is_absolute():
+        fallback = ROOT / path
+        if fallback.is_file():
+            return fallback
+    return path
+
+
+def _well_covered_days(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """The daily rows that carried enough radar passes to be worth reading.
+
+    ``build_unseen_fleet.py`` already made this call: low-coverage days sit in
+    ``summary.excluded_days``. A file without a summary is treated as all-usable rather than
+    silently producing no alert.
+    """
+    daily = [row for row in data.get("daily") or [] if isinstance(row, dict) and row.get("day") is not None]
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    excluded = {str(day) for day in summary.get("excluded_days") or []}
+    used = [row for row in daily if str(row["day"]) not in excluded]
+    return used or daily
+
+
+def _radar_cells(grid: Any) -> list[list[float]]:
+    """Up to :data:`RADAR_MAX_CELLS` unmatched-detection cells as ``[[lon, lat], ...]``.
+
+    Densest cells come first: the map's job is to show where the radar saw ships that were not
+    broadcasting, and a 200-cell cap keeps the evidence block from dominating watch.json. Ties
+    break on coordinates so repeated builds are byte-stable.
+    """
+    ranked: list[tuple[int, float, float]] = []
+    for cell in grid or []:
+        if not isinstance(cell, dict):
+            continue
+        lon, lat = cell.get("lon"), cell.get("lat")
+        if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
+            continue
+        try:
+            count = int(cell.get("n") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        ranked.append((count, float(lon), float(lat)))
+    ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [[round(lon, 4), round(lat, 4)] for _, lon, lat in ranked[:RADAR_MAX_CELLS]]
+
+
+def _radar_alert(unseen: Path | None) -> dict[str, Any] | None:
+    """One fleet-level alert for the latest well-covered radar day, or None when unavailable.
+
+    The unseen snapshot is daily and fleet-wide: it can say how many hulls radar saw without an
+    AIS broadcast, never which ones. So the alert names no ship (``mmsi`` 0, ``name`` null),
+    spans that UTC day, and carries the counts and cells as evidence. A missing file is not an
+    error - the watch screen simply has no radar layer for this build.
+    """
+    path = _unseen_path(unseen)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    used = _well_covered_days(data)
+    if not used:
+        return None
+    row = max(used, key=lambda item: str(item["day"]))
+    try:
+        day = date.fromisoformat(str(row["day"]))
+    except ValueError:
+        return None
+
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    try:
+        seen = int(row.get("seen") or 0)
+    except (TypeError, ValueError):
+        seen = 0
+    raw_unmatched = row.get("unmatched")
+    if raw_unmatched is None:
+        raw_unmatched = row.get("dark")
+    try:
+        unmatched = int(raw_unmatched or 0)
+    except (TypeError, ValueError):
+        unmatched = 0
+
+    median = summary.get("median_dark_share")
+    if not isinstance(median, (int, float)):
+        shares = [
+            float(item["dark_share"]) for item in used if isinstance(item.get("dark_share"), (int, float))
+        ]
+        median = statistics.median(shares) if shares else 0.0
+    days_used = summary.get("n_days_used")
+    if not isinstance(days_used, int):
+        days_used = len(used)
+
+    start = datetime.combine(day, dtime.min, tzinfo=UTC)
+    end = start + timedelta(days=1) - timedelta(seconds=1)
+    lat, lon = _strait_centroid()
+    return {
+        "id": f"radar_unmatched-0-{int(start.timestamp())}",
+        "kind": "radar_unmatched",
+        "status": "ended",
+        "mmsi": 0,
+        "name": None,
+        "area_id": RADAR_AREA_ID,
+        "severity": RADAR_SEVERITY,
+        "label": f"Radar: {unmatched} vessels not broadcasting",
+        "t_start": _iso(start),
+        "t_end": _iso(end),
+        "last": {"lat": lat, "lon": lon, "t": _iso(end), "sog": None, "cog": None},
+        "next": None,
+        "speed_cap_kn": 0.0,
+        "contacts": [],
+        "trail": [],
+        "evidence": {
+            "day": day.isoformat(),
+            "seen": seen,
+            "unmatched": unmatched,
+            "share": round(unmatched / seen, 4) if seen else 0.0,
+            "median_share_well_covered_days": round(float(median), 4),
+            "days_used": days_used,
+            "cells": _radar_cells(data.get("grid")),
+            "source": GFW_ATTRIBUTION,
+        },
+    }
 
 
 def _routine_quiet(
@@ -761,6 +1009,7 @@ def build(
     out: Path = DEFAULT_OUT,
     sanctions: Path | None = DEFAULT_SANCTIONS,
     land: Path | None = DEFAULT_LAND,
+    unseen: Path | None = DEFAULT_UNSEEN,
     explain: Explanation | None = None,
 ) -> dict[str, Any]:
     """Read every region, write ``watch.json``, and return the payload.
@@ -862,6 +1111,10 @@ def build(
             alerts.append(payload)
             alerted.add(payload["mmsi"])
 
+    radar = _radar_alert(unseen)
+    if radar is not None:
+        alerts.append(radar)
+
     alerts.sort(key=lambda alert: (-alert["severity"], alert["id"]))
     alert_ids: dict[int, list[str]] = {}
     for alert in alerts:
@@ -885,7 +1138,7 @@ def build(
         "alerts": alerts,
         "counts": {"ships": len(ships), "alerts": len(alerts), "hidden_routine": hidden},
     }
-    _write_json(Path(out) / "watch.json", payload)
+    _write_watch_json(Path(out) / "watch.json", payload)
     return payload
 
 
@@ -901,6 +1154,7 @@ def run_once(
     out: Path,
     sanctions: Path | None,
     land: Path | None,
+    unseen: Path | None = DEFAULT_UNSEEN,
     explain: bool = False,
 ) -> dict[str, Any]:
     """One build plus the single log line ``--loop`` prints per iteration."""
@@ -912,6 +1166,7 @@ def run_once(
         out=out,
         sanctions=sanctions,
         land=land,
+        unseen=unseen,
         explain=explanation,
     )
     elapsed = time.perf_counter() - started
@@ -935,6 +1190,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot output folder")
     parser.add_argument("--land", type=Path, default=DEFAULT_LAND, help="land GeoJSON")
     parser.add_argument("--sanctions", type=Path, default=DEFAULT_SANCTIONS, help="sanctions CSV")
+    parser.add_argument(
+        "--unseen",
+        type=Path,
+        default=DEFAULT_UNSEEN,
+        help="radar-vs-AIS snapshot (hormuz_unseen.json); a missing file adds no radar alert",
+    )
     parser.add_argument(
         "--explain",
         action="store_true",
@@ -963,6 +1224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "out": args.out,
         "sanctions": args.sanctions,
         "land": args.land,
+        "unseen": args.unseen,
         "explain": args.explain,
     }
     if args.loop == 0:
