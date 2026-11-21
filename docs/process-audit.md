@@ -162,3 +162,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 22:** builders/lanes ~90%; Chief: IMO-only fix, live-stream default, parser fix, validation runs, merges.
 - **Rule breaks:** pushed without reading the local check result once (CI caught it).
 - **Change for next 30 min:** never chain a push after make check without gating on its exit code (&&); grep the codebase for empty .catch handlers and make them log.
+
+## Sat 21 Nov, 17:25 ET (audit 24, covers 16:24-17:25)
+- **Went well:** merged #199 (dossier, search, replay, area stats), #201 (own Sentinel-1 ship detection: 35 ships on today's 02:06 UTC pass, honestly 0 matched because our Hormuz recording started 6 h later), #202 (deploy kit). Designer mockups approved by Kassem ("good redesign, just think of bloating"); builder on #200 with hard anti-bloat rules. Pi lane done: 0.15 s recovery after kill (was 2.8 s), safety loop p99 1.5 ms under stress. Vultr credit ($100) applied.
+- **Went wrong:** the deploy lane never started: `nohup delegate.sh` failed with "Permission denied" (script not executable) and I didn't read its log for ~20 min. The dossier cache key changed on every recorder append, so every open re-parsed 46 MB (~5 s); found only through the builder's "Surprises" line. Laptop died at ~16:43: recorder gap of ~36 min (watchdog restarted it on resume) and a background merge watcher died mid-wait.
+- **Code share since audit 23:** builders/lanes ~85%; Chief: per-file cache + public mode, conflict resolution on #201, merges.
+- **Rule breaks:** none; merged #202 by hand only after confirming its check had passed before the watcher died.
+- **Change for next 30 min:** launch delegate.sh with `bash` and read the first log line within a minute; keep the laptop on power. Moving the recorder to Vultr removes the single point of failure.
