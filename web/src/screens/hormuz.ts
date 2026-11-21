@@ -15,6 +15,13 @@ import { offlineStyle } from "../basemap";
 import { attribution } from "../components/Attribution";
 import { h } from "../components/dom";
 import { fetchHormuz } from "../components/hormuz";
+import {
+  addStoryLayers,
+  showCluster,
+  showListed,
+  storyCards,
+  type HormuzStories,
+} from "../components/hormuzStories";
 import { trendChart, trendHeadline, type HormuzTrend } from "../components/hormuzTrend";
 import { topBar } from "../components/TopBar";
 import "./hormuz.css";
@@ -25,6 +32,7 @@ export interface HormuzScreen {
 
 const TREND_URL = "/api/hormuz/trend";
 const SAR_URL = "/api/sar/scan";
+const STORIES_URL = "/api/hormuz/stories";
 const DETECTIONS = "sar-detections";
 const DOTS = "sar-dots";
 
@@ -110,6 +118,14 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     attribution(),
   );
 
+  // Labels the cluster's hollow dots on the map (the offline basemap has no text glyphs).
+  const mapKey = h(
+    "p",
+    { class: "hz-map-key", hidden: true },
+    "○ reported position   ● came back here   grey dashes: the false track",
+  );
+  stage.append(mapKey);
+
   const body = h("div", { class: "hz-body" }, h("p", { class: "hz-small" }, "Loading the strait..."));
   const rail = h("aside", { class: "rail hormuz-rail", "aria-label": "The strait" }, body);
 
@@ -139,6 +155,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   let mapReady = false;
   map.on("load", () => {
     if (destroyed) return;
+    addStoryLayers(map);
     map.addSource(DETECTIONS, { type: "geojson", data: detections() });
     map.addLayer({
       id: DOTS,
@@ -216,11 +233,39 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     );
   }
 
-  Promise.all([fetchHormuz<HormuzTrend>(TREND_URL, abort.signal), fetchHormuz<SarScan>(SAR_URL, abort.signal).catch(() => null)])
-    .then(([trend, scan]) => {
+  /** Two cards under the headline; a click draws that story on the map. */
+  function storyBlock(stories: HormuzStories): HTMLElement {
+    const cards = storyCards(
+      stories,
+      (story) => {
+        mapKey.hidden = true;
+        if (mapReady) showListed(map, story);
+      },
+      (cluster) => {
+        if (!mapReady) return;
+        showCluster(map, cluster);
+        mapKey.hidden = false;
+      },
+    );
+    return h(
+      "section",
+      { class: "hz-section hz-stories" },
+      ...cards,
+      h("p", { class: "hz-small" }, stories.source ?? "Powered by Global Fishing Watch"),
+    );
+  }
+
+  Promise.all([
+    fetchHormuz<HormuzTrend>(TREND_URL, abort.signal),
+    fetchHormuz<SarScan>(SAR_URL, abort.signal).catch(() => null),
+    fetchHormuz<HormuzStories>(STORIES_URL, abort.signal).catch(() => null),
+  ])
+    .then(([trend, scan, stories]) => {
       if (destroyed || abort.signal.aborted) return;
       sar = scan;
-      const parts: HTMLElement[] = [headlineBlock(trend), chartBlock(trend)];
+      const parts: HTMLElement[] = [headlineBlock(trend)];
+      if (stories) parts.push(storyBlock(stories));
+      parts.push(chartBlock(trend));
       if (scan) parts.push(satellitePass(scan));
       body.replaceChildren(...parts);
       renderSarDetail();

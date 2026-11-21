@@ -90,6 +90,12 @@ def get_history() -> dict[str, Any]:
     return _snapshot(HISTORY_FILE)
 
 
+@router.get("/stories")
+def get_stories() -> dict[str, Any]:
+    """Listed ships that went dark in the Gulf box, and the outage clusters (#219)."""
+    return _snapshot("hormuz_stories.json")
+
+
 def _number(value: Any) -> float | None:
     """A finite JSON number, or None for anything else (bools are not counts)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
