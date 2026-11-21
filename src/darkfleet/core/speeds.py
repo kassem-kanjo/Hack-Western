@@ -1,9 +1,9 @@
 """Maximum plausible vessel speeds.
 
-The per-class service speeds below are our working assumption (issue #28): docs/research.md
-section 5 has no sourced figure for most classes, so they are labelled as assumptions. We add a
-15% margin so the prism errs towards "could have been there"; a too-tight bound would hide real
-candidates.
+ASSUMED SERVICE SPEEDS, NO PRIMARY SOURCE FOUND. docs/research.md section 5 gives no sourced
+figure for these classes, so every speed in the table below is our own working assumption
+(issue #28), not a measured or published value. Each is multiplied by the 1.15 margin so the
+prism errs towards "could have been there"; a too-tight bound would hide real candidates.
 """
 
 from __future__ import annotations
