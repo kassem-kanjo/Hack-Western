@@ -147,3 +147,18 @@ Steps, fixed in advance:
 2. For each real gap of 48 hours or less in the 15 radar cells, score = the maximum over its unmatched radar cells of the bridge log-density, taking each cell's best value over the 30-minute sample times of its scene day at which the cell centre is inside the lens. Cells are tested by centre point against the exact lens (not the 0.01 degree box used in Test 1), so counts differ slightly from Test 1.
 3. Null: the same score with each gap shifted by 7 to 21 days, K = 50 shuffles, same shift rule as Test 1. Reported: (a) the number of gaps with any scorable cell, real vs shuffled; (b) the mean score over scorable gaps, real vs the 50 shuffled means; (c) the number of real gaps whose score exceeds the 95th percentile of the pooled shuffled scores, against the count expected by chance (the mean over shuffles of the same count, about 5% of scorable gaps); (d) recall-side check: AUC of the true position's bridge log-density against 20 positions displaced 50 to 150 km at random per case (bootstrap interval over cases). Within one case the ranking depends only on distance from the bridge mean, so the AUC does not depend on sigma.
 4. Verdict: signal if the interval of the count ratio in (c) excludes 1 or the p-value of (b) or (c) is below 0.05 and the AUC interval in (d) excludes 0.5; otherwise no signal. Both outcomes are reported as they come out; no parameter is changed after seeing results.
+
+### Results (Experiment 2)
+Fitted sigma = 21.62 km per square-root hour from 151 recall cases. Gaps of 48 hours or less in the 15 radar cells: 1,258. K = 50 shifted-prism shuffles.
+
+| Measure | Real | Shifted (mean, 95% range) | Ratio or p |
+| --- | --- | --- | --- |
+| Gaps with a scorable radar cell | 89 | 86.5 (71.7 to 100.3) | ratio 1.03, p 0.431 |
+| Mean best log-density over scorable gaps | -20.67 | -21.30 (-22.84 to -19.74) | p 0.275 |
+| Gaps above the null 95th percentile (-10.71) | 5 | 4.3 (2.0 to 8.0); 5% of scorable gaps = 4.5 | ratio 1.16 (0.27 to 2.39), p 0.431 |
+
+Recall-side check: the true position's bridge density beats a position displaced 50 to 150 km in 87.0% of 3,020 pairs (AUC 0.870, 95% interval 0.844 to 0.896, 151 cases).
+
+Verdict: no signal. (Rule from the pre-registration: signal needs the count ratio interval above 1 or p < 0.05 on the mean score or the count, and the AUC interval above 0.5.)
+
+Reading: the hypothesis is half right. The bridge is specific about where a ship is (AUC 0.87 against displaced positions, where the binary prism scored 98.4% for displaced points), but the radar cells it finds in dark-gap prisms score the same as cells found in time-shifted prisms (5 gaps above the null 95th percentile against 4.3 expected). A specific model does not create a signal the data lacks. Deviations from the pre-registration: 151 recall cases were used for the fit (the 146 of Test 1 excluded 5 whose polygon union failed; the bridge scoring uses exact point-in-lens tests and does not hit that error); the GEOS error in `core/prism.py` (issue #45) was left unfixed.
