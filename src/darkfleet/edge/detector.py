@@ -1,9 +1,12 @@
 """Untrusted, low-priority boat detector process.
 
-Reads frames from an image directory, a video file or a camera index, runs a
+Reads frames from a directory, a camera or the network bridge, runs a
 YOLOX-nano ONNX "boat" detector, and sends DETECTIONS/HEARTBEAT messages to the
 safety core over a Unix socket. `--mock` needs no camera, model, cv2 or
 onnxruntime.
+
+`--source` is `dir:<path>`, `camera:<index>` or `net:<port>`; a plain path is
+still read as a directory.
 """
 
 from __future__ import annotations
@@ -20,6 +23,13 @@ from typing import Any
 import numpy as np
 
 from darkfleet.edge.protocol import make_detections, make_heartbeat, send_msg
+from darkfleet.edge.sources import (
+    FrameSource,
+    decode_frame,
+    list_images,
+    open_source,
+    parse_source_spec,
+)
 
 DEFAULT_MODEL = "data/models/yolox_nano.onnx"
 INPUT_SIZE = 416
@@ -27,15 +37,10 @@ PAD_VALUE = 114
 BOAT_CLASS = 8  # COCO "boat"
 STRIDES = (8, 16, 32)
 NMS_IOU = 0.45
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".bmp"})
 CONNECT_TIMEOUT_S, CONNECT_RETRY_S, SLEEP_SLICE_S = 10.0, 0.05, 0.05
 MOCK_SYNTHETIC_FRAMES = 12
 
 Box = dict[str, Any]
-
-
-def _images(root: Path) -> list[Path]:
-    return sorted(p for p in root.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
 
 
 def letterbox(img_hw: tuple[int, int], size: int = INPUT_SIZE) -> float:
@@ -105,41 +110,12 @@ def mock_boxes(frame_index: int) -> list[Box]:
 
 
 def mock_frames(source: str) -> list[tuple[str, list[Box]]]:
-    root = Path(source)
-    paths = _images(root) if root.is_dir() else []
+    spec = parse_source_spec(source)
+    root = Path(spec.path) if spec.kind == "dir" else None
+    paths = list_images(root) if root is not None and root.is_dir() else []
     if paths:
         return [(p.name, mock_boxes(i)) for i, p in enumerate(paths)]
     return [(f"mock-{i:06d}", mock_boxes(i)) for i in range(MOCK_SYNTHETIC_FRAMES)]
-
-
-class RealSource:
-    def __init__(self, source: str) -> None:
-        import cv2
-
-        self._cv2, self._next, self._paths = cv2, 0, None
-        path = Path(source)
-        self._paths = _images(path) if path.is_dir() else None
-        if self._paths is not None and not self._paths:
-            raise FileNotFoundError(f"no images in {source}")
-        target = int(source) if source.lstrip("-").isdigit() else str(path)
-        self._cap = None if self._paths is not None else cv2.VideoCapture(target)
-        if self._cap is not None and not self._cap.isOpened():
-            raise OSError(f"cannot open source: {source}")
-
-    def read(self) -> np.ndarray | None:
-        if self._paths is None:
-            ok, img = self._cap.read()
-            return img if ok else None
-        if self._next >= len(self._paths):
-            return None
-        self._next += 1
-        return self._cv2.imread(str(self._paths[self._next - 1]))
-
-    def restart(self) -> None:
-        if self._paths is not None:
-            self._next = 0
-        elif self._cap is not None:
-            self._cap.set(self._cv2.CAP_PROP_POS_FRAMES, 0)
 
 
 class OnnxDetector:
@@ -203,7 +179,7 @@ def run(args: argparse.Namespace) -> int:
         return 3
 
     frames = mock_frames(args.source) if args.mock else None
-    source = None if args.mock else RealSource(args.source)
+    source: FrameSource | None = None if args.mock else open_source(args.source)
     model = None if args.mock else OnnxDetector(args.model)
 
     deadline = time.monotonic() + CONNECT_TIMEOUT_S
@@ -225,8 +201,8 @@ def run(args: argparse.Namespace) -> int:
     index = 0
     try:
         while True:
-            t_capture = time.monotonic()
             if frames is not None:
+                t_capture = time.monotonic()
                 if index >= len(frames):
                     if args.once:
                         return 0
@@ -234,14 +210,15 @@ def run(args: argparse.Namespace) -> int:
                 boxes = frames[index][1]
             else:
                 assert source is not None and model is not None
-                img = source.read()
-                if img is None:
+                capture = source.read()
+                if capture is None:
                     if args.once:
                         return 0
                     source.restart()
                     link.pause(max(interval, SLEEP_SLICE_S))
                     continue
-                boxes = model.detect(img, args.score_min)
+                t_capture, frame = capture
+                boxes = model.detect(decode_frame(frame), args.score_min)
             t_done = time.monotonic()
             link.send(make_detections(frame_id, t_capture, t_done, boxes))
             frame_id += 1
@@ -254,11 +231,17 @@ def run(args: argparse.Namespace) -> int:
         return 1
     finally:
         sock.close()
+        if source is not None:
+            source.close()
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="darkfleet.edge.detector")
-    parser.add_argument("--source", required=True, help="image directory, video file or camera index")
+    parser.add_argument(
+        "--source",
+        required=True,
+        help="dir:<path>, camera:<index> or net:<port> (a plain path means a directory)",
+    )
     parser.add_argument("--socket", required=True, help="safety-core Unix socket")
     parser.add_argument("--mock", action="store_true", help="no camera, no model, no cv2/onnxruntime")
     parser.add_argument("--model", default=DEFAULT_MODEL)

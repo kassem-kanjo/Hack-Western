@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from darkfleet.api.edge import router as edge_router
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
 
@@ -49,6 +50,7 @@ app.add_middleware(
 
 app.include_router(live_router)
 app.include_router(hormuz_router)
+app.include_router(edge_router)
 
 
 def data_dir() -> Path:

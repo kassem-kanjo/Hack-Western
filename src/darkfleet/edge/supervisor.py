@@ -311,7 +311,11 @@ class Supervisor:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Edge unit supervisor: safety core + detector.")
-    parser.add_argument("--source", required=True, help="image folder, video file, or camera index")
+    parser.add_argument(
+        "--source",
+        required=True,
+        help="dir:<path>, camera:<index> or net:<port> (plain path = directory)",
+    )
     parser.add_argument("--mock", action="store_true", help="synthetic detections (no model, no camera)")
     parser.add_argument("--model", default=None, help="ONNX model path (real mode)")
     parser.add_argument("--state-dir", default="data/edge", help="where the socket, status and alerts go")
