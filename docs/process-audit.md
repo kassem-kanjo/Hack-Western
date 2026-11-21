@@ -36,3 +36,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 4:** ~100% DeepSeek; Chief wrote only briefs, review scripts and the screenshot harness.
 - **Rule breaks:** visual review still done by Chief, not Critic/Director (token budget); acceptable for polish rounds, Director review planned once at CP2.
 - **Change for next 30 min:** always `gh pr update-branch` before merging a queued PR; keep the screenshot harness (scratchpad/shot.py) as the standard UI gate for every web PR.
+
+## Sat 21 Nov, 02:51 ET (audit 6, covers 02:35-02:51)
+- **Went well:** bridge UI + evidence panel, water clipping and sanctions join all DeepSeek-coded and browser/real-data checked; the real-data run of the sanctions join exposed generic-name false positives (LISBOA, MARIA, PORTO) before merge; PR merge loop now waits for CLEAN after update-branch (no more 'not mergeable' errors).
+- **Went wrong:** I put a test fixture in the main checkout instead of the worker's worktree (caught and copied before the worker needed it); downloaded third-party data showed as untracked (now in .git/info/exclude until the PR's .gitignore lands).
+- **Code share since audit 5:** ~100% DeepSeek.
+- **Rule breaks:** none.
+- **Change for next 30 min:** remaining build items need Kassem (story decision, Vultr, MLH codes, Pi), so the health loop drops to hourly overnight to save tokens; inputs for a worker always go into the worker's worktree (or the brief), never the main checkout.
