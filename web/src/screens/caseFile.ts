@@ -17,6 +17,7 @@ import { topBar } from "../components/TopBar";
 import { fmtHours, fmtInt, vesselLabel } from "../format";
 import { mountCaseMap, type CaseMapHandle } from "../map/caseMap";
 import { nearestFrameIndex } from "../model/frames";
+import { demoCaseId } from "./overview";
 
 const API_DOWN =
   "The console could not reach the API. Start it with DARKFLEET_DATA=data/snapshot uv run uvicorn darkfleet.api.app:app --port 8000.";
@@ -40,13 +41,12 @@ export async function renderCaseFile(
   ranked: CaseSummary[],
   generatedAt: string | null,
 ): Promise<{ destroy(): void }> {
-  void ranked;
-
   activeAbort?.abort();
   const abort = new AbortController();
   activeAbort = abort;
 
   const caseHref = `#/case/${encodeURIComponent(id)}`;
+  const demo = demoCaseId(ranked);
 
   // The shell is built before the fetch resolves so the topbar and the mode badge
   // are stable while the rail fills in; those nodes also tell us whether this
@@ -59,7 +59,13 @@ export async function renderCaseFile(
   const rail = h("aside", { class: "rail" });
 
   root.replaceChildren(
-    topBar({ active: "case", mode: "SNAPSHOT", generatedAt, caseHref }),
+    topBar({
+      active: "case",
+      mode: "SNAPSHOT",
+      generatedAt,
+      caseHref,
+      demoHref: demo !== null ? `#/case/${encodeURIComponent(demo)}` : null,
+    }),
     h("main", { class: "main" }, stage, rail),
   );
 
@@ -86,6 +92,16 @@ export async function renderCaseFile(
   const candidateSightings = detail.candidates.filter(
     (candidate) => candidate.verdict === "candidate",
   ).length;
+
+  // Earliest radar pass, not the first row in the API array: the demo link
+  // promises "first radar pass" for the ruled-out case it opens.
+  const earliestPass = detail.candidates
+    .flatMap((candidate) =>
+      candidate.scene_time === null
+        ? []
+        : [{ candidate, at: Date.parse(candidate.scene_time) }],
+    )
+    .sort((a, b) => a.at - b.at)[0]?.candidate;
 
   const mapDiv = h("div", { id: "map", class: "map" });
   const mapArea = h(
@@ -122,13 +138,10 @@ export async function renderCaseFile(
   // container is at its final height before MapLibre measures it.
   stage.append(tl.element);
   caseMap = mountCaseMap(mapDiv, detail);
-  // Open at the first radar pass (verdict candidate if there is one) so the lens
-  // and a live detection are on screen at once, not an empty point at t = 0.
-  const firstPass =
-    detail.candidates.find((c) => c.verdict === "candidate" && c.scene_time !== null) ??
-    detail.candidates.find((c) => c.scene_time !== null);
-  const startFrame = firstPass?.scene_time
-    ? nearestFrameIndex(detail.lens_frames, firstPass.scene_time)
+  // Open at the first radar pass so the lens and a detection are on screen at
+  // once, rather than an empty point at t = 0.
+  const startFrame = earliestPass?.scene_time
+    ? nearestFrameIndex(detail.lens_frames, earliestPass.scene_time)
     : 0;
   caseMap.setFrame(startFrame);
   tl.setFrame(startFrame);
