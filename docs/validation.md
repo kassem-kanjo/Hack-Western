@@ -135,3 +135,15 @@ Recall by gap type:
 - A land mask and radar fetched around shifted prisms would allow the spatial shuffle.
 
 Data: Global Fishing Watch (CC BY-NC 4.0). Powered by Global Fishing Watch.
+
+## Experiment 2: Brownian-bridge model (pre-registered 2026-11-21, before the run)
+
+Hypothesis: the binary prism is too large to be specific (Test 2 above: it contains a position moved 50 to 150 km 98.4% of the time), but a Brownian-bridge movement model (Horne et al. 2007, Ecology 88:2354) is specific, so radar cells that score high under it beat chance.
+
+Model. Ship seen at A (time t0) and B (t1), T hours apart. At time t with tau = (t - t0)/T the mean position is the geodesic interpolation from A to B and the variance per axis is sigma^2 * tau * (1 - tau) * T km^2 (sigma in km per square-root hour; variance floored at 1 km^2 at the ends). The density is truncated to the prism by giving -infinity to any point outside the exact lens at that time (the normalising constant of the truncation is ignored; it is a per-gap constant).
+
+Steps, fixed in advance:
+1. Fit sigma once by maximum likelihood on the synthetic recall cases of Test 2 only (known position of the ship at the time of its middle event; closed form sigma^2 = sum(d_i^2 / w_i) / (2n), where d is the distance of the true position from the bridge mean and w = tau(1 - tau)T). Radar is not used for fitting. The fit ignores truncation.
+2. For each real gap of 48 hours or less in the 15 radar cells, score = the maximum over its unmatched radar cells of the bridge log-density, taking each cell's best value over the 30-minute sample times of its scene day at which the cell centre is inside the lens. Cells are tested by centre point against the exact lens (not the 0.01 degree box used in Test 1), so counts differ slightly from Test 1.
+3. Null: the same score with each gap shifted by 7 to 21 days, K = 50 shuffles, same shift rule as Test 1. Reported: (a) the number of gaps with any scorable cell, real vs shuffled; (b) the mean score over scorable gaps, real vs the 50 shuffled means; (c) the number of real gaps whose score exceeds the 95th percentile of the pooled shuffled scores, against the count expected by chance (the mean over shuffles of the same count, about 5% of scorable gaps); (d) recall-side check: AUC of the true position's bridge log-density against 20 positions displaced 50 to 150 km at random per case (bootstrap interval over cases). Within one case the ranking depends only on distance from the bridge mean, so the AUC does not depend on sigma.
+4. Verdict: signal if the interval of the count ratio in (c) excludes 1 or the p-value of (b) or (c) is below 0.05 and the AUC interval in (d) excludes 0.5; otherwise no signal. Both outcomes are reported as they come out; no parameter is changed after seeing results.
