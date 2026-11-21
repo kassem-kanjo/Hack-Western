@@ -1,0 +1,225 @@
+/* Alert replay (#185): the dark period on a ten-second clock.
+
+   A strip inside the focus panel, not a card: one small-caps header with a
+   count, one transport row, one hairline scrubber. Rectangles, no pills, no
+   glow; mono for every number, 4 px spacing. Tokens only. */
+
+.replay {
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--c-line);
+  background: var(--c-panel);
+  color: var(--c-text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.replay[hidden] {
+  display: none;
+}
+
+.replay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  height: 26px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.replay-head h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+
+.replay-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-3);
+  white-space: nowrap;
+}
+
+.replay-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 10px var(--sp-2);
+}
+
+/* ---- transport ------------------------------------------------------------ */
+
+.replay-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* A transport key, not a pill: 22 px, square, hairline. */
+.replay-play {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-1);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.replay-play:hover {
+  background: var(--c-panel-raised);
+}
+
+.replay-play:disabled {
+  border-color: var(--c-line);
+  color: var(--c-text-3);
+  cursor: default;
+}
+
+.replay-play:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: -1px;
+}
+
+.replay-icon {
+  display: block;
+}
+
+.replay-clock {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-text-1);
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.replay-sep {
+  color: var(--c-line-strong);
+}
+
+.replay-total {
+  color: var(--c-text-3);
+}
+
+/* The reach at the playhead: the one number that moves. */
+.replay-radius {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-3);
+  white-space: nowrap;
+}
+
+/* ---- scrubber ------------------------------------------------------------- */
+
+.replay-track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  margin-top: var(--sp-1);
+}
+
+/* The native range keeps drag, touch and the keyboard; only its looks change.
+   --at is the played fraction, a hard stop rather than a gradient. */
+.replay-range {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.replay-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: linear-gradient(
+    to right,
+    var(--c-prism-stroke) 0 var(--at, 0%),
+    var(--c-line-strong) var(--at, 0%) 100%
+  );
+}
+
+.replay-range::-webkit-slider-thumb {
+  width: 3px;
+  height: 14px;
+  margin-top: -6px;
+  border: 0;
+  border-radius: 0;
+  background: var(--c-focus);
+  -webkit-appearance: none;
+}
+
+.replay-range::-moz-range-track {
+  height: 2px;
+  border: 0;
+  background: linear-gradient(
+    to right,
+    var(--c-prism-stroke) 0 var(--at, 0%),
+    var(--c-line-strong) var(--at, 0%) 100%
+  );
+}
+
+.replay-range::-moz-range-thumb {
+  width: 3px;
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--c-focus);
+}
+
+.replay-range:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* Moment marks above the line: the last fix, the reappearance. */
+.replay-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.replay-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 4px;
+  background: var(--c-text-3);
+}
+
+.replay-tick.is-last {
+  background: var(--c-risk-high);
+}
+
+.replay-tick.is-next {
+  background: var(--c-gap);
+}
+
+/* On the phone the panel is a sheet; the strip keeps its height and rhythm. */
+@media (max-width: 760px) {
+  .replay-body {
+    padding: 10px 12px;
+  }
+
+  .replay-play {
+    width: 28px;
+    height: 28px;
+  }
+}

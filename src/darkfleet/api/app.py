@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -18,9 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from darkfleet.api.areas import router as areas_router
 from darkfleet.api.edge import router as edge_router
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
+from darkfleet.api.search import router as search_router
+from darkfleet.api.vessels import router as vessels_router
+from darkfleet.api.vessels import warm_cache as warm_vessel_cache
 from darkfleet.api.watch import router as watch_router
 
 # Only these CaseDetail fields belong in a list response; the rest are detail-only.
@@ -44,7 +49,16 @@ GAP_WINDOW = {"start": "2026-08-15", "end": "2026-11-15"}
 
 STATS_FALLBACK: dict[str, Any] = {"dark_hours_daily": [], "validation": None}
 
-app = FastAPI(title="Dark Fleet API", version="1.0.0")
+# On the public server (DARKFLEET_PUBLIC=1) the interactive API docs are switched off; the
+# console only needs the JSON routes, and the docs page lists every endpoint to strangers.
+_PUBLIC = os.environ.get("DARKFLEET_PUBLIC", "").strip() == "1"
+app = FastAPI(
+    title="Dark Fleet API",
+    version="1.0.0",
+    docs_url=None if _PUBLIC else "/docs",
+    redoc_url=None if _PUBLIC else "/redoc",
+    openapi_url=None if _PUBLIC else "/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +71,17 @@ app.include_router(live_router)
 app.include_router(hormuz_router)
 app.include_router(edge_router)
 app.include_router(watch_router)
+app.include_router(vessels_router)
+
+
+@app.on_event("startup")
+def _warm_vessel_cache() -> None:
+    """Parse the recent recording in the background so the first dossier opens at once."""
+    threading.Thread(target=warm_vessel_cache, name="warm-vessels", daemon=True).start()
+
+
+app.include_router(search_router)
+app.include_router(areas_router)
 
 
 def data_dir() -> Path:

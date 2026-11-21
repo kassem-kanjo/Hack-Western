@@ -417,6 +417,61 @@ export function watchStream(onUpdate: WatchUpdate): WatchStream {
   };
 }
 
+// ---- Vessel dossier (#182; src/darkfleet/api/vessels.py) ----
+
+/** The list entry behind a watchlist tag: category, citation and dataset links. */
+export interface VesselWatchlist {
+  category: string;
+  list_name: string | null;
+  datasets: string[];
+  url: string | null;
+}
+
+/** The hull's newest fix. `sog`/`cog` are null when the broadcast did not carry them. */
+export interface VesselLastFix {
+  lat: number;
+  lon: number;
+  t: string;
+  sog: number | null;
+  cog: number | null;
+}
+
+/** One drawn track point: `[lon, lat, t]`, time order, at most 200 over 12 h. */
+export type VesselTrackPoint = [number, number, string];
+
+/** The counts and window behind the track. */
+export interface VesselStats {
+  pings_12h: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+/** `GET /api/vessel/{mmsi}`: one hull, joined from watch, live and the recording. */
+export interface VesselDossier {
+  mmsi: number;
+  name: string | null;
+  imo: number | null;
+  callsign: string | null;
+  type: string | null;
+  class: string | null;
+  flag: string | null;
+  length_m: number | null;
+  destination: string | null;
+  watchlist: VesselWatchlist | null;
+  last: VesselLastFix;
+  track: VesselTrackPoint[];
+  alerts: string[];
+  stats: VesselStats;
+}
+
+/** One hull's dossier; a 404 throws like every other GET here. */
+export function fetchVesselDossier(
+  mmsi: number,
+  signal?: AbortSignal,
+): Promise<VesselDossier> {
+  return getJson<VesselDossier>(`/api/vessel/${mmsi}`, signal);
+}
+
 // ---- Edge unit (src/darkfleet/api/edge.py; contract for issue #36) ----
 
 /**

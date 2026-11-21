@@ -1632,3 +1632,18 @@
     display: none;
   }
 }
+
+/* Area chips enriched with alerts in the last 12 h and an hourly ship-count trace (#186). */
+.watch-chip .watch-chip-alerts {
+  color: var(--c-risk-high);
+}
+
+.watch-chip-spark {
+  flex: none;
+}
+
+.watch-chip-spark polyline {
+  fill: none;
+  stroke: var(--c-text-3);
+  stroke-width: 1;
+}
