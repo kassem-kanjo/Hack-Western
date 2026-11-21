@@ -1,4 +1,4 @@
-.PHONY: check lint test web-build dev-api dev-web demo-check snapshot
+.PHONY: check lint test web-build dev-api dev-web demo-check snapshot sunday
 
 # The demo gate must run from make's /bin/sh, which may not have uv on PATH.
 UV ?= $(HOME)/.local/bin/uv
@@ -7,6 +7,9 @@ check: lint test web-build
 
 snapshot:
 	uv run python scripts/build_all.py
+
+sunday:
+	bash scripts/sunday.sh
 
 lint:
 	uv run ruff check . && uv run ruff format --check .
