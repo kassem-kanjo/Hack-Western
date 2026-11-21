@@ -13,9 +13,13 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
    around Hormuz. The live picture is only as good as who hosts receivers.
 4. **Prisms need speed headroom to find meetings.** Two ships meeting exactly at their speed cap produce
    lenses that collapse to a point; detection depends on the speed margin (1.15x). Evidence: core test.
-5. **Globally, radar backs up 109 gaps.** Of 5,624 non-gear 6-96 h gaps (Aug 15-Nov 15), 109 had unmatched
+5. **109 gaps had an unexplained radar detection their ship could have reached.** Of 5,624 non-gear 6-96 h gaps (Aug 15-Nov 15), 109 had unmatched
    radar detections inside their prism. Best transit case: CL YICHUN (cargo), dark 22.9 h off Guyana, 2
    candidates. Evidence: docs/region-scan.md.
 6. **Some "dark" fleets are probably gear.** Consecutive MMSIs 210700xxx (type insufficient_data) off Guyana go
    dark together: likely tag-like transmitters, a false-positive class worth filtering. Brazilian oil-field
    supply boats sit still near platforms, so radar "candidates" there may be the platforms themselves.
+7. **Our best case failed our own physics.** CL YICHUN looked like the perfect opener until the Auditor did
+   the arithmetic: reaching the radar dots needed 18.4 kn average vs 10.8 kn straight-line, and the dots were
+   only reachable in a 75-minute window that doesn't match the satellite pass. Why it matters: a dramatic
+   anecdote is not evidence; a tool that rules cases *out* is more trustworthy than one that only flags.
