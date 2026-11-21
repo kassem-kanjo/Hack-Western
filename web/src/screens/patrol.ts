@@ -37,6 +37,7 @@ import {
   stressEdgeDetector,
 } from "../api";
 import { h } from "../components/dom";
+import { fetchSightings, type SightingsPayload } from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { fmtInt, fmtUtc } from "../format";
 
@@ -182,7 +183,7 @@ function banner(
   decision: EdgeDecision | null,
 ): { level: BannerLevel; text: string; sub: string } {
   if (status?.alarm?.blind === true || decision?.alarm?.level === "blind") {
-    return { level: "blind", text: "LOOKOUT BLIND \u2014 manual watch", sub: "no frames: the lookout cannot see" };
+    return { level: "blind", text: "Lookout blind \u2014 manual watch", sub: "no frames: the lookout cannot see" };
   }
   if (decision === null) return { level: "idle", text: "Waiting for a decision", sub: "" };
   const alarm = decision.alarm;
@@ -193,13 +194,13 @@ function banner(
     else if (alarm.trend === "steady") parts.push("steady");
     if (typeof alarm.ttc_s === "number") parts.push(`~${Math.round(alarm.ttc_s)} s at this rate`);
     if (typeof alarm.range_m === "number") parts.push(`range ~${fmtInt(alarm.range_m)} m (estimate)`);
-    const text = (alarm.text ?? "VESSEL NOT ON AIS \u2014 alert bridge").replace(/ \u00b7 closing$/, "");
+    const text = (alarm.text ?? "Vessel not on AIS \u2014 alert bridge").replace(/ \u00b7 closing$/, "");
     return { level: "alert", text, sub: parts.join(" \u00b7 ") };
   }
   const matched = typeof decision.verdict?.text === "string" && decision.verdict.text.startsWith("Matches AIS");
   return {
     level: matched ? "ok" : "idle",
-    text: "WATCHING",
+    text: "Watching",
     sub: matched ? decision.verdict.text : "",
   };
 }
@@ -479,6 +480,7 @@ export function renderPatrol(app: HTMLElement): void {
   const hint = h("p", { class: "patrol-hint", hidden: true });
   const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
 
+  const evidenceEl = h("p", { class: "patrol-evidence" }, "Evidence log: checking…");
   const side = h(
     "aside",
     { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
@@ -487,6 +489,7 @@ export function renderPatrol(app: HTMLElement): void {
     metrics,
     positionEl,
     chain,
+    evidenceEl,
     h("h3", { class: "patrol-h" }, "Reliability"),
     fields,
     underLoad,
@@ -562,6 +565,17 @@ export function renderPatrol(app: HTMLElement): void {
     if (!controls) return;
     stressBtn.disabled = stressing || stressActive;
     stressBtn.textContent = stressing ? "Overloading the Pi\u2026" : "Overload the Pi (10 s)";
+  }
+
+  /** "Evidence log: N sightings · chain verified", from the hash-chained log (#220). */
+  function paintEvidence(payload: SightingsPayload | null): void {
+    if (payload === null) {
+      evidenceEl.textContent = "Evidence log: no sightings yet";
+      return;
+    }
+    const count = payload.chain?.records ?? payload.sightings.length;
+    const chain = payload.chain?.ok === true ? "chain verified" : "chain not verified";
+    evidenceEl.textContent = `Evidence log: ${count} sightings · ${chain}`;
   }
 
   /** Scheduling, loop lateness, recovery/restart counts, stress and controls. */
@@ -810,6 +824,7 @@ export function renderPatrol(app: HTMLElement): void {
         return;
       }
 
+      paintEvidence(await fetchSightings());
       const [decisionResult] = await Promise.allSettled([fetchEdgeDecision()]);
       if (disposed) return;
       // The A/B result changes only when someone runs it: look every 30 s, and only until found.
