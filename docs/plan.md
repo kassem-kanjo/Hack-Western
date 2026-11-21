@@ -1,76 +1,43 @@
-# Plan v2.1 (evidence-based + Auditor review, Fri 20 Nov, ~23:30 ET)
+# Plan v3: use every hour (written Sat 21 Nov 03:45 ET)
 
-Replaces v1. Built on tonight's data probes (docs/feasibility-dark-fleet.md, docs/region-scan.md).
-GitHub issues are the source of truth; this is the map.
+Deadline Sun 22 Nov 09:00 (Devpost locks). Build window: now → Sun 06:00 (~26 h), then freeze + submit.
+Code by DeepSeek coders (lead-less, Chief reviews); Claude only orchestrates, reviews, checks in a browser.
 
-## What changed from v1 and why
-| v1 assumption | Evidence | v2 decision |
+## The product (v3): a physics-based evidence engine for shadow-fleet monitoring
+One engine, three theatres, one honest scoreboard:
+1. **Global investigation (built):** GFW gaps → prism + Brownian bridge → radar at real scene time →
+   sanctions → 5,624 → 109 → 19, with an evidence panel showing what radar can and can't prove.
+2. **Baltic live engine (new core):** our own AIS recording (since Fri 23:18, ~45k msgs/h, full tracks +
+   IMO) in Tiger Data → **kinematics**: own silences near shore (GFW misses them), impossible jumps
+   (spoofing), one identity in two places (cloning), **ship-to-ship meetings seen in the tracks** (two
+   vessels slow and close offshore), dark meetings (two silent ships whose prisms overlap) → **IMO
+   watchlist** against OpenSanctions shadow-fleet/sanctions → live alerts + replay on the map.
+3. **Edge unit (built; QNX if a Pi by 12:00):** camera sees a ship not broadcasting; AI killable live.
+Scoreboard: every claim has a validation number from a test we pre-declared.
+
+## Milestones and lanes
+| Window | Milestone | Lanes (parallel, disjoint files) |
 |---|---|---|
-| One region (Baltic) | 0 GFW gaps in Baltic or Hormuz (> 50 nm rule); almost no Baltic SAR | **Global investigation**: the engine finds cases wherever gaps and radar overlap |
-| GFW gives us gaps everywhere | Per-vessel presence API down | **Our own recording** of Baltic AIS since Fri 23:18 → our own gap detection |
-| Prism + SAR would find matches | 109 of 5,624 gaps have radar candidates in their prism | Core idea confirmed; best transit case CL YICHUN off Guyana |
+| Sat 03:45-09:00 (Kassem asleep) | **M4 Baltic engine** | L1 #72 tracks → Tiger (positions/static/coverage) · L2 #73 kinematics (silences, jumps, cloning) · L3 #75 STS/meeting detector from tracks · then L4 #74 ground-truth validation on masked tracks · L5 #76 IMO watchlist join |
+| Sat 09:00 | **CP1** | Kassem: story (v3 pitch), Vultr, MLH codes, Pi hunt |
+| Sat 09:00-15:00 | **M5 Live + online** | L6 #13 live alerts (SSE) + Baltic screen in console · L7 #15 deploy on Vultr (recorder + API + console, domain) · L8 #77 satellite quicklooks for candidates (Copernicus) · L9 #17 Entire in our workflow |
+| Sat 15:00 | **CP2** | Opus Auditor + /code-review high + /security-review on everything; fix list |
+| Sat 15:00-22:00 | **M6 Demo ready** | fixes from CP2 · replay mode (scrub last 24 h of Baltic) · edge on Pi (#36) if obtained · offline snapshot of all three theatres · demo script v1 + rehearsal |
+| Sat 22:00 | **CP3** | Full offline rehearsal at 3:00; feature freeze |
+| Sat 22:00-Sun 06:00 | **M7 Polish + story** | Critic/Director visual pass · README + architecture refresh · 60 s video · Devpost draft · DEV post draft (Comms review) · bug bash · buffer |
+| Sun 06:00-08:30 | **M8 Submit** | final data refresh, snapshot, video, Devpost with tracks matching the live site, submit by 08:30 |
+| Sun 10:00 / 11:30 | Judging | QNX sponsor table (if Pi) · main demo fair |
 
-## Auditor review (Opus, round 1) and what we changed
-Verdict was "not ready as written": the planned opener (CL YICHUN) fails our own physics (needs 18.4 kn
-average to reach the radar cells vs 10.8 kn straight-line; reachable only ~06:30-07:45 UTC, not at the
-Sentinel-1 pass), and nothing showed the signal beats chance. All 10 findings accepted:
-1. **Scene times + class speeds** (#28): get each radar scene's real acquisition time from the Copernicus
-   Data Space STAC catalogue (free); test the dot against the lens *at that instant*; use per-class service
-   speeds from research; re-rank. The opener is chosen from what survives, or we open on how a case is
-   ruled out.
-2. **Validation is the headline** (#27, never cut): (a) null test: shift prisms in time/space, recount,
-   report "N x chance"; (b) recall test: take GFW encounters where both ships broadcast, hide one ship's
-   track to fake a gap, measure how often prism + radar recovers its true position.
-3. **False-positive filters** (#28): off≈on within 5 km = stationary (not a case); radar cells recurring on
-   >= 3 days = fixed structure; show meetings only with slack > 0.3.
-4. **One story in 3 minutes: Investigate.** Baltic gets one line or is cut; Edge only at the QNX sponsor table.
-5. **Offline basemap** (#30): bundle Natural Earth coastlines; rehearse CP3 with wifi off.
-6. **Radar vs lens at scene time only**; never compare a day-resolution dot to an hourly lens.
-7. **Schema first** (#29): Chief freezes `/api/cases/{id}` JSON + one real fixture before lanes start;
-   Tiger Data gets a real issue (#31: `dark_hours_daily` continuous aggregate → `/api/stats`).
-8. **Lane C moves to validation**; Baltic #19 becomes an optional offline batch with berth/box-exit filters.
-9. **QNX: Pi in hand by Sat 12 PM or the edge lane is cut.**
-10. **Wording**: "109 gaps had an unexplained radar detection their ship could have reached", plus caveats
-    (radar misses small boats; GFW and OpenSanctions are CC BY-NC, non-commercial).
+## Never cut
+Validation numbers · global case file · Baltic kinematics with at least one real finding · offline snapshot ·
+rehearsed 3:00 script. **Cut order if behind:** satellite quicklooks → Entire → live SSE (keep replay) →
+edge on Pi → STS detector.
 
-## The product: one engine, three views
-1. **Investigate (historical, global).** GFW gap events → prisms → unmatched radar inside the prism →
-   possible hidden meetings (two gaps' prisms overlapping in time) → explainable 0-100 score → case list
-   and case file. Demo opener.
-2. **Watch (live, Baltic).** Our own AIS recording → silences detected by us (coverage-aware) → prisms
-   and meetings on our own data; sanctioned-tanker watchlist (OpenSanctions, CC BY-NC).
-3. **Edge (patrol unit, QNX if a Pi appears).** Camera sees a ship that isn't broadcasting → alert offline;
-   AI process killable live while the safety core keeps running.
+## Demo (3:00, v3 draft)
+0:00 Baltic map, live: "We've recorded every ship in the Baltic since Friday night." · 0:20 a real silence
+or impossible jump found in our own data, with the physics that proves it · 1:00 global funnel 5,624 → 109 →
+19 and why 90 are innocent · 1:40 the evidence panel: what radar can't prove, what physics can (validation
+numbers) · 2:20 watchlist hit (IMO match) or the OFAC name match labelled honestly · 2:45 who it's for.
 
-## Who does what (DeepSeek-first)
-Code is written by OpenCode DeepSeek flash coders; Builder leads run on Haiku and split work into named
-coder pieces; Sonnet only for an algorithm a coder failed on; Opus Auditor once per checkpoint; Chief
-merges after CI is green and the gate passes. Every piece = issue → branch → PR (`Closes #N`) → CI → merge.
-
-## M1 End to end → CP2, Sat 3 PM
-| Issue | Work | Depends |
-|---|---|---|
-| #25 Case builder | `scripts/build_cases.py`: gaps (global scan cache + DB) → prism footprint, radar candidates, **pairwise hidden meetings** (prefilter: time overlap + footprint intersect), filters for gear / stationary / tag-like MMSI blocks → `cases` table + JSON | core, data |
-| #12 Scoring + sanctions | explainable score (factors with points, data source, caveats); OpenSanctions vessel join by IMO/MMSI | #25 |
-| #19 Own gaps (Baltic) | silences from recorded AIS, coverage-aware (never a gap across a recorder outage) | recorder |
-| #10 API | FastAPI read-only: `/api/cases`, `/api/cases/{id}` (gap, footprint GeoJSON, lens polygons at 24 time steps, candidates, meetings, score factors, sources), `/api/stats`, `/api/live/silences`, `/api/edge/status`; `SNAPSHOT=1` serves frozen JSON with zero network | #25 |
-| #11 Console | screens 01 overview, 02 case file, 03 meeting, built one at a time and compared to the wireframe PNGs; fonts bundled; "Powered by Global Fishing Watch" on every map | #10 (mock JSON first) |
-
-Parallel lanes: **overnight** #29 schema (Chief) + #28 scene times/filters + #27 validation · **Sat AM** lane A #25 → #12 → #10 · lane B #11 against the frozen schema fixture · lane C #30 basemap + #31 Tiger aggregate. #19 Baltic only if ahead.
-
-## M2 Demo ready → CP3, Sat 10 PM
-#13 live layer · #14 edge sync + console view · #7 edge on Pi (if obtained) · #15 deploy (Vultr + domain;
-recorder moves to the VM) · #16 demo script rehearsed to 3:00 · #17 Entire (sessions, graph, Trails).
-
-## M3 Submit → Sun 8:30 AM
-Freeze 6 AM · Devpost + 60 s video (1280x720, 1.5x scale, big captions) · prize tracks identical on Devpost
-and live site · submit by 8:30. After: DEV post from docs/insights.md.
-
-## Cut order if behind at CP2 (keep the core)
-1. Watchlist sanctions in live view → 2. live layer → 3. edge on laptop (keep only if Pi) →
-4. meeting view polish. Never cut: validation numbers (#27), case list + case file with prism scrubber + radar candidates at scene time, offline snapshot + basemap, the rehearsed 3:00 script.
-
-## Gates (every PR)
-CI green · `make check` · tests for new behaviour · UI: screenshot vs wireframe · Chief re-runs checks.
-Every checkpoint: Opus Auditor + `/code-review high`; `/security-review` before deploy.
-Health loop every 30 min (`scripts/health.sh`: recorder, CI, PRs, gate on clean origin/main).
+## Gates (unchanged)
+Issue → branch → PR → CI → Chief re-verify (real data or browser) → merge. Health + audit loop.
