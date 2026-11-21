@@ -23,6 +23,10 @@ edge = [
 desktop = [
     "pywebview>=5.3",
 ]
+sat = [
+    "rasterio>=1.4",
+    "pillow>=10",
+]
 
 [dependency-groups]
 dev = [

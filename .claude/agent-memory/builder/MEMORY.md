@@ -1,1 +1,2 @@
 - [OpenCode worker patterns](opencode-worker-patterns.md) — delegate.sh worked for scaffold; uv not on worker PATH; apply diff.patch then run gate yourself
+- [SAR / Planetary Computer facts](sar-planetary-computer.md) — PC access works, slow reads, detector tuning, AIS recorder gap
