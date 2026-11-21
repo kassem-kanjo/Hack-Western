@@ -113,3 +113,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 15:** ~95% DeepSeek; Chief: path-display fix.
 - **Rule breaks:** none.
 - **Change for next 30 min:** at the 12:20 check, if no Pi: write decision 0003 (drop the hardware demo, keep the Patrol software tab and the QNX path as roadmap) and close #36 as not planned. No new lanes until CP3 (15:00) unless Kassem replies: V2 scope is done and tokens are scarce.
+
+## Sat 21 Nov, 12:50 ET (audit 17, covers 11:55-12:50)
+- **Went well:** Kassem got the QNX Pi + webcam; within ~20 min the edge unit gained camera/net frame sources, a laptop-to-Pi bridge, a key-only ssh deploy script and live status via the API (#157), verified with the real detector over TCP (kill → recovery 821.9 ms, 9.2 ms inference, 0 deadline misses).
+- **Went wrong:** venue wifi dropped 11:52-12:33 ET (recorder retried and recovered by itself; ~41 min hole, coverage-aware rules unaffected). The audit-16 PR stalled on the outage. My first smoke "passed" in --mock mode, which ignores the network source; caught by the sender's connect error and re-run with the real model. macOS rejects Unix socket paths over 104 chars (scratch dir), so the smoke used /tmp/dfe.
+- **Code share since audit 16:** ~90% DeepSeek; Chief: smoke harness, review.
+- **Rule breaks:** none.
+- **Change for next 30 min:** a smoke counts only if the path under test is the one the demo uses (no --mock for transport tests). Next: get the Pi onto a network (USB-C to the Mac is power only), then edge_deploy.sh.
