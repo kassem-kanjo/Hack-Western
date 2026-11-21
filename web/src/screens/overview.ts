@@ -64,6 +64,22 @@ export function bestCandidateId(ranked: CaseSummary[]): string | null {
   return best ? best.id : null;
 }
 
+/**
+ * The case "Start demo" opens: a physics-ruled-out gap with at least one radar
+ * pass, lowest score first. It is the honest version of the pitch (the ship
+ * was not there), and the case file opens it on the first radar pass.
+ */
+export function demoCaseId(ranked: CaseSummary[]): string | null {
+  let best: CaseSummary | null = null;
+  for (const candidate of ranked) {
+    if (candidate.status !== "ruled_out" || candidate.n_candidates < 1) continue;
+    if (best === null || (candidate.score ?? Infinity) < (best.score ?? Infinity)) {
+      best = candidate;
+    }
+  }
+  return best ? best.id : null;
+}
+
 /** Paint the overview into `root` (the #app element). */
 export function renderOverview(
   root: HTMLElement,
@@ -72,6 +88,7 @@ export function renderOverview(
   const ranked = rankCases(data.cases);
   const counts = funnelCounts(data.cases, data.totals.gaps_scanned);
   const best = bestCandidateId(ranked);
+  const demo = demoCaseId(ranked);
 
   const mapDiv = h("div", { id: "map", class: "map" });
 
@@ -98,6 +115,7 @@ export function renderOverview(
       mode: "SNAPSHOT",
       generatedAt: data.generated_at,
       caseHref: best !== null ? `#/case/${encodeURIComponent(best)}` : null,
+      demoHref: demo !== null ? `#/case/${encodeURIComponent(demo)}` : null,
     }),
     h("main", { class: "main" }, stage, rail),
   );

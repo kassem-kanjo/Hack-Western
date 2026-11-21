@@ -286,12 +286,17 @@ export function mountCaseMap(
       );
     }
 
-    // HTML labels replace a glyph-rendered text layer.
+    // HTML labels replace a glyph-rendered text layer. Anchor the text above
+    // the end dot with a 10 px gap so the dot never sits on top of the words.
     const startLabel = document.createElement("div");
     startLabel.className = "map-label";
     startLabel.textContent = `Last ping ${fmtUtc(detail.off.t)}`;
     markers.push(
-      new maplibregl.Marker({ element: startLabel })
+      new maplibregl.Marker({
+        element: startLabel,
+        anchor: "bottom",
+        offset: [0, -10],
+      })
         .setLngLat(detail.off.pos)
         .addTo(map),
     );
@@ -300,7 +305,11 @@ export function mountCaseMap(
     endLabel.className = "map-label";
     endLabel.textContent = `Reappears ${fmtUtc(detail.on.t)}`;
     markers.push(
-      new maplibregl.Marker({ element: endLabel })
+      new maplibregl.Marker({
+        element: endLabel,
+        anchor: "bottom",
+        offset: [0, -10],
+      })
         .setLngLat(detail.on.pos)
         .addTo(map),
     );

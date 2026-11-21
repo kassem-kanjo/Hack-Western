@@ -38,21 +38,28 @@ function timeFraction(offIso: string, onIso: string, iso: string): number {
   return clamp((at - start) / span, 0, 1);
 }
 
-/** Marker label sits inside the rotated diamond, so counter-rotate the text. */
-function radarLabel(n: number): HTMLElement {
-  const label = h("span", { class: "radar-label" }, `radar pass ${n}`);
-  label.style.position = "absolute";
-  label.style.left = "50%";
-  label.style.top = "14px";
-  label.style.transform = "translateX(-50%) rotate(-45deg)";
-  label.style.transformOrigin = "left top";
-  label.style.whiteSpace = "nowrap";
-  label.style.fontSize = "var(--fs-caption)";
-  label.style.color = "var(--c-text-3)";
-  return label;
+const MAX_TICK_LABELS = 10;
+const TICK_STEPS = [4, 6, 8, 12, 24, 48];
+
+/**
+ * Smallest step that keeps the hour labels under the cap. Four-hour ticks make
+ * a 96 h gap unreadable; pick 8, 12 or 24 h instead. Anything longer falls back
+ * to exactly ten labels.
+ */
+function tickStep(hours: number): number {
+  for (const step of TICK_STEPS) {
+    if (Math.floor(hours / step) <= MAX_TICK_LABELS) return step;
+  }
+  return Math.ceil(hours / MAX_TICK_LABELS);
 }
 
-/** One marker per distinct radar scene time, numbered in time order. */
+/**
+ * One marker per distinct radar scene time, numbered in time order.
+ *
+ * The label sits above the track on a short leader instead of inside the
+ * diamond, and close passes get stacked into lanes so two labels that share a
+ * timestamp (a single satellite pass covering several cells) never overlap.
+ */
 function radarMarkers(detail: CaseDetail, frames: CaseDetail["lens_frames"]): Marker[] {
   const byScene = new Map<string, Candidate[]>();
 
@@ -68,12 +75,36 @@ function radarMarkers(detail: CaseDetail, frames: CaseDetail["lens_frames"]): Ma
 
   const scenes = [...byScene.keys()].sort((a, b) => Date.parse(a) - Date.parse(b));
 
+  // Four label lanes is what the track row has room for. A lane is reused only
+  // once the previous label in it is far enough away to leave a gap.
+  const LANE_GAP_PCT = 9;
+  const laneLastPct = [
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+  ];
+
   return scenes.map((scene, i) => {
     const pct = timeFraction(detail.off.t, detail.on.t, scene) * 100;
-    const element = h("span", { class: "radar-pass" }, radarLabel(i + 1));
-    element.style.position = "absolute";
-    element.style.top = "-1px";
+
+    let lane = laneLastPct.findIndex((last) => pct - last >= LANE_GAP_PCT);
+    if (lane === -1) lane = laneLastPct.indexOf(Math.min(...laneLastPct));
+    laneLastPct[lane] = pct;
+
+    const element = h("span", { class: "radar-marker" });
     element.style.left = `${pct}%`;
+    element.style.setProperty("--lane-offset", `${lane * 14}px`);
+    // Keep a label at either end from hanging outside the timeline.
+    element.style.setProperty(
+      "--label-anchor",
+      pct < 6 ? "0%" : pct > 94 ? "-100%" : "-50%",
+    );
+    element.append(
+      h("span", { class: "radar-label" }, `radar pass ${i + 1}`),
+      h("span", { class: "radar-leader" }),
+      h("span", { class: "radar-pass" }),
+    );
     return { element, candidates: byScene.get(scene) ?? [] };
   });
 }
@@ -84,7 +115,8 @@ function tickRow(detail: CaseDetail): HTMLElement {
   row.style.height = "16px";
 
   const hours = detail.hours;
-  for (let hr = 4; hr <= hours; hr += 4) {
+  const step = tickStep(hours);
+  for (let hr = step; hr <= hours; hr += step) {
     const pct = hours > 0 ? (hr / hours) * 100 : 0;
     const tick = h("span", { class: "tick" }, `+${hr} h`);
     tick.style.position = "absolute";

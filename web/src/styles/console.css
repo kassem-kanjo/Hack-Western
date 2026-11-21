@@ -76,6 +76,22 @@ body {
   cursor: default;
 }
 
+.demo-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-2);
+  color: var(--c-text-1);
+  font-size: var(--fs-label);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.demo-link:hover {
+  border-color: var(--c-text-2);
+}
+
 .topbar-spacer {
   flex: 1;
 }
@@ -599,6 +615,9 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-4);
+  /* Same inset as every .rail-section, so the identity block lines up with the
+     score, reasons, sources and caveats below it. */
+  padding: var(--sp-4) var(--sp-5);
 }
 
 .case-head .name {
@@ -765,21 +784,58 @@ input.scrubber::-moz-range-thumb {
 }
 
 .tick {
+  top: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-caption);
   color: var(--c-text-3);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A radar pass is a zero-size anchor on the track: the diamond sits on it and
+   the label floats above it on a short leader, so the two never overlap. */
+.radar-marker {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .radar-pass {
+  position: absolute;
+  top: -5px;
+  left: -5px;
   width: 10px;
   height: 10px;
   background: var(--c-sar);
   transform: rotate(45deg);
 }
 
-.radar-pass.is-now {
+.radar-marker.is-now .radar-pass {
   box-shadow: 0 0 0 2px var(--c-focus);
+}
+
+.radar-leader {
+  position: absolute;
+  left: 0;
+  bottom: 8px;
+  width: 1px;
+  height: calc(10px + var(--lane-offset, 0px));
+  background: var(--c-line-strong);
+}
+
+.radar-label {
+  position: absolute;
+  bottom: calc(20px + var(--lane-offset, 0px));
+  left: 0;
+  transform: translateX(var(--label-anchor, -50%));
+  font-family: var(--font-sans);
+  font-size: var(--fs-caption);
+  line-height: 1;
+  color: var(--c-text-3);
+  white-space: nowrap;
 }
 
 .time-readout {
@@ -812,6 +868,7 @@ input.scrubber::-moz-range-thumb {
 
 .btn:focus-visible,
 .tab:focus-visible,
+.demo-link:focus-visible,
 .case-row:focus-visible {
   outline: 2px solid var(--c-focus);
   outline-offset: 2px;

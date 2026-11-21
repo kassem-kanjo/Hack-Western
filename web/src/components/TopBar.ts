@@ -12,6 +12,7 @@ export function topBar(opts: {
   mode: ConsoleMode;
   generatedAt: string | null;
   caseHref: string | null;
+  demoHref: string | null;
 }): HTMLElement {
   const overviewTab = h(
     "a",
@@ -42,11 +43,20 @@ export function topBar(opts: {
         : "SNAPSHOT"
       : opts.mode;
 
+  // The demo always opens a physics-ruled-out case on its first radar pass, so
+  // the four-way story (AIS gap, lens, detection, "not the ship") is on screen
+  // immediately without hunting through the list.
+  const demoLink =
+    opts.demoHref !== null
+      ? h("a", { class: "demo-link", href: opts.demoHref }, "Start demo")
+      : null;
+
   return h(
     "header",
     { class: "topbar" },
     h("span", { class: "brand" }, "Dark Fleet"),
     h("nav", { class: "tabs" }, overviewTab, caseTab),
+    demoLink,
     h("span", { class: "topbar-spacer" }),
     h(
       "span",

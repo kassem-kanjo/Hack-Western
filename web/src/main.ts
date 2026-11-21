@@ -60,7 +60,13 @@ function showLoading(): void {
 
 function showError(message: string): void {
   app.replaceChildren(
-    topBar({ active: "overview", mode: "ERROR", generatedAt: null, caseHref: null }),
+    topBar({
+      active: "overview",
+      mode: "ERROR",
+      generatedAt: null,
+      caseHref: null,
+      demoHref: null,
+    }),
     h(
       "main",
       { class: "main" },

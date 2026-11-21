@@ -31,23 +31,20 @@ function caseHead(detail: CaseDetail): HTMLElement {
 }
 
 function scoreSection(detail: CaseDetail): HTMLElement {
+  // A missing score is a state, not a zero: no hero number and no empty track,
+  // just the same "Not scored" chip the case list uses.
+  if (detail.score === null) {
+    return h("div", { class: "rail-section" }, riskChip(null, null));
+  }
+
   const hero = h(
     "div",
     { class: "score-hero" },
-    detail.score === null ? "\u2014" : fmtInt(detail.score),
-    h(
-      "small",
-      null,
-      detail.score === null ? "not scored in this snapshot" : "risk score of 100",
-    ),
+    fmtInt(detail.score),
+    h("small", null, "risk score of 100"),
   );
 
-  const row = h(
-    "div",
-    null,
-    hero,
-    detail.score === null ? riskChip(null, null) : riskChip(detail.band, detail.score),
-  );
+  const row = h("div", null, hero, riskChip(detail.band, detail.score));
   row.style.display = "flex";
   row.style.alignItems = "baseline";
   row.style.justifyContent = "space-between";
