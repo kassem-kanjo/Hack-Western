@@ -31,5 +31,8 @@ jobs:
       - name: Install Python 3.12
         run: uv python install 3.12
 
+      - name: Install web deps
+        run: npm ci --prefix web
+
       - name: Check
         run: make check
