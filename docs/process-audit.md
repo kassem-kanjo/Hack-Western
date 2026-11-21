@@ -120,3 +120,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 16:** ~90% DeepSeek; Chief: smoke harness, review.
 - **Rule breaks:** none.
 - **Change for next 30 min:** a smoke counts only if the path under test is the one the demo uses (no --mock for transport tests). Next: get the Pi onto a network (USB-C to the Mac is power only), then edge_deploy.sh.
+
+## Sat 21 Nov, 13:20 ET (audit 18, covers 12:50-13:20)
+- **Went well:** live Patrol tab merged (#160) and exercised in real Chrome with the real model: Kill → "restarting" while the safety core runs → recovered 831.2 ms. Review caught the button showing a browser-side timing (872 ms) next to the supervisor's 804 ms; fixed so every readout shows the one measured number. Story approved by Kassem and recorded (#159).
+- **Went wrong:** I tried to record "story approved" from an ambiguous "go for 2"; the permission classifier stopped it and Kassem confirmed explicitly. Pi setup took many turns because I didn't read the QNX slide first: it said the loaner Pis come pre-loaded, which removed the imager question. Health went RED: Hypothesis found an antimeridian bug in the prism polygons (#161), unrelated to today's merges; fix lane w20 running.
+- **Code share since audit 17:** ~90% DeepSeek; Chief: recovery-readout fix, smoke harness.
+- **Rule breaks:** nearly logged a CEO approval from an ambiguous message (blocked).
+- **Change for next 30 min:** approvals are recorded only from explicit words, quoted; for hardware, read every artefact the user already shared before giving setup steps. Merge #161's fix to return main to green.
