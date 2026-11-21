@@ -20,9 +20,10 @@ import math
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
+from shapely.geometry import Polygon
 
 from darkfleet.core.geo import GEOD, Fix, distance_km, distance_km_array
-from darkfleet.core.prism import _reach_km
+from darkfleet.core.prism import _circle, _reach_km, lens_polygon
 
 S2_FLOOR_KM2 = 1.0  # variance floor so the density is finite at t0 and t1
 
@@ -69,6 +70,36 @@ def bridge_s2(a: Fix, b: Fix, sigma: float, t: datetime) -> float:
     hours = _gap_hours(a, b)
     tau = _tau(a, b, t)
     return max(sigma * sigma * tau * (1.0 - tau) * hours, S2_FLOOR_KM2)
+
+
+def bridge_ellipse(
+    a: Fix,
+    b: Fix,
+    sigma: float,
+    t: datetime,
+    v_kn: float | None = None,
+    k: float = 2.0,
+    n: int = 64,
+) -> Polygon:
+    """Most-likely region at time t: the k-sigma circle of the bridge, in lon/lat.
+
+    The Brownian bridge puts the vessel inside a disc of radius ``k * sqrt(s2)``
+    around the interpolated mean with high probability (``k=2`` is roughly 95% per
+    axis), so this is the shape the UI can shade without implying more precision than
+    the model has. The circle pinches to the radius implied by the ``S2_FLOOR_KM2``
+    variance floor at the endpoints, exactly like ``bridge_s2``. When a speed cap is
+    supplied the disc is clipped to the space-time lens: a cell the vessel could not
+    physically have reached must never be shaded as likely.
+    """
+    mlat, mlon = bridge_mean(a, b, t)
+    radius_km = k * math.sqrt(bridge_s2(a, b, sigma, t))
+    ellipse = Polygon(_circle(mlat, mlon, radius_km, n))
+    if v_kn is None:
+        return ellipse
+    lens = lens_polygon(a, b, v_kn, t)
+    if lens.is_empty:
+        return Polygon()
+    return ellipse.intersection(lens)
 
 
 def bridge_logpdf(a: Fix, b: Fix, sigma: float, lat: float, lon: float, t: datetime) -> float:

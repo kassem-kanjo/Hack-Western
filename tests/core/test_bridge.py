@@ -14,6 +14,7 @@ import pytest
 
 from darkfleet.core.bridge import (
     S2_FLOOR_KM2,
+    bridge_ellipse,
     bridge_logpdf,
     bridge_mean,
     bridge_s2,
@@ -22,6 +23,7 @@ from darkfleet.core.bridge import (
     paired_auc,
 )
 from darkfleet.core.geo import Fix, distance_km
+from darkfleet.core.prism import lens_polygon
 
 T0 = datetime(2026, 10, 7, 0, 0, tzinfo=UTC)
 A = Fix(24.0, 56.0, T0)
@@ -65,6 +67,42 @@ def test_bridge_s2_floor_at_ends_and_max_at_midpoint():
     assert bridge_s2(A, B, SIGMA, mid) == pytest.approx(SIGMA**2 * total_h / 4.0)
     # tau*(1-tau) peaks at the midpoint, so no interior time can beat it
     assert bridge_s2(A, B, SIGMA, mid) > bridge_s2(A, B, SIGMA, A.t + (B.t - A.t) / 4)
+
+
+def test_bridge_ellipse_centred_on_the_interpolated_point():
+    mid = A.t + (B.t - A.t) / 2
+    mlat, mlon = bridge_mean(A, B, mid)
+    expected_r = 2.0 * math.sqrt(bridge_s2(A, B, SIGMA, mid))
+
+    ellipse = bridge_ellipse(A, B, SIGMA, mid, n=32)
+
+    assert ellipse.geom_type == "Polygon"
+    assert ellipse.is_empty is False
+    for x, y in ellipse.exterior.coords:
+        assert distance_km(mlat, mlon, y, x) == pytest.approx(expected_r, abs=0.5)
+    assert distance_km(mlat, mlon, ellipse.centroid.y, ellipse.centroid.x) < 1.0
+
+
+def test_bridge_ellipse_radius_floors_at_the_ends():
+    floor_r = 2.0 * math.sqrt(S2_FLOOR_KM2)
+    for t, fix in ((A.t, A), (B.t, B)):
+        ellipse = bridge_ellipse(A, B, SIGMA, t)
+        assert ellipse.is_empty is False
+        for x, y in ellipse.exterior.coords:
+            assert distance_km(fix.lat, fix.lon, y, x) == pytest.approx(floor_r, abs=0.05)
+
+
+def test_bridge_ellipse_stays_inside_the_lens_with_a_speed_cap():
+    span = B.t - A.t
+    for frac in (0.2, 0.5, 0.8):
+        t = A.t + span * frac
+        lens = lens_polygon(A, B, 20.0, t)
+        assert not lens.is_empty
+
+        clipped = bridge_ellipse(A, B, SIGMA, t, v_kn=20.0)
+        assert not clipped.is_empty
+        assert clipped.difference(lens).area < 1e-12
+        assert clipped.area <= bridge_ellipse(A, B, SIGMA, t).area + 1e-12
 
 
 def test_bridge_logpdf_peaks_at_mean_and_decays():
