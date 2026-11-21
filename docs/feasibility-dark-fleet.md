@@ -40,3 +40,7 @@
 | F2 SAR granularity | **PASS** (Hormuz) / FAIL (Baltic) | 4Wings `public-global-sar-presence` at HIGH res = 0.01° cells (~1 km), DAILY date (no time of day). Oct 2026, Gulf of Oman box [54-60E, 22-27N]: 11,036 detection cells, **5,551 unmatched to AIS**. Gulf of Finland: 1 detection. |
 
 **Decision (Chief, Fri 23:25): demo region moves from the Baltic to the Strait of Hormuz / Gulf of Oman.** Rich radar coverage, real gap events, and the centre of sanctioned Iranian oil STS activity. SAR has day resolution only, so a detection matches a prism if its cell intersects the union of lenses over that day.
+| F5 live AIS, Hormuz | **FAIL** | aisstream, box [22-27.5N, 50-60.5E], 90 s: 3 messages, 2 vessels. Volunteer receivers barely cover Iran/Oman. |
+| F6 storage | **PASS** | Tiger Cloud service up: TimescaleDB 2.32.1 on PostgreSQL 18.7 (trial, $1,000 credit, no card). |
+
+**Decision (Chief, Fri 23:55): live layer = Baltic / Danish-straits watchlist** (591 vessels/min coverage): track sanctioned tankers live and alert when one goes silent. Investigation (satellite + prisms) stays in Hormuz. Same shadow fleet, two theatres.
