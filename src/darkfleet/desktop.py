@@ -244,7 +244,9 @@ def open_window(
     A missing build opens the window immediately on a small "Building…" page; the build then
     runs in pywebview's worker thread and the real URL is loaded in the same window.
     """
-    webview = webview_module if webview_module is not None else importlib.import_module("pywebview")
+    webview = (
+        webview_module if webview_module is not None else importlib.import_module("webview")
+    )  # pip "pywebview" installs module "webview"
     needs_build = not web_dist_ready(dist)
     window = webview.create_window(
         WINDOW_TITLE,
