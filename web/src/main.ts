@@ -22,7 +22,7 @@ import { topBar } from "./components/TopBar";
 import { renderCaseFile } from "./screens/caseFile";
 import { renderHormuz } from "./screens/hormuz";
 import { rankCases, renderOverview } from "./screens/overview";
-import { renderLive, type LiveScreen } from "./screens/live";
+import { parseLiveRoute, renderLive, type LiveRoute, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
 import { initPresent } from "./present/present";
 
@@ -90,12 +90,9 @@ function showError(message: string): void {
  * "#/live/<REGION>" or "#/live/<REGION>/event/<index>" -> region and event index (null when no
  * event is selected). Any other hash returns null. The region must be the snapshot alphabet.
  */
-function liveFromHash(): { region: string; eventIndex: number | null } | null {
-  const path = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
-  const match = /^\/live\/([A-Z_]+)(?:\/event\/(\d+))?$/.exec(path);
-  if (match === null) return null;
-  const [, region, index] = match;
-  return { region, eventIndex: index === undefined ? null : Number(index) };
+function liveFromHash(): LiveRoute | null {
+  // One parser for every live route (event, kind, vessel): the screen and the router must agree.
+  return parseLiveRoute(location.hash);
 }
 
 /** "#/case/<id>" -> id; "#/", "", or anything unrecognised -> overview. */

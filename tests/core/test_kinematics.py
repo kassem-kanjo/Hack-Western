@@ -28,7 +28,7 @@ from darkfleet.core.kinematics import (
     split_tracks,
 )
 from darkfleet.core.speeds import max_speed_knots
-from darkfleet.core.tracks import CoverageMinute, Ping
+from darkfleet.core.tracks import CoverageMinute, Ping, ship_class
 from darkfleet.ingest.ais_tracks import parse_line
 
 T0 = datetime(2026, 11, 21, 0, 0, tzinfo=UTC)
@@ -177,6 +177,30 @@ def test_silence_underway_with_full_coverage() -> None:
     assert 0.0 < event.severity <= 1.0
 
 
+def test_silence_reports_where_the_ship_reappeared() -> None:
+    track = [_ping(minutes=0, sog=11.0), _ping(minutes=134, lat=55.3, sog=11.0)]
+    event = silences(track, _coverage(track[0].t, track[1].t))[0]
+
+    moved = event.evidence["moved_km"]
+    assert moved == pytest.approx(event.evidence["distance_km"])
+    assert moved > 2.0
+    assert "; it reappeared" in event.explanation
+    assert "km from where it went quiet" in event.explanation
+    assert "it may simply have stopped" not in event.explanation
+
+
+def test_silence_reappearing_in_place_is_weaker() -> None:
+    # 0.001 degrees is about 120 m: the ship went quiet and came back to the same spot, which
+    # is what a vessel that simply stopped reporting at a berth does.
+    track = [_ping(minutes=0, sog=11.0), _ping(minutes=134, lat=55.001, lon=12.001, sog=11.0)]
+    event = silences(track, _coverage(track[0].t, track[1].t))[0]
+
+    assert event.evidence["moved_km"] < 2.0
+    assert "it may simply have stopped" in event.explanation
+    # The same gap moving a real distance scores about 0.279; staying put halves it.
+    assert event.severity == pytest.approx(0.14, abs=0.005)
+
+
 def test_gap_at_or_below_threshold_is_not_a_silence() -> None:
     track = [_ping(minutes=0), _ping(minutes=60)]
     assert silences(track, _coverage(track[0].t, track[1].t)) == []
@@ -245,7 +269,22 @@ def test_impossible_jump_is_flagged_and_maxes_severity() -> None:
     assert event.evidence["km"] > 100
     assert event.evidence["implied_kn"] > 3 * cap
     assert event.evidence["cap_kn"] == pytest.approx(round(cap, 2))
+    assert event.evidence["last_lat"] == pytest.approx(track[0].lat)
+    assert event.evidence["last_lon"] == pytest.approx(track[0].lon)
+    assert event.evidence["next_lat"] == pytest.approx(track[1].lat)
+    assert event.evidence["next_lon"] == pytest.approx(track[1].lon)
     assert event.severity == 1.0
+
+
+def test_fast_ferry_at_38_kn_makes_no_jump() -> None:
+    # 38 kn over 30 min is about 35 km. An AIS type 42 high-speed craft (EXPRESS 5, TRANEN)
+    # sails that fast; the old passenger/default cap wrongly called it impossible.
+    cap = max_speed_knots(ship_class(42))
+    track = [_ping(minutes=0), _ping(minutes=30, lat=55.0, lon=12.551)]
+    implied = distance_km(*A, track[1].lat, track[1].lon) / 0.5 / KNOT_KM_H
+    assert implied == pytest.approx(38.0, abs=1.0)
+
+    assert jumps(track, cap) == []
 
 
 def test_plausible_speed_is_not_a_jump() -> None:

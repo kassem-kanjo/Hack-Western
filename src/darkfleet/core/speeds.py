@@ -16,6 +16,8 @@ _TABLE_KNOTS = {
     "fishing": 12.0,
     "carrier": 15.0,
     "passenger": 20.0,
+    "hsc": 42.0,
+    "service": 30.0,
     "other_non_fishing": 14.0,
 }
 _DEFAULT_KNOTS = 14.0

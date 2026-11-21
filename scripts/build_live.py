@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -37,7 +38,7 @@ from statistics import median
 from typing import Any
 
 from darkfleet.core import kinematics
-from darkfleet.core.anchorages import context_for
+from darkfleet.core.anchorages import context_for, sts_hotspot_for
 from darkfleet.core.encounters import meetings
 from darkfleet.core.geo import distance_km
 from darkfleet.core.speeds import max_speed_knots
@@ -81,6 +82,22 @@ never treated as a member: an untyped hull cannot prove it is a cargo ship or a 
 
 ALERT_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
 """Watchlist categories that are an alert; detention is context, not an accusation."""
+
+SANCTIONS_MISSING = "sanctions file missing"
+"""``watchlist_status`` when the CSV is absent: an unchecked list, not a clean fleet."""
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write JSON through a sibling ``.tmp`` file so readers never see a partial snapshot.
+
+    A crash or a killed build halfway through ``write_text`` would otherwise leave the API
+    serving truncated JSON. ``os.replace`` is atomic on the same filesystem, and the temp
+    name is derived from the target so concurrent writers cannot share a scratch file.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _drop_spoofed_clones(clones: list[Event], spoofs: list[Event], km: float = 2.0) -> list[Event]:
@@ -278,18 +295,19 @@ def _split_watchlist(rows: Sequence[dict[str, Any]]) -> dict[str, list[dict[str,
 def _meeting_context(meeting_events: Sequence[Event], alerts: Sequence[dict[str, Any]]) -> list[Event]:
     """Re-read each meeting with the water it happened in and the hulls that were in it.
 
-    Two join decisions, both about a meeting's *context* rather than its geometry:
+    Three join decisions, all about a meeting's *context* rather than its geometry:
 
-    * a meeting inside a known anchorage is probably routine refuelling, so its severity is
-      halved and the anchorage is named in the evidence. The box is hand-drawn, which the note
-      says out loud;
+    * a meeting inside a routine anchorage is probably bunkering, so its severity is halved and
+      the anchorage is named in the evidence. The wording says "could be", not "likely": the box
+      is hand-drawn, which the note says out loud;
+    * a meeting inside a known ship-to-ship hot spot (EOPL) is not routine refuelling at all:
+      severity is floored at 0.8 and the area is named, so it ranks above open-water meetings;
     * a meeting where either hull is a sanctions or shadow-fleet alert is worth a look whatever
       the water: severity is floored at 0.9 and the alert categories are attached. This is
-      checked after the anchorage discount, so a sanctioned pair bunkering in Singapore still
-      ranks high.
+      checked last, so a sanctioned pair in EOPL or Singapore still ranks high.
 
     ``Event`` is frozen, so each changed finding is rebuilt with :func:`dataclasses.replace`;
-    a meeting that matches neither rule is passed through unchanged.
+    a meeting that matches none of the rules is passed through unchanged.
     """
     categories: dict[int, list[str]] = {}
     for row in alerts:
@@ -314,9 +332,19 @@ def _meeting_context(meeting_events: Sequence[Event], alerts: Sequence[dict[str,
                 "note": context["note"],
             }
             explanation += (
-                f" In a known anchorage ({context['name']}): likely routine refuelling "
-                f"(bunkering); transfers outside such areas deserve a closer look."
+                f" In a routine anchorage ({context['name']}); this could be bunkering (refuelling)."
             )
+            changed = True
+
+        hotspot = sts_hotspot_for(event.lat, event.lon)
+        if hotspot is not None:
+            severity = max(severity, 0.8)
+            evidence["context"] = {
+                "name": hotspot["name"],
+                "kind": hotspot["kind"],
+                "note": hotspot["note"],
+            }
+            explanation += f" In a known ship-to-ship transfer area ({hotspot['name']}); worth a closer look."
             changed = True
 
         watchlist_categories: list[str] = []
@@ -423,6 +451,15 @@ def build(
 
     watch = _watchlist_rows(tracks, vessels, sanctions)
     watchlist = _split_watchlist(watch)
+    if sanctions is None or not Path(sanctions).is_file():
+        watchlist_status = SANCTIONS_MISSING
+        print(
+            f"WARNING: {SANCTIONS_MISSING} ({sanctions}): the watchlist could not be checked, "
+            "so 0 hits does not mean these hulls are clean.",
+            file=sys.stderr,
+        )
+    else:
+        watchlist_status = "ok"
     # Anchorage context and sanctions alerts are read after the detectors because both need
     # data the geometry alone does not have: where the meeting was, and who was in it.
     meeting_events = _meeting_context(meeting_events, watchlist["alerts"])
@@ -457,13 +494,13 @@ def build(
         },
         "events": payload_events,
         "watchlist": watchlist,
+        "watchlist_status": watchlist_status,
         "vessels": _vessel_rows(tracks, vessels),
     }
 
     out = Path(out)
-    out.mkdir(parents=True, exist_ok=True)
     name = Path(region).name or "region"
-    (out / f"live_{name}.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _write_json(out / f"live_{name}.json", payload)
     return payload
 
 

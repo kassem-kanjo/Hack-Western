@@ -167,6 +167,42 @@ export function watchlistAlerts(
   return watchlist.alerts ?? [];
 }
 
+/** Everything the recording listed, alerts first, whatever shape the summary sent. */
+export function watchlistEntries(
+  watchlist: LiveWatchlistEntry[] | { alerts?: LiveWatchlistEntry[]; info?: LiveWatchlistEntry[] } | null | undefined,
+): LiveWatchlistEntry[] {
+  if (!watchlist) return [];
+  if (Array.isArray(watchlist)) return [...watchlist];
+  return [...(watchlist.alerts ?? []), ...(watchlist.info ?? [])];
+}
+
+function isAlert(entry: LiveWatchlistEntry): boolean {
+  return entry.category === "sanctioned" || entry.category === "shadow_fleet";
+}
+
+/**
+ * The list entry for one vessel, if the recording matched it. An MMSI hit wins
+ * over an IMO hit, and an alert wins over a detention, so the card always shows
+ * the strongest reason the ship is listed.
+ */
+export function watchlistForVessel(
+  vessel: LiveVessel,
+  watchlistInput: Parameters<typeof watchlistEntries>[0],
+): LiveWatchlistEntry | null {
+  const entries = watchlistEntries(watchlistInput);
+  const ordered = [...entries].sort((a, b) => Number(isAlert(b)) - Number(isAlert(a)));
+
+  for (const entry of ordered) {
+    if (entry.mmsi !== null && entry.mmsi === vessel.mmsi) return entry;
+  }
+  if (vessel.imo !== null) {
+    for (const entry of ordered) {
+      if (entry.imo !== null && entry.imo === vessel.imo) return entry;
+    }
+  }
+  return null;
+}
+
 export function watchlistHit(
   event: LiveEvent,
   vessels: LiveVessel[],

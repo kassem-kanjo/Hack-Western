@@ -1,13 +1,17 @@
-"""Known anchorages and bunkering areas, for reading a meeting's location as context.
+"""Known anchorages and ship-to-ship hot spots, for reading a meeting's location as context.
 
-A ship-to-ship transfer is not automatically suspicious. In Singapore, Fujairah, Gibraltar or
-the Johor/EOPL area, refuelling alongside another hull is ordinary port business, so a meeting
-there deserves a lower score than the same geometry in open water. The list below is deliberately
-small: eight boxes that cover the anchorages the Baltic and Malacca recordings actually visit.
+A ship-to-ship transfer is not automatically suspicious. In Singapore, Fujairah or Gibraltar,
+refuelling alongside another hull is ordinary port business, so a meeting there deserves a lower
+score than the same geometry in open water. The list below is deliberately small: seven routine
+boxes that cover the anchorages the Baltic and Malacca recordings actually visit.
 
-The boxes are drawn by hand around the published anchorage extents, not traced from any
-authority's boundary. That is why every entry carries :data:`BOUNDARY_NOTE`: the answer means
-"this is the well-known waiting area", not "this coordinate is legally inside an anchorage".
+The Eastern Outer Port Limits (EOPL) off Johor are a different signal. They are a known transfer
+area for sanctioned oil, so they are kept in :data:`STS_HOTSPOTS` rather than in the routine
+anchorage table: a meeting there is not discounted as bunkering, it is flagged for a closer look.
+
+The boxes are drawn by hand around the published extents, not traced from any authority's
+boundary. That is why every entry carries :data:`BOUNDARY_NOTE`: the answer means "this is the
+well-known waiting area", not "this coordinate is legally inside an anchorage".
 
 Pure: a fixed table and a point-in-box test, no files and no network.
 """
@@ -39,12 +43,6 @@ ANCHORAGES: list[Anchorage] = [
     {
         "name": "Singapore Western anchorage",
         "bbox": [103.70, 1.18, 103.84, 1.28],
-        "kind": "bunkering",
-        "note": BOUNDARY_NOTE,
-    },
-    {
-        "name": "Johor/EOPL (Malaysia)",
-        "bbox": [104.30, 1.25, 104.75, 1.45],
         "kind": "bunkering",
         "note": BOUNDARY_NOTE,
     },
@@ -85,16 +83,42 @@ Order matters only where boxes touch or overlap: :func:`context_for` returns the
 so a point in two boxes is attributed to the one listed first (the more specific area).
 """
 
+STS_HOTSPOTS: list[Anchorage] = [
+    {
+        "name": "EOPL",
+        "bbox": [104.30, 1.25, 104.75, 1.45],
+        "kind": "sts",
+        "note": "known ship-to-ship transfer area for sanctioned oil (approximate box)",
+    },
+]
+"""Boxes where transfers of sanctioned oil are known to happen, not routine bunkering.
+
+Kept apart from :data:`ANCHORAGES` so a meeting here is never discounted as ordinary
+refuelling. The Johor/EOPL box is approximate and hand-drawn; it is evidence of context,
+not proof that a particular transfer was illicit.
+"""
+
+
+def _first_match(boxes: list[Anchorage], lat: float, lon: float) -> Anchorage | None:
+    """The first box containing ``(lat, lon)``, with inclusive edges, or None."""
+    for box in boxes:
+        min_lon, min_lat, max_lon, max_lat = box["bbox"]
+        if min_lon <= lon <= max_lon and min_lat <= lat <= max_lat:
+            return box
+    return None
+
 
 def context_for(lat: float, lon: float) -> Anchorage | None:
-    """The first anchorage box containing ``(lat, lon)``, or None for open water.
+    """The first routine anchorage box containing ``(lat, lon)``, or None for open water.
 
     Box edges count as inside: at this resolution a few hundred metres either way does not
     change whether a meeting was ordinary refuelling. The first match wins so overlapping
     boxes resolve deterministically, and an empty table answers None without a special case.
+    Ship-to-ship hot spots are deliberately not returned here; use :func:`sts_hotspot_for`.
     """
-    for anchorage in ANCHORAGES:
-        min_lon, min_lat, max_lon, max_lat = anchorage["bbox"]
-        if min_lon <= lon <= max_lon and min_lat <= lat <= max_lat:
-            return anchorage
-    return None
+    return _first_match(ANCHORAGES, lat, lon)
+
+
+def sts_hotspot_for(lat: float, lon: float) -> Anchorage | None:
+    """The first ship-to-ship hot spot containing ``(lat, lon)``, or None elsewhere."""
+    return _first_match(STS_HOTSPOTS, lat, lon)

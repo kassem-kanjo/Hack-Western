@@ -20,7 +20,9 @@ export type PresentToken =
   | "hormuz_days_used"
   | "baltic_ships"
   | "baltic_events"
-  | "alerts"
+  | "alerts_at_least"
+  | "window_h"
+  | "watchlist_vessel"
   | "gaps_scanned"
   | "radar_nearby"
   | "cleared"
@@ -38,8 +40,14 @@ export interface PresentCaption {
 export interface PresentStep {
   /** Stable key, used only for markup ids and debugging. */
   id: string;
-  /** Hash route to show for this beat. */
+  /**
+   * Hash route to show for this beat. It may carry a route token such as
+   * `{watchlist_mmsi}`; present.ts fills those at run time and uses
+   * `fallbackRoute` when the value is not known yet.
+   */
   route: string;
+  /** Route for a beat whose route token has no live value; omit when fixed. */
+  fallbackRoute?: string;
   /** One sentence the room reads (<= 9 words). */
   headline: string;
   /** One supporting line under it (<= 22 words). */
@@ -52,78 +60,77 @@ export interface PresentStep {
 
 export const PRESENT_STEPS: readonly PresentStep[] = [
   {
-    id: "world",
-    route: "#/",
-    headline: "Every big ship must broadcast where it is",
-    line: "Around Hormuz, radar sees ships daily; on a typical day, about {hormuz_share_pct}% aren't broadcasting.",
-    proof: "{hormuz_share_pct}% dark · {hormuz_days_used} days measured",
+    id: "hormuz",
+    route: "#/hormuz",
+    headline: "The fleet nobody declares",
+    line: "Around Hormuz, on a typical day about {hormuz_share_pct}% of vessels radar sees have no matching broadcast. Some are small boats; many are not.",
+    proof: "{hormuz_share_pct}% · {hormuz_days_used} well-covered days, Aug–Nov",
     fallback: {
-      line: "Around Hormuz, radar sees ships daily; on a typical day, many aren't broadcasting.",
-      proof: "radar sees ships · many dark",
+      line: "Around Hormuz, many vessels radar sees each day have no matching broadcast. Some are small boats; many are not.",
+      proof: "radar vs broadcasts · Aug–Nov",
     },
   },
   {
     id: "hormuz-rule",
-    route: "#/",
-    headline: "Their rule can't see inside the strait",
-    line: "Global Fishing Watch logged almost nothing inside the strait in six months; their rule only counts ships far offshore.",
-    proof: "GFW offshore rule · strait inside",
+    route: "#/hormuz",
+    headline: "The public record barely sees it",
+    line: "Global Fishing Watch logged one dark gap inside the strait from May to November: its rule only counts ships far offshore.",
+    proof: "1 GFW gap event · separate query",
   },
   {
-    id: "baltic-live",
+    id: "live",
     route: "#/live/BALTIC_WATCH",
-    headline: "So we built our own, live since Friday",
-    line: "We've recorded every ship in six shadow-fleet hotspots; the Baltic alone is {baltic_ships} ships and {baltic_events} findings.",
+    headline: "So we record it ourselves",
+    line: "Since Friday night we've captured every ship our receivers hear in three hotspots. The Baltic: {baltic_ships} ships in {window_h} hours.",
     proof: "live map · coverage line",
     fallback: {
-      line: "We've recorded every ship in six shadow-fleet hotspots; the Baltic recording is live on the map.",
+      line: "Since Friday night we've captured every ship our receivers hear in three hotspots, starting with the Baltic.",
     },
   },
   {
     id: "spoof",
-    route: "#/live/BALTIC_WATCH/event/0",
+    route: "#/live/BALTIC_WATCH/kind/spoof",
     headline: "Physics catches what statements can't",
-    line: "{spoof_ships} ships jumped from their route to one point on land near St Petersburg, and back. Physics says spoofed.",
-    proof: "{spoof_ships} ships · one land point",
+    line: "{spoof_ships} unrelated ships each jumped tens of kilometres to one point on land near St Petersburg, and back. Their positions were falsified, or a shared device is wrong.",
+    proof: "{spoof_ships} ships · one point on land",
     fallback: {
-      line: "Several ships jumped from their route to one point on land near St Petersburg, and back. Physics says spoofed.",
-      proof: "several ships · one land point",
+      line: "Several unrelated ships each jumped tens of kilometres to one point on land near St Petersburg, and back.",
+      proof: "several ships · one point on land",
     },
   },
   {
-    id: "clone-correction",
-    route: "#/live/BALTIC_WATCH/event/0",
-    headline: "Our own detector was wrong; physics corrected it",
-    line: "What looked like cloned identities was really the spoof point, so we relabelled them; the tool corrects itself.",
+    id: "self-check",
+    route: "#/live/BALTIC_WATCH/kind/spoof",
+    headline: "And we check ourselves",
+    line: "An early version flagged a river port in St Petersburg. We tightened the physics and it disappeared. Every alert says why.",
     proof: "per-ship jump in and out",
   },
   {
     id: "watchlist",
-    route: "#/live/BALTIC_WATCH/event/0",
-    headline: "{alerts} sanctioned ships are in the Baltic now",
-    line: "We check every IMO number against sanctions lists; {alerts} sanctioned or shadow-fleet ships are sailing here now.",
-    proof: "red watchlist tag · SAPFIR",
+    route: "#/live/BALTIC_WATCH/vessel/{watchlist_mmsi}",
+    fallbackRoute: "#/live/BALTIC_WATCH",
+    headline: "At least {alerts_at_least} listed ships in {window_h} hours",
+    line: "Every broadcast IMO number is checked against sanctions lists: at least {alerts_at_least} sanctioned or shadow-fleet ships seen here in the last {window_h} hours.",
+    proof: "vessel card · {watchlist_vessel}",
     fallback: {
-      headline: "Sanctioned ships are in the Baltic now",
-      line: "We check every IMO number against sanctions lists; the red tag marks sanctioned or shadow-fleet ships sailing here now.",
+      headline: "Sanctioned ships, seen in our recording",
+      line: "Every broadcast IMO number is checked against sanctions lists; the red tag marks sanctioned or shadow-fleet ships we heard.",
+      proof: "red watchlist tag · vessel card",
     },
   },
   {
     id: "validation",
     route: "#/",
-    headline: "We tested ourselves and don't accuse on radar",
-    line: "Of {gaps_scanned} dark gaps, {radar_nearby} had radar nearby; physics cleared {cleared}, leaving {unexplained} unexplained. Radar was no better than chance. Location: {bridge_auc}.",
-    proof: "funnel · {null_ratio}× · AUC {bridge_auc}",
-    fallback: {
-      line: "Of thousands of dark gaps, some had radar nearby and physics cleared most. Radar was no better than chance; location we do well.",
-      proof: "funnel · radar no better than chance",
-    },
+    headline: "We never accuse on radar alone",
+    line: "We tested our own method: radar near a dark ship was no better than chance. Physics is what we trust.",
+    proof: "evidence panel · {null_ratio}× chance",
+    fallback: { proof: "evidence panel" },
   },
   {
     id: "close",
     route: "#/live/BALTIC_WATCH",
-    headline: "We separate what physics proves from suspicion",
-    line: "A tool for compliance teams and coast guards. Ask me about any dot on the map.",
+    headline: "What physics proves, apart from what looks suspicious",
+    line: "For compliance teams and coast guards. Ask me about any dot on the map.",
     proof: "back to the live map",
   },
 ];

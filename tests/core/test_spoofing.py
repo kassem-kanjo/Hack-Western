@@ -17,7 +17,8 @@ from pathlib import Path
 
 from shapely.geometry import box
 
-from darkfleet.core.kinematics import split_tracks
+from darkfleet.core.geo import distance_km
+from darkfleet.core.kinematics import jumps, split_tracks
 from darkfleet.core.spoofing import filter_explained_jumps, ghost_points
 from darkfleet.core.tracks import Event, Ping
 from darkfleet.ingest.ais_tracks import parse_line
@@ -94,7 +95,13 @@ def test_real_fixture_has_exactly_one_ghost_point() -> None:
             "jump_out_kn",
             "offset_km",
         }
-        assert vessel["offset_km"] > 5.0
+        # Evidence comes from the qualifying teleport visit, not from the first/last report
+        # that happens to sit in the disk, so both legs are always numeric and impossible.
+        assert isinstance(vessel["jump_in_kn"], (int, float))
+        assert isinstance(vessel["jump_out_kn"], (int, float))
+        assert vessel["jump_in_kn"] > 48.0
+        assert vessel["jump_out_kn"] > 48.0
+        assert vessel["offset_km"] >= 20.0
 
 
 def test_a_moored_port_is_not_a_ghost_point() -> None:
@@ -119,6 +126,32 @@ def test_three_vessels_teleporting_out_and_back_are_one_ghost_point() -> None:
         assert vessel["jump_in_kn"] > 300.0
         assert vessel["jump_out_kn"] > 300.0
         assert vessel["offset_km"] > 5.0
+
+
+def test_evidence_comes_from_the_qualifying_visit_not_the_disk_edges() -> None:
+    # Vessel 111 teleports out and back at minute 5, then its track ends with a second fix at
+    # the same false point. That last fix has no exit leg, so it cannot qualify; the evidence
+    # must still describe the first visit instead of reporting jump_out_kn=None for the disk.
+    origin_lat = LAT + 0.45
+    tracks: dict[int, list[Ping]] = {
+        111: [
+            Ping(mmsi=111, t=T0, lat=origin_lat, lon=LON, sog=8.0),
+            Ping(mmsi=111, t=T0 + timedelta(minutes=5), lat=LAT, lon=LON, sog=8.0),
+            Ping(mmsi=111, t=T0 + timedelta(minutes=6), lat=LAT, lon=LON, sog=8.0),
+            Ping(mmsi=111, t=T0 + timedelta(minutes=11), lat=origin_lat, lon=LON, sog=8.0),
+            Ping(mmsi=111, t=T0 + timedelta(minutes=30), lat=LAT, lon=LON, sog=8.0),
+        ],
+        222: _teleport(222),
+        333: _teleport(333),
+    }
+
+    ghosts = ghost_points(tracks)
+
+    assert len(ghosts) == 1
+    vessels = {vessel["mmsi"]: vessel for vessel in ghosts[0].evidence["vessels"]}
+    assert vessels[111]["jump_out_kn"] is not None
+    assert vessels[111]["jump_out_kn"] > 300.0
+    assert vessels[111]["offset_km"] >= 20.0
 
 
 def test_a_synthetic_land_square_marks_the_point_inland() -> None:
@@ -207,6 +240,21 @@ def test_filter_explained_jumps_drops_only_jumps_at_a_ghost() -> None:
     kept = filter_explained_jumps([at_ghost, far_away, evidence_at_ghost], ghosts)
 
     assert kept == [far_away]
+
+
+def test_filter_explained_jumps_drops_a_jump_leaving_a_ghost() -> None:
+    tracks = {mmsi: _teleport(mmsi) for mmsi in (111, 222, 333)}
+    ghosts = ghost_points(tracks)
+    ghost = ghosts[0]
+
+    # A jump whose departure fix is the ghost and whose arrival is 0.5 degrees (~55 km) away:
+    # the impossible fix is at the start, so the Event's lat/lon (the arrival) is not near it.
+    departure = Ping(mmsi=111, t=T0, lat=ghost.lat, lon=ghost.lon, sog=8.0)
+    arrival = Ping(mmsi=111, t=T0 + timedelta(minutes=1), lat=ghost.lat + 0.5, lon=ghost.lon, sog=8.0)
+    [jump] = jumps([departure, arrival], cap_kn=1.0)
+
+    assert distance_km(jump.lat, jump.lon, ghost.lat, ghost.lon) > 1.0
+    assert filter_explained_jumps([jump], ghosts) == []
 
 
 def test_filter_explained_jumps_is_a_noop_without_ghosts() -> None:

@@ -80,6 +80,12 @@ def ship_class(ship_type: int | None) -> str:
         return "cargo"
     if ship_type == 30:
         return "fishing"
+    if 40 <= ship_type <= 49:
+        # High-speed craft (fast ferries such as EXPRESS 5 and TRANEN) genuinely sustain 35-40 kn.
+        return "hsc"
+    if 50 <= ship_type <= 59:
+        # Pilot, search-and-rescue, tug and other service craft: fast but not ferry-fast.
+        return "service"
     if 60 <= ship_type <= 69:
         return "passenger"
     return "default"
