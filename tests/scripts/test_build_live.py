@@ -1,0 +1,124 @@
+"""Prove scripts/build_live.py turns one recorded hour into a complete live snapshot.
+
+The fixture is a real aisstream sample, gzipped into the recorder's hour-file layout, so the test
+exercises the same parse -> detect -> serialise path the CLI uses, not a hand-built shortcut.
+"""
+
+from __future__ import annotations
+
+import gzip
+import importlib.util
+import json
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ais" / "baltic_sample.jsonl"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "build_live.py"
+
+REGION = "SAMPLE"
+
+
+def _load_script():
+    spec = importlib.util.spec_from_file_location("build_live", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+build_live = _load_script()
+
+
+def _write_recording(tmp_path: Path) -> Path:
+    """Lay the fixture out as one hourly recording under the region folder."""
+    region_dir = tmp_path / "data" / "cache" / "ais" / REGION
+    region_dir.mkdir(parents=True)
+    text = FIXTURE.read_text(encoding="utf-8")
+    with gzip.open(region_dir / "20261121T04.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(text)
+    return region_dir
+
+
+def _snapshot(tmp_path: Path) -> dict:
+    return json.loads((tmp_path / "out" / f"live_{REGION}.json").read_text(encoding="utf-8"))
+
+
+def test_main_writes_every_contract_key(tmp_path: Path, monkeypatch) -> None:
+    _write_recording(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert build_live.main(["--region", REGION, "--out", "out"]) == 0
+
+    payload = _snapshot(tmp_path)
+    assert set(payload) == {
+        "region",
+        "generated_at",
+        "window",
+        "coverage",
+        "counts",
+        "events",
+        "watchlist",
+        "vessels",
+    }
+    assert payload["region"] == REGION
+    assert payload["window"]["start"].endswith("Z")
+    assert payload["window"]["end"] >= payload["window"]["start"]
+    assert set(payload["coverage"]) == {"minutes", "median_msgs_per_min", "holes"}
+    assert payload["coverage"]["minutes"] >= 1
+    assert set(payload["counts"]) == {
+        "pings",
+        "vessels",
+        "silences",
+        "jumps",
+        "clones",
+        "meetings",
+        "watchlist",
+    }
+    assert payload["counts"]["pings"] > 0
+    assert payload["counts"]["vessels"] > 0
+    assert payload["vessels"]
+    for vessel in payload["vessels"]:
+        assert set(vessel) == {"mmsi", "name", "imo", "ship_type", "class", "last"}
+        assert set(vessel["last"]) == {"t", "lat", "lon", "sog"}
+        assert vessel["class"] in {"tanker", "cargo", "fishing", "passenger", "default"}
+
+
+def test_counts_match_the_events_written(tmp_path: Path, monkeypatch) -> None:
+    _write_recording(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert build_live.main(["--region", REGION, "--out", "out", "--hours", "1"]) == 0
+
+    payload = _snapshot(tmp_path)
+    by_kind = Counter(event["kind"] for event in payload["events"])
+    counts = payload["counts"]
+    assert counts["silences"] == by_kind["silence"]
+    assert counts["jumps"] == by_kind["jump"]
+    assert counts["clones"] == by_kind["clone"]
+    assert counts["meetings"] == by_kind["meeting"]
+    assert counts["vessels"] == len(payload["vessels"])
+    assert counts["watchlist"] == len(payload["watchlist"])
+    assert len(payload["events"]) <= 500
+
+    severities = [event["severity"] for event in payload["events"]]
+    assert severities == sorted(severities, reverse=True)
+    for event in payload["events"]:
+        assert event["start"].endswith("Z")
+        assert event["end"].endswith("Z")
+
+
+def test_coverage_holes_merge_adjacent_quiet_minutes() -> None:
+    rows = [
+        build_live.CoverageMinute(datetime(2026, 11, 21, 4, m, tzinfo=UTC), n)
+        for m, n in ((0, 150), (1, 10), (2, 10), (3, 150), (4, 5), (5, 150))
+    ]
+
+    summary = build_live._coverage_summary(rows)
+
+    assert summary["minutes"] == 6
+    assert summary["median_msgs_per_min"] == 80.0
+    assert summary["holes"] == [
+        {"start": "2026-11-21T04:01:00Z", "end": "2026-11-21T04:02:00Z"},
+        {"start": "2026-11-21T04:04:00Z", "end": "2026-11-21T04:04:00Z"},
+    ]

@@ -103,6 +103,41 @@ CREATE TABLE IF NOT EXISTS sar_cells (
 );
 SELECT create_hypertable('sar_cells', 'day', if_not_exists => TRUE);
 
+-- Per-day unseen-fleet series (issue #88): every radar detection, the subset also seen
+-- broadcasting AIS, and the remainder. One row per region/day; no vessel identity.
+CREATE TABLE IF NOT EXISTS sar_daily (
+    day date NOT NULL,
+    region text NOT NULL,
+    seen integer NOT NULL,
+    broadcasting integer NOT NULL,
+    dark integer NOT NULL,
+    PRIMARY KEY (day, region)
+);
+SELECT create_hypertable('sar_daily', 'day', if_not_exists => TRUE);
+
+-- Weekly roll-up for the fleet chart. A gap can straddle a week boundary, but summing
+-- whole UTC days keeps the series comparable with the daily rows.
+CREATE MATERIALIZED VIEW IF NOT EXISTS sar_weekly
+WITH (timescaledb.continuous) AS
+SELECT time_bucket('7 days', day) AS week,
+       region,
+       sum(seen) AS seen,
+       sum(broadcasting) AS broadcasting,
+       sum(dark) AS dark
+FROM sar_daily
+GROUP BY time_bucket('7 days', day), region
+WITH NO DATA;
+
+SELECT remove_continuous_aggregate_policy('sar_weekly', if_exists => TRUE);
+
+SELECT add_continuous_aggregate_policy(
+    'sar_weekly',
+    start_offset => INTERVAL '1 year',
+    end_offset => INTERVAL '1 day',
+    schedule_interval => INTERVAL '1 day',
+    if_not_exists => TRUE
+);
+
 -- A gap is attributed to the UTC day it *starts* on; for timestamptz, time_bucket with a
 -- fixed '1 day' width uses a midnight-UTC origin.
 --

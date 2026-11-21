@@ -16,6 +16,8 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from darkfleet.api.live import router as live_router
+
 # Only these CaseDetail fields belong in a list response; the rest are detail-only.
 CASE_SUMMARY_FIELDS = (
     "id",
@@ -41,6 +43,8 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+app.include_router(live_router)
 
 
 def data_dir() -> Path:

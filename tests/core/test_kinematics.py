@@ -1,27 +1,40 @@
-"""Tests for issue #73: track splitting, coverage, silences, jumps and clones.
+"""Tests for issue #73/#95: splitting, coverage, local activity, silences, jumps and clones.
 
 The synthetic tracks are deliberately small and hand-checkable: each test pins one rule and one
 threshold, so a regression points at a formula rather than at the detector. The Hypothesis test
 covers the property the jump rule must never violate: physics below the cap can never be a jump.
+The clone regression parses the recorded 630001188 fixture, so the real alternation stays covered.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from darkfleet.core.geo import GEOD, KNOT_KM_H, distance_km
-from darkfleet.core.kinematics import clones, covered, jumps, silences, split_tracks
+from darkfleet.core.kinematics import (
+    ActivityIndex,
+    build_activity_index,
+    clones,
+    covered,
+    jumps,
+    local_activity,
+    silences,
+    split_tracks,
+)
 from darkfleet.core.speeds import max_speed_knots
 from darkfleet.core.tracks import CoverageMinute, Ping
+from darkfleet.ingest.ais_tracks import parse_line
 
 T0 = datetime(2026, 11, 21, 0, 0, tzinfo=UTC)
 A = (55.0, 12.0)
 B = (55.0, 12.6)  # about 38 km east of A at this latitude
+FIXTURES = Path(__file__).parents[1] / "fixtures" / "ais"
 
 
 def _ping(
@@ -51,6 +64,50 @@ def _clone_track(minutes: list[int], places: list[tuple[float, float]]) -> list[
         Ping(mmsi=1, t=T0 + timedelta(minutes=m), lat=lat, lon=lon, sog=8.0)
         for m, (lat, lon) in zip(minutes, places, strict=True)
     ]
+
+
+def _nearby_track(
+    mmsi: int, *, lat: float = 55.1, lon: float = 12.1, every_min: int = 10, until_min: int = 130
+) -> list[Ping]:
+    return [
+        Ping(mmsi=mmsi, t=T0 + timedelta(minutes=m), lat=lat, lon=lon, sog=8.0)
+        for m in range(0, until_min + 1, every_min)
+    ]
+
+
+def _fixture_pings(name: str) -> list[Ping]:
+    pings: list[Ping] = []
+    for line in (FIXTURES / name).read_text(encoding="utf-8").splitlines():
+        parsed = parse_line(line)
+        if isinstance(parsed, Ping):
+            pings.append(parsed)
+    return pings
+
+
+# --- local activity -----------------------------------------------------------------------
+
+
+def test_local_activity_false_when_no_other_vessels_are_nearby() -> None:
+    tracks = {
+        1: [_ping(minutes=0, mmsi=1)],
+        2: [_ping(minutes=5, mmsi=2, lat=57.0, lon=14.0)],  # well outside the 60 km radius
+    }
+    index: ActivityIndex = build_activity_index(tracks)
+
+    assert not local_activity(index, 55.0, 12.0, T0, T0 + timedelta(minutes=44), exclude_mmsi=1)
+
+
+def test_local_activity_true_when_three_others_are_heard_in_every_bucket() -> None:
+    tracks: dict[int, list[Ping]] = {1: [_ping(minutes=0, mmsi=1)]}
+    for mmsi, lat, lon in ((2, 55.1, 12.1), (3, 54.9, 12.1), (4, 55.1, 11.9)):
+        tracks[mmsi] = _nearby_track(mmsi, lat=lat, lon=lon)
+
+    index = build_activity_index(tracks)
+
+    assert local_activity(index, 55.0, 12.0, T0, T0 + timedelta(minutes=44), exclude_mmsi=1)
+    assert not local_activity(
+        index, 55.0, 12.0, T0, T0 + timedelta(minutes=44), exclude_mmsi=1, min_vessels=4
+    )
 
 
 # --- split_tracks -------------------------------------------------------------------------
@@ -149,6 +206,27 @@ def test_coverage_hole_suppresses_a_silence() -> None:
     assert silences(track, low) == []
 
 
+def test_silence_is_suppressed_when_the_local_area_is_empty() -> None:
+    track = [_ping(minutes=0, sog=11.0), _ping(minutes=134, lat=55.3, sog=11.0)]
+    coverage = _coverage(track[0].t, track[1].t)
+    index = build_activity_index(split_tracks(track))
+
+    assert silences(track, coverage, activity=index) == []
+
+
+def test_silence_survives_when_receivers_nearby_keep_hearing_others() -> None:
+    track = [_ping(minutes=0, sog=11.0), _ping(minutes=134, lat=55.3, sog=11.0)]
+    coverage = _coverage(track[0].t, track[1].t)
+    tracks = {1: track, 2: _nearby_track(2), 3: _nearby_track(3, lat=55.2)}
+    index = build_activity_index(tracks)
+
+    events = silences(track, coverage, activity=index)
+
+    assert len(events) == 1
+    assert "receivers within 60 km kept hearing" in events[0].explanation
+    assert events[0].evidence["local_other_vessels"] >= 2
+
+
 # --- jumps --------------------------------------------------------------------------------
 
 
@@ -204,7 +282,7 @@ def test_clone_detects_alternation_between_two_clusters() -> None:
     event = events[0]
     assert event.kind == "clone"
     assert event.evidence["flips"] == 3
-    assert event.evidence["max_separation_km"] > 30
+    assert event.evidence["separation_km"] > 30
     assert event.start == T0
     assert event.end == T0 + timedelta(minutes=3)
     assert "two transmitters" in event.explanation
@@ -220,17 +298,18 @@ def test_positions_closer_than_min_km_are_not_a_clone() -> None:
     assert clones(_clone_track([0, 1, 2, 3], [A, near, A, near])) == []
 
 
-def test_alternation_slower_than_the_window_is_not_a_clone() -> None:
-    assert clones(_clone_track([0, 6, 12, 18], [A, B, A, B])) == []
+def test_transitions_below_the_clone_speed_are_not_flips() -> None:
+    # A 38 km hop every 20 h is about 1 kn: a ferry crossing, not two transmitters.
+    assert clones(_clone_track([0, 1200, 2400, 3600], [A, B, A, B])) == []
 
 
 def test_two_separate_episodes_give_two_events() -> None:
-    track = _clone_track([0, 1, 2, 3, 60, 61, 62, 63], [A, B, A, B, A, B, A, B])
+    track = _clone_track([0, 1, 2, 3, 420, 421, 422, 423], [A, B, A, B, A, B, A, B])
     events = clones(track)
 
     assert len(events) == 2
     assert events[0].start == T0
-    assert events[1].start == T0 + timedelta(minutes=60)
+    assert events[1].start == T0 + timedelta(minutes=420)
 
 
 def test_long_continuous_episode_gives_one_event() -> None:
@@ -242,9 +321,26 @@ def test_long_continuous_episode_gives_one_event() -> None:
     assert events[0].evidence["flips"] == 8
 
 
-def test_three_distinct_locations_are_not_two_clusters() -> None:
-    far_third = (55.0, 13.2)  # far from B as well as from A
-    assert clones(_clone_track([0, 1, 2, 3], [A, B, A, far_third])) == []
+def test_a_single_distant_fix_is_not_a_clone() -> None:
+    far_third = (55.0, 13.2)  # joins B, but there is no alternating run to count
+    assert clones(_clone_track([0, 1, 2], [A, B, far_third])) == []
+
+
+def test_real_clone_fixture_gives_one_event() -> None:
+    # The recorded 630001188 case: two places about 49 km apart, visited in turn for hours.
+    # A 10-minute window missed it because the hops are 5-60 minutes apart.
+    pings = _fixture_pings("clone_630001188.jsonl")
+    assert pings and all(p.mmsi == 630001188 for p in pings)
+
+    events = clones(pings)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.kind == "clone"
+    assert event.mmsi == 630001188
+    assert 45.0 <= event.evidence["separation_km"] <= 55.0
+    assert event.evidence["flips"] >= 3
+    assert "one ship cannot do that" in event.explanation
 
 
 # --- property: below the cap, never a jump ------------------------------------------------

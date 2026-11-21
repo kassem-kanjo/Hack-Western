@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from shapely.geometry import box
 
-from darkfleet.core.encounters import dark_meetings, meetings
+from darkfleet.core.encounters import dark_meetings, meetings, twin_transponders
 from darkfleet.core.geo import GEOD, KNOT_KM_H
 from darkfleet.core.tracks import Event, Ping
 
@@ -23,9 +23,13 @@ def _track(
     lon: float = LON,
     sog: float = 1.0,
     step_min: int = 5,
+    nav_status: int | None = None,
 ) -> list[Ping]:
     """A track reporting every `step_min` minutes for `minutes` minutes (inclusive ends)."""
-    return [Ping(mmsi, T0 + timedelta(minutes=m), lat, lon, sog) for m in range(0, minutes + 1, step_min)]
+    return [
+        Ping(mmsi, T0 + timedelta(minutes=m), lat, lon, sog, nav_status=nav_status)
+        for m in range(0, minutes + 1, step_min)
+    ]
 
 
 def test_two_vessels_drifting_together_are_one_meeting() -> None:
@@ -72,6 +76,94 @@ def test_meeting_near_land_is_skipped() -> None:
 
     eleven_km_away = box(LON - 0.2, LAT + 0.1, LON + 0.2, LAT + 0.3)
     assert len(meetings(tracks, land=eleven_km_away)) == 1  # far land does not hide the meeting
+
+
+def test_two_vessels_moored_in_a_port_are_not_a_meeting() -> None:
+    # A quay ~0.3 km west of the pair: both hulls happen to sit within the default 3 km
+    # offshore exclusion, which is exactly the Baltic false-positive pattern this issue fixes.
+    port = box(LON - 0.02, LAT - 0.02, LON - 0.005, LAT + 0.02)
+    tracks = {
+        111: _track(111, 60, sog=0.0),
+        222: _track(222, 60, lon=LON + 0.0005, sog=0.0),  # ~29 m apart on the quay
+    }
+
+    assert meetings(tracks, land=port) == []
+    assert len(meetings(tracks)) == 1  # control: without land there is nothing to rule it out
+
+
+def test_a_resting_pair_offshore_is_still_a_meeting() -> None:
+    # The land filter must not throw away genuine slow meetings in open water.
+    far_land = box(LON - 0.2, LAT + 0.5, LON + 0.2, LAT + 0.7)  # ~55 km north
+    tracks = {
+        111: _track(111, 60, sog=0.1),
+        222: _track(222, 60, lon=LON + 0.001, sog=0.1),
+    }
+
+    assert len(meetings(tracks, land=far_land)) == 1
+
+
+def test_two_mmsis_at_the_same_point_are_twins_not_a_meeting() -> None:
+    tracks = {222: _track(222, 45), 111: _track(111, 45)}  # identical fixes: 0 m apart
+
+    assert meetings(tracks) == []
+    twins = twin_transponders(tracks)
+    assert len(twins) == 1
+    twin = twins[0]
+    assert (twin.mmsi, twin.other_mmsi) == (111, 222)
+    assert twin.evidence["max_distance_m"] == 0.0
+    assert twin.evidence["twin_transponders"] is True
+
+
+def test_a_pair_that_separates_is_not_a_twin() -> None:
+    tracks = {
+        111: _track(111, 45),
+        222: _track(222, 45, lon=LON + 0.001),  # ~57 m apart throughout
+    }
+
+    assert len(meetings(tracks)) == 1
+    assert twin_transponders(tracks) == []
+
+
+def test_moored_nav_status_is_skipped() -> None:
+    tracks = {
+        111: _track(111, 60, sog=0.1, nav_status=5),
+        222: _track(222, 60, lon=LON + 0.001, sog=0.1, nav_status=5),
+    }
+
+    assert meetings(tracks) == []
+    assert twin_transponders(tracks) == []
+
+
+def test_ship_type_filter_accepts_codes_and_predicates() -> None:
+    tracks = {
+        111: _track(111, 45),
+        222: _track(222, 45, lon=LON + 0.001),
+    }
+    types = {111: 70, 222: 80}  # cargo and tanker
+
+    assert len(meetings(tracks, ship_types={70, 80}, vessel_types=types)) == 1
+    assert meetings(tracks, ship_types={70}, vessel_types=types) == []
+    assert meetings(tracks, ship_types=lambda code: code == 30, vessel_types=types) == []
+    assert len(meetings(tracks, ship_types=lambda code: code in {70, 80}, vessel_types=types)) == 1
+    assert meetings(tracks, ship_types={70, 80}) == []  # unknown type cannot prove membership
+
+
+def test_severity_grows_with_duration() -> None:
+    short = {
+        111: _track(111, 30),
+        222: _track(222, 30, lon=LON + 0.001),
+    }
+    long = {
+        111: _track(111, 180),
+        222: _track(222, 180, lon=LON + 0.001),
+    }
+
+    short_event = meetings(short)[0]
+    long_event = meetings(long)[0]
+
+    assert short_event.severity == pytest.approx(0.3)
+    assert long_event.severity == pytest.approx(1.0)
+    assert short_event.severity < long_event.severity
 
 
 def test_pair_across_a_grid_cell_boundary_is_found() -> None:

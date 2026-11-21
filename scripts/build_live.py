@@ -1,0 +1,359 @@
+"""Build a region-agnostic live snapshot from a recorded AIS folder.
+
+    uv run python scripts/build_live.py --region BALTIC_WATCH [--hours 12]
+        [--out data/snapshot] [--land web/public/basemap/land.geojson]
+        [--sanctions data/sanctions/maritime.csv]
+
+The recorder drops one ``*.jsonl.gz`` per UTC hour under ``data/cache/ais/<REGION>/``, but the
+engine itself knows nothing about a region: it takes whatever pings it is given. This script is
+therefore the single bridge from a recording to the read-only ``live_<REGION>.json`` shape the
+API and the live screen consume, for any folder the recorder produced.
+
+It parses once through :func:`darkfleet.ingest.ais_tracks.iter_files`, then hands the pings to
+the same pure detectors the Baltic snapshot uses. Two deliberate join decisions live here rather
+than in ``core/``:
+
+* speed caps come from the static ship type (``tracks.ship_class`` -> ``core.speeds``), because a
+  jump is only impossible relative to the class of the hull that reported it;
+* jumps reported by an MMSI that also shows a clone are dropped, because two transmitters sharing
+  one identity explain every impossible hop; reporting both would double-count one cause.
+
+Planning runs before issue #95 may have added an activity index to ``core.kinematics``, so the
+optional ``activity=`` argument is passed only when that module exposes the builder.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from statistics import median
+from typing import Any
+
+from darkfleet.core import kinematics
+from darkfleet.core.encounters import meetings
+from darkfleet.core.speeds import max_speed_knots
+from darkfleet.core.tracks import (
+    CoverageMinute,
+    Event,
+    Ping,
+    VesselInfo,
+    ship_class,
+)
+from darkfleet.core.water import load_land
+from darkfleet.ingest.ais_tracks import coverage, iter_files
+from darkfleet.ingest.watchlist import imo_watchlist
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_AIS = Path("data/cache/ais")
+DEFAULT_OUT = Path("data/snapshot")
+DEFAULT_LAND = Path("web/public/basemap/land.geojson")
+DEFAULT_SANCTIONS = Path("data/sanctions/maritime.csv")
+
+HOLE_FRACTION = 0.2
+"""A minute is a coverage hole when it holds less than this share of the median minute."""
+
+MAX_EVENTS = 500
+"""The live screen cannot draw more than this many markers usefully; the head is the answer."""
+
+KEEP_STRENGTHS = frozenset({"imo", "strong_name"})
+"""Watchlist strengths worth surfacing: a hull number or a distinctive full name, not a guess."""
+
+
+def resolve_region_dir(region: str) -> Path:
+    """Find a region folder from a bare name or a path.
+
+    ``--region BALTIC_WATCH`` means ``data/cache/ais/BALTIC_WATCH`` relative to the working
+    directory (the CLI contract), while an absolute or relative folder path is accepted as-is so
+    tests and one-off recordings can point at a temp directory. The repo-relative location is the
+    last fallback, which keeps ``uv run`` from a script directory working.
+    """
+    candidate = Path(region).expanduser()
+    if candidate.is_dir():
+        return candidate
+    local = DEFAULT_AIS / region
+    if local.is_dir():
+        return local
+    return ROOT / DEFAULT_AIS / region
+
+
+def _merge_info(previous: VesselInfo | None, current: VesselInfo) -> VesselInfo:
+    """Keep the newest non-empty value of every static field.
+
+    Message 5 and message 24 arrive in pieces (and class-B part B carries no name), so letting a
+    later report blank an earlier field would lose a ship's name for no reason.
+    """
+    if previous is None:
+        return current
+    return VesselInfo(
+        mmsi=current.mmsi,
+        imo=current.imo if current.imo is not None else previous.imo,
+        name=current.name if current.name is not None else previous.name,
+        callsign=current.callsign if current.callsign is not None else previous.callsign,
+        ship_type=current.ship_type if current.ship_type is not None else previous.ship_type,
+        length_m=current.length_m if current.length_m is not None else previous.length_m,
+        destination=current.destination if current.destination is not None else previous.destination,
+        last_seen=current.last_seen if current.last_seen is not None else previous.last_seen,
+    )
+
+
+def _read_pings_and_vessels(directory: Path) -> tuple[list[Ping], dict[int, VesselInfo]]:
+    """Parse a recording once, keeping position reports and the latest static record per MMSI."""
+    pings: list[Ping] = []
+    vessels: dict[int, VesselInfo] = {}
+    for obj in iter_files([directory]):
+        if isinstance(obj, Ping):
+            pings.append(obj)
+        else:
+            vessels[obj.mmsi] = _merge_info(vessels.get(obj.mmsi), obj)
+    return pings, vessels
+
+
+def _last_hours(pings: list[Ping], hours: int | None) -> list[Ping]:
+    """Keep only the newest `hours` of pings, measured back from the recording's last ping.
+
+    The recording is the clock: a wall-clock cutoff would silently produce an empty snapshot
+    when replaying an older capture. `hours is None` keeps everything.
+    """
+    if hours is None or not pings:
+        return pings
+    end = max(ping.t for ping in pings)
+    cutoff = end - timedelta(hours=hours)
+    return [ping for ping in pings if ping.t >= cutoff]
+
+
+def _iso(t: datetime) -> str:
+    """UTC ISO-8601 with a trailing Z, the spelling every snapshot field uses."""
+    return t.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _coverage_summary(rows: Sequence[CoverageMinute]) -> dict[str, Any]:
+    """Minute count, median traffic and merged holes for the UI's coverage strip.
+
+    A hole is any minute below :data:`HOLE_FRACTION` of the median, because a receiver that is
+    hearing a fifth of its usual traffic is effectively down for silence detection. Adjacent low
+    minutes are one outage, so they are merged into a single ``[start, end]`` range; both ends are
+    inclusive minute labels.
+    """
+    if not rows:
+        return {"minutes": 0, "median_msgs_per_min": 0.0, "holes": []}
+    values = [row.n_msgs for row in rows]
+    median_msgs = float(median(values))
+    threshold = median_msgs * HOLE_FRACTION
+    holes: list[dict[str, str]] = []
+    start: datetime | None = None
+    end: datetime | None = None
+    for row in rows:
+        if row.n_msgs < threshold:
+            if start is None:
+                start = row.minute
+            end = row.minute
+        elif start is not None and end is not None:
+            holes.append({"start": _iso(start), "end": _iso(end)})
+            start = end = None
+    if start is not None and end is not None:
+        holes.append({"start": _iso(start), "end": _iso(end)})
+    return {"minutes": len(rows), "median_msgs_per_min": median_msgs, "holes": holes}
+
+
+def _run_silences(tracks: dict[int, list[Ping]], rows: Sequence[CoverageMinute]) -> list[Event]:
+    """Silence events, using issue #95's activity index when the installed module has it.
+
+    The index is optional by design so this builder works on either side of that merge; it only
+    sharpens ``covered`` with per-receiver activity, while the public ``silences`` contract stays
+    the same.
+    """
+    activity = None
+    if hasattr(kinematics, "build_activity_index"):
+        activity = kinematics.build_activity_index(tracks)
+    events: list[Event] = []
+    for track in tracks.values():
+        if activity is None:
+            events.extend(kinematics.silences(track, rows))
+        else:
+            events.extend(kinematics.silences(track, rows, activity=activity))
+    return events
+
+
+def _vessel_rows(tracks: dict[int, list[Ping]], vessels: dict[int, VesselInfo]) -> list[dict[str, Any]]:
+    """One row per MMSI seen, carrying static identity plus its last reported position."""
+    rows: list[dict[str, Any]] = []
+    for mmsi in sorted(tracks):
+        track = tracks[mmsi]
+        if not track:
+            continue
+        info = vessels.get(mmsi)
+        last = track[-1]
+        rows.append(
+            {
+                "mmsi": mmsi,
+                "name": info.name if info else None,
+                "imo": info.imo if info else None,
+                "ship_type": info.ship_type if info else None,
+                "class": ship_class(info.ship_type if info else None),
+                "last": {
+                    "t": _iso(last.t),
+                    "lat": last.lat,
+                    "lon": last.lon,
+                    "sog": last.sog,
+                },
+            }
+        )
+    return rows
+
+
+def _watchlist_rows(
+    tracks: dict[int, list[Ping]],
+    vessels: dict[int, VesselInfo],
+    sanctions: Path | None,
+) -> list[dict[str, Any]]:
+    """Sanctions hits for observed hulls, keeping only the two evidence strengths we trust.
+
+    A missing CSV (it is CC BY-NC and never committed) simply yields an empty list, so the live
+    snapshot still builds on a fresh checkout.
+    """
+    if sanctions is None or not Path(sanctions).is_file():
+        return []
+    seen = [vessels[mmsi] for mmsi in tracks if mmsi in vessels]
+    matches = imo_watchlist(seen, Path(sanctions))
+    kept = [case for case in matches.values() if case.get("strength") in KEEP_STRENGTHS]
+    return sorted(kept, key=lambda case: int(case.get("mmsi") or 0))
+
+
+def _event_payload(event: Event) -> dict[str, Any]:
+    """Event as a JSON dict, with datetimes rendered as ISO strings."""
+    row = asdict(event)
+    row["start"] = _iso(event.start)
+    row["end"] = _iso(event.end)
+    return row
+
+
+def _event_sort_key(row: dict[str, Any]) -> tuple[float, str, str, int]:
+    """Strongest first, with stable tie-breakers so two runs produce the same file."""
+    return (-float(row["severity"]), str(row["start"]), str(row["kind"]), int(row["mmsi"]))
+
+
+def build(
+    region: str,
+    directory: Path,
+    out: Path,
+    *,
+    hours: int | None = None,
+    land: Path | None = None,
+    sanctions: Path | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Run every detector over one recording and write ``live_<region>.json``.
+
+    Pure detectors are called with the whole cleaned track map where they are pairwise (meetings)
+    and per track where they are not (silences, jumps, clones); this keeps the cost linear in
+    pings for the per-vessel rules. Returns the payload for callers that want to assert on it.
+    """
+    pings, vessels = _read_pings_and_vessels(Path(directory))
+    pings = _last_hours(pings, hours)
+
+    rows = coverage(ping.t for ping in pings)
+    tracks = kinematics.split_tracks(pings)
+    classes = {mmsi: ship_class(vessels[mmsi].ship_type if mmsi in vessels else None) for mmsi in tracks}
+
+    silences = _run_silences(tracks, rows)
+    clone_events: list[Event] = []
+    jump_events: list[Event] = []
+    for mmsi, track in tracks.items():
+        clone_events.extend(kinematics.clones(track))
+        jump_events.extend(kinematics.jumps(track, max_speed_knots(classes[mmsi])))
+
+    # A clone means two transmitters share the MMSI; the resulting teleports are not the ship
+    # going somewhere impossible, so the clone event already tells the whole story.
+    cloned_mmsis = {event.mmsi for event in clone_events}
+    jump_events = [event for event in jump_events if event.mmsi not in cloned_mmsis]
+
+    land_geom = load_land(land) if land is not None and Path(land).is_file() else None
+    meeting_events = meetings(tracks, land=land_geom)
+    watch = _watchlist_rows(tracks, vessels, sanctions)
+
+    events = [*silences, *jump_events, *clone_events, *meeting_events]
+    payload_events = sorted((_event_payload(event) for event in events), key=_event_sort_key)
+    payload_events = payload_events[:MAX_EVENTS]
+
+    by_kind = Counter(event.kind for event in events)
+    generated_at = now or datetime.now(UTC)
+    start = min((ping.t for ping in pings), default=None)
+    end = max((ping.t for ping in pings), default=None)
+    payload = {
+        "region": region,
+        "generated_at": _iso(generated_at),
+        "window": {
+            "start": _iso(start) if start else None,
+            "end": _iso(end) if end else None,
+        },
+        "coverage": _coverage_summary(rows),
+        "counts": {
+            "pings": len(pings),
+            "vessels": len(tracks),
+            "silences": by_kind.get("silence", 0),
+            "jumps": by_kind.get("jump", 0),
+            "clones": by_kind.get("clone", 0),
+            "meetings": by_kind.get("meeting", 0),
+            "watchlist": len(watch),
+        },
+        "events": payload_events,
+        "watchlist": watch,
+        "vessels": _vessel_rows(tracks, vessels),
+    }
+
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    name = Path(region).name or "region"
+    (out / f"live_{name}.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Build a live AIS snapshot for one region.")
+    parser.add_argument("--region", required=True, help="folder name under data/cache/ais")
+    parser.add_argument("--hours", type=int, default=None, help="only the newest N hours (default all)")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="snapshot output folder")
+    parser.add_argument("--land", type=Path, default=DEFAULT_LAND, help="land GeoJSON for meeting filtering")
+    parser.add_argument("--sanctions", type=Path, default=DEFAULT_SANCTIONS, help="maritime sanctions CSV")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Parse flags, fail loudly on a missing recording, and print a one-line summary."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.hours is not None and args.hours <= 0:
+        parser.error("--hours must be a positive integer")
+
+    directory = resolve_region_dir(args.region)
+    if not directory.is_dir():
+        print(f"missing recording folder: {directory}", file=sys.stderr)
+        return 2
+
+    payload = build(
+        args.region,
+        directory,
+        args.out,
+        hours=args.hours,
+        land=args.land,
+        sanctions=args.sanctions,
+    )
+    counts = payload["counts"]
+    name = Path(args.region).name or "region"
+    print(
+        f"{args.region}: {counts['pings']} pings, {counts['vessels']} vessels, "
+        f"{counts['silences']} silences, {counts['jumps']} jumps, {counts['clones']} clones, "
+        f"{counts['meetings']} meetings, {counts['watchlist']} watchlist "
+        f"-> {Path(args.out) / f'live_{name}.json'}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
