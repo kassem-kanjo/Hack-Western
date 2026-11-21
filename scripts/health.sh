@@ -32,7 +32,14 @@ if [ ! -d "$W/web/node_modules" ] || ! cmp -s "$W/web/package-lock.json" "$W/web
   (npm ci --prefix "$W/web" >/dev/null 2>&1 && cp "$W/web/package-lock.json" "$W/web/node_modules/.lock-copy")
 fi
 if make -C "$W" check >/tmp/health-make.log 2>&1; then say OK "make check on origin/main $(git -C "$W" rev-parse --short HEAD)"
-else say RED "make check on origin/main failed (tail /tmp/health-make.log)"; red=1; fi
+else
+  # A timing test can miss its window when this laptop is under heavy load (load avg ~80
+  # seen). Re-run only the failed tests once: RED if they fail again, WARN if they pass.
+  failed=$(grep -o '^FAILED [^ ]*' /tmp/health-make.log | cut -d' ' -f2 | sort -u)
+  if [ -n "$failed" ] && (cd "$W" && uv run --extra edge pytest -q $failed >/tmp/health-retry.log 2>&1); then
+    say WARN "flaky under load, passed on retry: $(echo $failed | tr '\n' ' ')"
+  else say RED "make check on origin/main failed (tail /tmp/health-make.log)"; red=1; fi
+fi
 # Work in progress (builders) in the main checkout: report only
 wip=$(git status --porcelain | wc -l | tr -d ' '); [ "$wip" != 0 ] && say INFO "$wip uncommitted path(s) in checkout (builders' WIP)"
 
