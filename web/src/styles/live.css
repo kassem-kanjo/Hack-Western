@@ -265,6 +265,160 @@
   outline-offset: 2px;
 }
 
+/* ---------- replay: the strip becomes a scrubber (#85) ---------- */
+
+/* The control cluster exists only in replay; hidden must beat its own display. */
+.live-strip [hidden] {
+  display: none;
+}
+
+.live-rb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Transport and speed are instrument keys, not pills: 28 px, mono, hairline. */
+.live-rb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  min-width: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--c-line-strong);
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--c-text-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.live-rb-btn:hover {
+  background: var(--c-panel-raised);
+}
+
+.live-rb-btn:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.live-rb-icon {
+  display: block;
+}
+
+/* Replay is a mode, so its button uses the selection white, not a new colour. */
+.live-replay[aria-pressed="true"] {
+  border-color: var(--c-focus);
+}
+
+/* The played share of the window is a quiet wash, not a kind colour: it
+   describes the clock, not a finding. Its right edge is the cursor. */
+.live-progress {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: calc(var(--at, 0) * 100%);
+  height: 100%;
+  background: color-mix(in srgb, var(--c-text-1) 10%, transparent);
+  pointer-events: none;
+}
+
+.live-strip.is-replay .live-progress {
+  display: block;
+}
+
+.live-progress::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--c-text-2);
+}
+
+/* Laid over the ticks so a drag anywhere on the strip seeks. The native input
+   keeps pointer, touch and keyboard support; only its looks are replaced. */
+.live-scrub {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: ew-resize;
+}
+
+.live-scrub:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.live-scrub::-webkit-slider-runnable-track {
+  height: 34px;
+  background: transparent;
+}
+
+.live-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 3px;
+  height: 26px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--c-focus);
+}
+
+.live-scrub::-moz-range-track {
+  height: 34px;
+  background: transparent;
+  border: 0;
+}
+
+.live-scrub::-moz-range-thumb {
+  width: 3px;
+  height: 26px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--c-focus);
+}
+
+/* Ticks the clock has not reached are the shape of what is coming: they stay
+   in place and step back rather than disappear. */
+.live-tick.is-future {
+  opacity: 0.3;
+}
+
+/* A marker the replay clock has just reached says so once, on the map. Under
+   reduced motion it simply appears. */
+.live-marker.is-entering {
+  animation: live-marker-in 320ms ease-out both;
+}
+
+@keyframes live-marker-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-marker.is-entering {
+    animation: none;
+  }
+}
+
 /* ---------- rail ---------- */
 
 .live-rail {
@@ -532,6 +686,7 @@
 .live-row:focus-visible,
 .live-chip:focus-visible,
 .live-tick:focus-visible,
+.live-replay:focus-visible,
 .live-switch-btn:focus-visible {
   outline: 2px solid var(--c-focus);
   outline-offset: 2px;

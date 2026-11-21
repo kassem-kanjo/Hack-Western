@@ -76,6 +76,16 @@ export function formatDuration(minutes: number): string {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
+/**
+ * The clock every relative time on the Live screen is measured from: the
+ * region snapshot's own `generated_at`, never the browser's clock. A recording
+ * opened tomorrow must still say "last seen 4 min ago", because that is what
+ * was true when the snapshot was written. Null when the timestamp is unreadable.
+ */
+export function snapshotNow(generatedAt: string | null | undefined): number | null {
+  return typeof generatedAt === "string" ? parseMs(generatedAt) : null;
+}
+
 /** When it happened, in words: "just now", "12 min ago", "2 h ago"; unreadable times show nothing. */
 export function timeAgo(iso: string, nowMs: number): string {
   const then = parseMs(iso);

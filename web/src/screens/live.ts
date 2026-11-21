@@ -10,12 +10,20 @@
  * selection: clicks assign location.hash and the router calls select(), so a
  * reload always reproduces the same view and the map never disagrees with the
  * address bar.
+ *
+ * Replay (#85) is time travel V1: the strip's axis becomes a scrubber over the
+ * recorded window and `t` gates the events the map, the hero number and the
+ * rail show. The snapshot has event start/end times and vessel last positions
+ * only, so replay moves the findings clock, not the ships: no invented track
+ * between fixes. Leaving replay restores the live view from the same data.
  */
 
 import "../styles/live.css";
 
 import { fetchLiveEvents, fetchLiveRegions, fetchLiveSummary, fetchLiveVessels } from "../api";
 import { eventDetail } from "../components/EventDetail";
+import { REPLAY_SPEEDS, replayBar, replayDurationMs } from "../components/ReplayBar";
+import type { ReplaySpeed } from "../components/ReplayBar";
 import { h } from "../components/dom";
 import { topBar } from "../components/TopBar";
 import { vesselCard } from "../components/VesselCard";
@@ -28,6 +36,7 @@ import {
   eventsOfKinds,
   fmtCoverage,
   rankRows,
+  snapshotNow,
   sortEvents,
   timeAgo,
   timelineFraction,
@@ -56,6 +65,9 @@ const LIST_ROWS = 7;
 
 /** The API's documented maximum; ask for it so the list is never silently short. */
 const EVENT_LIMIT = 500;
+
+/** Replay's arrow-key step. Ten minutes is one readable notch on a 24 h window. */
+const REPLAY_STEP_MS = 10 * 60_000;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -262,12 +274,53 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     all.forEach((event, index) => allIndex.set(event, index));
 
     // One clock for this render: "12 min ago", the detail and the strip then
-    // agree, and selecting an event later does not make the list jump.
-    const nowMs = Date.now();
+    // agree, and selecting an event later does not make the list jump. That
+    // clock is the snapshot's generated_at, not the browser's now, so the same
+    // recording reads identically on any day it is opened.
+    const nowMs = snapshotNow(summary.generated_at) ?? Date.now();
     const label = regionLabel(region);
     const hours = windowHours(summary.window);
     const recorded = new Set(regions.map((entry) => entry.region));
     const counts = kindCounts(all);
+
+    // ---- replay clock ----
+    //
+    // V1 time travel moves one cursor, `t`, across the recorded window. Every
+    // view derives from it: the map draws events with start <= t, the hero
+    // counts them, the rail ranks them. The window comes from the summary, so a
+    // different snapshot needs no code change.
+    const windowStartMs = Date.parse(summary.window.start);
+    const windowEndMs = Date.parse(summary.window.end);
+    const windowSpanMs = windowEndMs - windowStartMs;
+    const hasWindow = Number.isFinite(windowSpanMs) && windowSpanMs > 0;
+
+    // A broken start time is not a reason to hide a finding: it counts as begun.
+    const startedAt = new Map<LiveEvent, number>();
+    for (const event of all) {
+      const at = Date.parse(event.start);
+      startedAt.set(event, Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY);
+    }
+
+    let replay = false;
+    let playing = false;
+    let speed: ReplaySpeed = 60;
+    let tMs = hasWindow ? windowStartMs : 0;
+    /** True while a drag owns the thumb; the animation frame then leaves `t` alone. */
+    let scrubbing = false;
+    let frame: number | null = null;
+    /** The previous animation-frame time; null forces the next frame to restart the delta. */
+    let lastFrameMs: number | null = null;
+
+    /** Has the clock reached this event's start? In live view everything has begun. */
+    function begun(event: LiveEvent): boolean {
+      if (!replay) return true;
+      return (startedAt.get(event) ?? Number.NEGATIVE_INFINITY) <= tMs;
+    }
+
+    /** Everything the kind filter may show at the current `t`. */
+    function upToNow(): LiveEvent[] {
+      return replay ? all.filter(begun) : all;
+    }
 
     // A kind route opens its highest-severity event: `all` is already sorted, so
     // the first match is the top one and nothing depends on the API's index.
@@ -341,15 +394,23 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
 
     // ---- stage: hero number + coverage ----
 
+    // The number and its caption are separate nodes because replay rewrites both
+    // every frame: the count grows as the clock passes each event's start.
+    const heroNum = h(
+      "span",
+      { class: "live-hero-num" },
+      String(unusualCount(summary.counts)),
+    );
+    const heroLabel = h(
+      "span",
+      { class: "live-hero-label" },
+      `unusual events in the last ${hours} h`,
+    );
+
     const hero = h(
       "div",
       { class: "live-hero" },
-      h(
-        "div",
-        { class: "live-hero-row" },
-        h("span", { class: "live-hero-num" }, String(unusualCount(summary.counts))),
-        h("span", { class: "live-hero-label" }, `unusual events in the last ${hours} h`),
-      ),
+      h("div", { class: "live-hero-row" }, heroNum, heroLabel),
       h(
         "div",
         { class: "live-hero-cov" },
@@ -382,26 +443,58 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     // ---- stage: timeline strip ----
 
     const track = h("div", { class: "live-axis-track" });
-    const replay = h(
+    // The played share of the window sits under the ticks; CSS keeps it hidden
+    // until replay, so the live strip looks exactly as before.
+    const progressEl = h("span", { class: "live-progress", "aria-hidden": "true" });
+    track.append(progressEl);
+
+    // One primary action: start the recording back at its beginning. The same
+    // button leaves replay, so there is never a second thing to look for.
+    const replayBtn = h(
       "button",
-      { class: "btn live-replay", type: "button", disabled: true, title: "Coming in V2" },
-      "Replay last 24 h",
+      {
+        class: "btn live-replay",
+        type: "button",
+        "aria-pressed": "false",
+        disabled: !hasWindow,
+        title: hasWindow
+          ? "Play the recording back from its start (Esc leaves replay)"
+          : "No recorded window in this snapshot",
+      },
+      `Replay last ${hours} h`,
     );
+
+    // The right-hand axis label is the clock: "now" live, the cursor time in replay.
+    const timeLabel = h("span", null, "now");
+    const labels = h(
+      "div",
+      { class: "live-axis-labels" },
+      h("span", null, `-${hours} h`),
+      timeLabel,
+    );
+
+    const replayControls = replayBar({
+      onTogglePlay: () => togglePlay(),
+      onCycleSpeed: () => cycleSpeed(),
+      onScrubStart: () => {
+        scrubbing = true;
+      },
+      onScrub: (fraction) => {
+        seekTo(windowStartMs + fraction * windowSpanMs);
+      },
+      onScrubEnd: () => {
+        scrubbing = false;
+        lastFrameMs = null;
+      },
+    });
+    replayControls.element.hidden = true;
+
     const strip = h(
       "div",
       { class: "live-strip" },
-      replay,
-      h(
-        "div",
-        { class: "live-axis" },
-        track,
-        h(
-          "div",
-          { class: "live-axis-labels" },
-          h("span", null, `-${hours} h`),
-          h("span", null, "now"),
-        ),
-      ),
+      replayBtn,
+      replayControls.element,
+      h("div", { class: "live-axis" }, track, labels),
     );
 
     const stage = h(
@@ -473,6 +566,9 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
 
     function renderRows(): void {
       rowsEl.replaceChildren();
+      // In replay "3 h ago" is measured from the cursor, not the wall clock: the
+      // row and the strip must describe the same moment.
+      const clock = replay ? tMs : nowMs;
       rankRows(filtered, LIST_ROWS).forEach((event, position) => {
         const index = allIndex.get(event) ?? -1;
         if (index < 0) return;
@@ -506,15 +602,20 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
               ? h("span", { class: "live-row-tag" }, "On sanctions watchlist")
               : null,
           ),
-          h("span", { class: "live-row-time" }, timeAgo(event.start, nowMs)),
+          h("span", { class: "live-row-time" }, timeAgo(event.start, clock)),
         );
         row.addEventListener("click", () => goToEvent(index));
         rowsEl.append(h("li", null, row));
       });
     }
 
+    /** Tick element -> event, so the replay clock can dim future ticks without rebuilding. */
+    const tickEvents = new Map<HTMLButtonElement, LiveEvent>();
+
     function renderTicks(): void {
-      track.replaceChildren();
+      // The progress fill and the scrubber stay; only the marks are rebuilt.
+      for (const old of track.querySelectorAll(".live-tick, .live-hole")) old.remove();
+      tickEvents.clear();
 
       // Holes first so ticks paint above them: a hole describes the recorder,
       // not a finding, and must never look like one.
@@ -531,7 +632,9 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
         track.append(band);
       }
 
-      for (const event of filtered) {
+      // The strip is the whole window, not the visible slice: during replay the
+      // ticks still show what is coming, so `t` has a shape to move through.
+      for (const event of eventsOfKinds(all, active)) {
         const index = allIndex.get(event) ?? -1;
         if (index < 0) continue;
 
@@ -543,7 +646,17 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
         });
         tick.style.setProperty("--at", String(timelineFraction(event.start, summary.window)));
         tick.addEventListener("click", () => goToEvent(index));
+        tickEvents.set(tick, event);
         track.append(tick);
+      }
+
+      markTicks();
+    }
+
+    /** Dim the ticks the replay clock has not reached yet; live view has no future. */
+    function markTicks(): void {
+      for (const [tick, event] of tickEvents) {
+        tick.classList.toggle("is-future", !begun(event));
       }
     }
 
@@ -559,7 +672,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
             watch: watchlistForVessel(vessel, summary.watchlist),
             backHref: `#/live/${region}`,
             regionLabel: label,
-            nowMs,
+            generatedAt: summary.generated_at,
             eventHref: (event) => {
               const index = allIndex.get(event);
               return index === undefined ? null : `#/live/${region}/event/${index}`;
@@ -595,11 +708,14 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     /** Push the filtered markers and the current selection to the map. */
     function pushMap(capped: LiveEvent[]): void {
       // The first LIST_ROWS markers carry the same 1..7 rank as the rail's rows.
-      // A selection whose kind the chips have hidden is not drawn either: the
-      // map must show exactly the kind on screen, never a leftover ring.
+      // A selection whose kind the chips have hidden, or whose event the replay
+      // clock has not reached, is not drawn either: the map must show exactly
+      // what is on screen, never a leftover ring.
       const chosen = selectedVessel === null ? selectedEvent() : null;
-      const visibleSelection = chosen !== null && active.has(chosen.kind) ? chosen : null;
-      map.setEvents(capped, visibleSelection, LIST_ROWS);
+      const visibleSelection =
+        chosen !== null && active.has(chosen.kind) && begun(chosen) ? chosen : null;
+      // In replay a marker that just appeared fades in; live view has no arrivals.
+      map.setEvents(capped, visibleSelection, LIST_ROWS, replay);
     }
 
     /**
@@ -620,7 +736,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     }
 
     function applyFilter(): void {
-      filtered = eventsOfKinds(all, active);
+      filtered = eventsOfKinds(upToNow(), active);
       // The map keeps its own cap; list and strip show everything the filter
       // left, so a chip never hides a finding from the ranked view.
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
@@ -636,6 +752,221 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       else active = new Set([kind]);
       applyFilter();
     }
+
+    // ---- replay: clock, scrubber and keyboard ----
+
+    /** How many events the clock has reached, regardless of the kind filter. */
+    function reachedCount(): number {
+      let total = 0;
+      for (const event of all) if (begun(event)) total += 1;
+      return total;
+    }
+
+    /**
+     * The hero number is the one figure on screen, so in replay it counts the
+     * findings up to the cursor and names that moment: a growing number with a
+     * clock beside it is the whole idea of time travel in one glance.
+     */
+    function updateHero(): void {
+      if (!replay) {
+        heroNum.textContent = String(unusualCount(summary.counts));
+        heroLabel.textContent = `unusual events in the last ${hours} h`;
+        return;
+      }
+      heroNum.textContent = String(reachedCount());
+      heroLabel.textContent = hasWindow
+        ? `unusual events by ${fmtUtc(new Date(tMs).toISOString())}`
+        : "unusual events so far";
+    }
+
+    /** Fraction of the window the cursor sits on, clamped to [0, 1]. */
+    function timeFraction(): number {
+      if (!hasWindow) return 1;
+      return Math.min(1, Math.max(0, (tMs - windowStartMs) / windowSpanMs));
+    }
+
+    /** Push `t` to the three places that read it: progress, clock label, thumb. */
+    function updateScrub(): void {
+      const fraction = timeFraction();
+      progressEl.style.setProperty("--at", String(fraction));
+      timeLabel.textContent = replay ? fmtUtc(new Date(tMs).toISOString()) : "now";
+      replayControls.setFraction(fraction);
+    }
+
+    /**
+     * Re-derive every time-dependent view from `t`. Only the rail re-renders
+     * when the visible set changed; the ticks just dim, which is what keeps a
+     * 60 fps scrub calm.
+     */
+    function applyTime(): void {
+      const before = filtered.length;
+      filtered = eventsOfKinds(upToNow(), active);
+      updateHero();
+      pushMap(filtered.slice(0, MAP_EVENT_CAP));
+      // The visible set is monotone in t, so an unchanged count means the same
+      // rows; re-rendering them every frame would only cost layout.
+      if (filtered.length !== before) renderRows();
+      markTicks();
+      updateScrub();
+    }
+
+    /** Move the cursor to an absolute time; a scrub or a step never invents one. */
+    function seekTo(next: number): void {
+      if (!hasWindow) return;
+      tMs = Math.min(windowEndMs, Math.max(windowStartMs, next));
+      lastFrameMs = null;
+      applyTime();
+    }
+
+    /** One animation frame of playback; `t` advances by wall time at the chosen speed. */
+    function frameStep(now: number): void {
+      frame = null;
+      if (!replay || !playing) return;
+      if (lastFrameMs === null) lastFrameMs = now;
+      // A backgrounded tab returns with a huge delta; cap it so the window does
+      // not jump to the end while nobody was watching.
+      const delta = Math.min(Math.max(0, now - lastFrameMs), 250);
+      lastFrameMs = now;
+
+      if (!scrubbing) {
+        tMs = Math.min(
+          windowEndMs,
+          tMs + (delta / replayDurationMs(speed)) * windowSpanMs,
+        );
+        applyTime();
+      }
+
+      if (tMs >= windowEndMs) {
+        setPlaying(false);
+        return;
+      }
+      frame = window.requestAnimationFrame(frameStep);
+    }
+
+    function setPlaying(next: boolean): void {
+      playing = next && hasWindow;
+      lastFrameMs = null;
+      replayControls.setPlaying(playing);
+      if (playing && frame === null) frame = window.requestAnimationFrame(frameStep);
+      if (!playing && frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
+    }
+
+    function togglePlay(): void {
+      if (!replay) {
+        enterReplay();
+        return;
+      }
+      if (!hasWindow) return;
+      // Play pressed at the end replays the window rather than doing nothing.
+      if (!playing && tMs >= windowEndMs) {
+        tMs = windowStartMs;
+        applyTime();
+      }
+      setPlaying(!playing);
+    }
+
+    function cycleSpeed(): void {
+      const index = REPLAY_SPEEDS.indexOf(speed);
+      speed = REPLAY_SPEEDS[(index + 1) % REPLAY_SPEEDS.length] ?? 60;
+      replayControls.setSpeed(speed);
+      // The new speed starts from this frame; the old delta must not be billed twice.
+      lastFrameMs = null;
+    }
+
+    /**
+     * Enter replay at the start of the window and run. The press is the user's
+     * request for motion, so it plays even under reduced motion; only the
+     * marker fade is dropped there. Every entry is a fresh replay at the
+     * standard speed, so the window is always the promised ~20 s to a viewer
+     * who pressed the button after an earlier demo left 1× behind.
+     */
+    function enterReplay(): void {
+      if (replay || !hasWindow) return;
+      replay = true;
+      playing = false;
+      tMs = windowStartMs;
+      speed = 60;
+      replayControls.setSpeed(speed);
+      strip.classList.add("is-replay");
+      replayBtn.textContent = "Exit replay";
+      replayBtn.setAttribute("aria-pressed", "true");
+      replayControls.element.hidden = false;
+      // Laid over the ticks so a drag anywhere on the strip seeks; the ticks stay
+      // visible underneath as the shape of what is coming.
+      track.append(replayControls.slider);
+      applyTime();
+      setPlaying(true);
+    }
+
+    /** Leave replay: the same snapshot, drawn live again, with no reload. */
+    function exitReplay(): void {
+      if (!replay) return;
+      setPlaying(false);
+      replay = false;
+      tMs = windowEndMs;
+      strip.classList.remove("is-replay");
+      replayBtn.textContent = `Replay last ${hours} h`;
+      replayBtn.setAttribute("aria-pressed", "false");
+      replayControls.element.hidden = true;
+      replayControls.slider.remove();
+      filtered = eventsOfKinds(upToNow(), active);
+      updateHero();
+      renderRows();
+      renderTicks();
+      updateScrub();
+      pushMap(filtered.slice(0, MAP_EVENT_CAP));
+    }
+
+    /**
+     * The keys replay owns. Space and the arrows are only meaningful once the
+     * strip is a scrubber, so live view keeps the browser's own behaviour;
+     * Escape always leaves. A text field keeps its keys.
+     */
+    function onKeydown(event: KeyboardEvent): void {
+      if (destroyed) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      const typing =
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement ||
+          (target instanceof HTMLInputElement && target.type !== "range"));
+      if (typing) return;
+
+      if (event.key === "Escape") {
+        if (!replay) return;
+        event.preventDefault();
+        exitReplay();
+        replayBtn.focus();
+        return;
+      }
+
+      if (!replay) return;
+
+      if (event.key === " " || event.key === "Spacebar") {
+        // Also stops a focused control from acting a second time on keyup.
+        event.preventDefault();
+        togglePlay();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        // Stepping by hand stops the clock, so the step is legible.
+        setPlaying(false);
+        seekTo(tMs + (event.key === "ArrowLeft" ? -REPLAY_STEP_MS : REPLAY_STEP_MS));
+      }
+    }
+
+    replayBtn.addEventListener("click", () => {
+      if (replay) exitReplay();
+      else enterReplay();
+    });
+    document.addEventListener("keydown", onKeydown);
 
     /**
      * Navigate by hash. The router turns that into select(index); going
@@ -662,8 +993,10 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
       markCurrentRow();
       renderTicks();
       pushMap(filtered.slice(0, MAP_EVENT_CAP));
-      if (event !== null) map.focusEvent(event);
-      else map.resetView();
+      // A finding the replay clock has not reached is not on the map yet; flying
+      // to it would zoom into empty sea until its turn comes.
+      if (event !== null && begun(event)) map.focusEvent(event);
+      else if (event === null) map.resetView();
     }
 
     function selectKind(kind: string): void {
@@ -726,6 +1059,7 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     renderRail();
     markCurrentRow();
     pushMap(filtered.slice(0, MAP_EVENT_CAP));
+    updateScrub();
 
     const initialVessel = selectedVesselRow();
     const initial = selectedEvent();
@@ -742,6 +1076,12 @@ export function renderLive(app: HTMLElement, opts: LiveRoute): LiveScreen {
     selectKindAction = selectKind;
     selectVesselAction = selectVessel;
     teardown = () => {
+      // The key listener outlives the strip; drop the clock and the keys first.
+      document.removeEventListener("keydown", onKeydown);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        frame = null;
+      }
       map.destroy();
     };
   }

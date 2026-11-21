@@ -9,7 +9,7 @@
  */
 
 import type { LiveEvent, LiveVessel, LiveWatchlistEntry } from "../model/live";
-import { KIND_LABEL, UNNAMED_VESSEL, timeAgo } from "../model/liveFacts";
+import { KIND_LABEL, UNNAMED_VESSEL, snapshotNow, timeAgo } from "../model/liveFacts";
 import { h } from "./dom";
 
 export interface VesselCardProps {
@@ -22,7 +22,12 @@ export interface VesselCardProps {
   backHref: string;
   /** Label for the breadcrumb, e.g. "Baltic". */
   regionLabel: string;
-  nowMs: number;
+  /**
+   * The region snapshot's `generated_at` (ISO). Every "last seen ..." on the
+   * card counts back from this, not from the browser clock, so the recording
+   * reads the same whenever it is opened.
+   */
+  generatedAt: string;
   /** Hash for one of this vessel's events; null when it has no route. */
   eventHref: (event: LiveEvent) => string | null;
 }
@@ -66,7 +71,10 @@ function row(label: string, value: string | null): HTMLElement | null {
 function headBlock(props: VesselCardProps, name: string): HTMLElement {
   const { vessel, backHref, regionLabel } = props;
   const last = vessel.last;
-  const seen = last === null ? "" : timeAgo(last.t, props.nowMs);
+  // Times are read against the recording, not the wall clock: an unreadable
+  // snapshot time leaves the relative age off rather than guessing.
+  const nowMs = snapshotNow(props.generatedAt);
+  const seen = last === null || nowMs === null ? "" : timeAgo(last.t, nowMs);
   const position =
     last === null
       ? "No position broadcast in the recording"
@@ -101,6 +109,9 @@ function headBlock(props: VesselCardProps, name: string): HTMLElement {
 
 function eventsBlock(props: VesselCardProps): HTMLElement {
   const items: HTMLElement[] = [];
+  // Same snapshot clock as the head: "12 min ago" means 12 minutes before the
+  // recording was written, whichever day the card is opened on.
+  const nowMs = snapshotNow(props.generatedAt);
 
   if (props.events.length === 0) {
     items.push(h("li", { class: "vessel-card__none" }, "No unusual events in this recording."));
@@ -116,7 +127,9 @@ function eventsBlock(props: VesselCardProps): HTMLElement {
         "span",
         { class: "vessel-card__event-head" },
         h("span", { class: "vessel-card__event-kind" }, KIND_LABEL[event.kind]),
-        h("span", { class: "vessel-card__event-time" }, timeAgo(event.start, props.nowMs)),
+        nowMs === null
+          ? null
+          : h("span", { class: "vessel-card__event-time" }, timeAgo(event.start, nowMs)),
       ),
       why === "" ? null : h("span", { class: "vessel-card__event-why" }, why),
     );
