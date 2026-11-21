@@ -36,8 +36,6 @@ export interface EventDetailProps {
   nowMs: number;
 }
 
-/** One em dash stands in for every figure the snapshot did not give us. */
-const DASH = "\u2014";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /* -------------------------------------------------------------------------
@@ -48,6 +46,20 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 function num(evidence: Record<string, unknown>, key: string): number | null {
   const raw = evidence[key];
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/**
+ * A [lat, lon] pair as the engine writes it (clone clusters, spoof centre).
+ * Anything that is not two finite numbers is dropped rather than printed.
+ */
+function coord(evidence: Record<string, unknown>, key: string): [number, number] | null {
+  const raw = evidence[key];
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const lat = raw[0];
+  const lon = raw[1];
+  if (typeof lat !== "number" || !Number.isFinite(lat)) return null;
+  if (typeof lon !== "number" || !Number.isFinite(lon)) return null;
+  return [lat, lon];
 }
 
 /**
@@ -72,6 +84,12 @@ function evidenceMmsis(evidence: Record<string, unknown>): number[] {
   return out;
 }
 
+/** A boolean evidence flag; null when the key is absent or not a boolean. */
+function flag(evidence: Record<string, unknown>, key: string): boolean | null {
+  const raw = evidence[key];
+  return typeof raw === "boolean" ? raw : null;
+}
+
 /* -------------------------------------------------------------------------
  * Formatting
  * ---------------------------------------------------------------------- */
@@ -86,13 +104,22 @@ function fmtInt(value: number): string {
   return String(Math.round(value));
 }
 
-/** A value with its unit, or an em dash when the snapshot has no number. */
-function unitValue(value: number | null, unit: string): string {
-  return value === null ? DASH : `${fmt1(value)} ${unit}`;
+/** A value with its unit, or null when the evidence has no such number (the row is then hidden). */
+function unitValue(value: number | null, unit: string): string | null {
+  return value === null ? null : `${fmt1(value)} ${unit}`;
 }
 
-function countValue(value: number | null): string {
-  return value === null ? DASH : fmtInt(value);
+function countValue(value: number | null): string | null {
+  return value === null ? null : fmtInt(value);
+}
+
+/** "59.44 N, 24.75 E": a position a person can read, in the order the table lists lat/lon. */
+function coordValue(value: [number, number] | null): string | null {
+  if (value === null) return null;
+  const [lat, lon] = value;
+  const ns = lat >= 0 ? "N" : "S";
+  const ew = lon >= 0 ? "E" : "W";
+  return `${Math.abs(lat).toFixed(2)} ${ns}, ${Math.abs(lon).toFixed(2)} ${ew}`;
 }
 
 /** HH:MM in UTC; derived from the timestamp itself so the machine's zone never leaks in. */
@@ -105,10 +132,10 @@ function utcHm(iso: string): string | null {
   return `${hours}:${minutes}`;
 }
 
-/** A clock time with its zone spelled out, for the numbers table. */
-function clockValue(iso: string): string {
+/** A clock time with its zone spelled out, for the numbers table; null when unreadable. */
+function clockValue(iso: string): string | null {
   const hm = utcHm(iso);
-  return hm === null ? DASH : `${hm} UTC`;
+  return hm === null ? null : `${hm} UTC`;
 }
 
 /* -------------------------------------------------------------------------
@@ -214,12 +241,15 @@ function headBlock(props: EventDetailProps, vessel: LiveVessel | null): HTMLElem
     ),
     // The red tag is a separate line: it is a caveat about the ship, not part of its name.
     watch !== null ? h("div", { class: "event-detail__watch" }, "On sanctions watchlist") : null,
-    h(
-      "div",
-      { class: "event-detail__big" },
-      h("span", { class: "event-detail__big-value" }, big.value),
-      big.tail !== "" ? h("span", { class: "event-detail__big-tail" }, big.tail) : null,
-    ),
+    // A missing figure hides the block: a dash is not a finding.
+    big.value !== ""
+      ? h(
+          "div",
+          { class: "event-detail__big" },
+          h("span", { class: "event-detail__big-value" }, big.value),
+          big.tail !== "" ? h("span", { class: "event-detail__big-tail" }, big.tail) : null,
+        )
+      : null,
     sentence !== "" ? h("p", { class: "event-detail__sentence" }, sentence) : null,
   );
 }
@@ -248,18 +278,15 @@ function barRow(label: string, value: string, percent: number, muted: boolean): 
   );
 }
 
-function jumpProof(event: LiveEvent, vessel: LiveVessel | null): HTMLElement {
-  const km = num(event.evidence, "distance_km");
+function jumpProof(event: LiveEvent): HTMLElement {
+  // Engine keys (core/kinematics.py jumps): km, minutes, implied_kn, cap_kn.
+  const km = num(event.evidence, "km");
   const minutes = num(event.evidence, "minutes");
   const implied = num(event.evidence, "implied_kn");
   const cap = num(event.evidence, "cap_kn");
   if (km === null || minutes === null || implied === null || cap === null || implied <= 0) {
     return missingPicture();
   }
-
-  const shipClass = vessel?.class.trim() ?? "";
-  const capLabel =
-    shipClass !== "" ? `Fastest a ${shipClass} this size can go` : "Fastest a ship this size can go";
 
   return h(
     "div",
@@ -270,7 +297,7 @@ function jumpProof(event: LiveEvent, vessel: LiveVessel | null): HTMLElement {
       100,
       false,
     ),
-    barRow(capLabel, `${fmt1(cap)} kn`, (cap / implied) * 100, true),
+    barRow("Fastest this ship can go", `${fmt1(cap)} kn`, (cap / implied) * 100, true),
     h(
       "p",
       { class: "event-detail__caption" },
@@ -280,23 +307,24 @@ function jumpProof(event: LiveEvent, vessel: LiveVessel | null): HTMLElement {
 }
 
 /**
- * The axis is the coverage window, so the dotted line has real room on both
- * sides of the gap. If the window is unusable we fall back to the event's own
- * span, where the gap fills the whole axis.
+ * The axis is the gap itself: last heard on the left, heard again on the right.
+ * That is what the picture is about, and its two labels are then the two event
+ * times rather than two ends of a 24 h window that would squeeze the gap into a
+ * sliver. The coverage window is only a fallback for an unusable event span.
  */
 function timeAxis(
   event: LiveEvent,
   coverage: { start: string; end: string },
 ): { start: string; end: string } | null {
-  const windowStart = Date.parse(coverage.start);
-  const windowEnd = Date.parse(coverage.end);
-  if (Number.isFinite(windowStart) && Number.isFinite(windowEnd) && windowEnd > windowStart) {
-    return { start: coverage.start, end: coverage.end };
-  }
   const eventStart = Date.parse(event.start);
   const eventEnd = Date.parse(event.end);
   if (Number.isFinite(eventStart) && Number.isFinite(eventEnd) && eventEnd > eventStart) {
     return { start: event.start, end: event.end };
+  }
+  const windowStart = Date.parse(coverage.start);
+  const windowEnd = Date.parse(coverage.end);
+  if (Number.isFinite(windowStart) && Number.isFinite(windowEnd) && windowEnd > windowStart) {
+    return { start: coverage.start, end: coverage.end };
   }
   return null;
 }
@@ -376,19 +404,23 @@ function silenceProof(
     ticks,
   );
 
-  const axisRow = h(
-    "div",
-    { class: "event-detail__axis" },
-    h("span", null),
-    h(
-      "span",
-      { class: "event-detail__axis-times" },
-      h("span", null, utcHm(axis.start) ?? DASH),
-      h("span", null, `${utcHm(axis.end) ?? DASH} UTC`),
-    ),
-  );
+  const axisRow =
+    utcHm(axis.start) !== null && utcHm(axis.end) !== null
+      ? h(
+          "div",
+          { class: "event-detail__axis" },
+          h("span", null),
+          h(
+            "span",
+            { class: "event-detail__axis-times" },
+            h("span", null, utcHm(axis.start)),
+            h("span", null, `${utcHm(axis.end)} UTC`),
+          ),
+        )
+      : null;
 
   const others = num(event.evidence, "local_other_vessels");
+  const gapWords = formatDuration(minutes);
   const caption =
     others !== null
       ? h(
@@ -396,18 +428,23 @@ function silenceProof(
           { class: "event-detail__caption" },
           "Our receivers kept hearing about ",
           h("span", { class: "event-detail__mono" }, fmtInt(others)),
-          " other ships nearby. Only this one stopped.",
+          " other ships nearby. Only this one stopped, for ",
+          h("span", { class: "event-detail__mono" }, gapWords),
+          ".",
         )
       : h(
           "p",
           { class: "event-detail__caption" },
-          "Our receivers kept hearing other ships nearby. Only this one stopped.",
+          "Our receivers kept hearing other ships nearby. Only this one stopped, for ",
+          h("span", { class: "event-detail__mono" }, gapWords),
+          ".",
         );
 
   return h("div", { class: "event-detail__proof" }, rows, axisRow, caption);
 }
 
 function cloneProof(event: LiveEvent): HTMLElement {
+  // Engine keys (core/kinematics.py _clone_event): cluster_a, cluster_b, separation_km, flips.
   const separation = num(event.evidence, "separation_km");
   if (separation === null) return missingPicture();
 
@@ -462,27 +499,44 @@ function cloneProof(event: LiveEvent): HTMLElement {
   labelB.textContent = "Position B";
   svg.append(labelB);
 
-  return h(
-    "div",
-    { class: "event-detail__proof" },
-    svg,
-    h(
-      "p",
-      { class: "event-detail__caption" },
-      "One ID, two places, ",
-      h("span", { class: "event-detail__mono" }, countValue(num(event.evidence, "flips"))),
-      " switches.",
-    ),
-  );
+  // The clusters' own coordinates are the proof the two places are real places.
+  const clusterA = coordValue(coord(event.evidence, "cluster_a"));
+  const clusterB = coordValue(coord(event.evidence, "cluster_b"));
+  const places =
+    clusterA !== null || clusterB !== null
+      ? h(
+          "p",
+          { class: "event-detail__caption" },
+          clusterA !== null ? `A ${clusterA}` : null,
+          clusterA !== null && clusterB !== null ? " \u00b7 " : null,
+          clusterB !== null ? `B ${clusterB}` : null,
+        )
+      : null;
+
+  const flips = countValue(num(event.evidence, "flips"));
+  const sentence =
+    flips !== null
+      ? h(
+          "p",
+          { class: "event-detail__caption" },
+          "One ID, two places, ",
+          h("span", { class: "event-detail__mono" }, flips),
+          " switches.",
+        )
+      : null;
+
+  return h("div", { class: "event-detail__proof" }, svg, sentence, places);
 }
 
-function meetingProof(event: LiveEvent): HTMLElement {
+function meetingProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
+  // Engine keys (core/encounters.py): min_distance_m, max_distance_m, minutes, mean_sog.
   const closest = num(event.evidence, "min_distance_m");
   const minutes = num(event.evidence, "minutes");
   const sog = num(event.evidence, "mean_sog");
   if (closest === null || minutes === null) return missingPicture();
 
   const together = `${fmtInt(minutes)} min`;
+  const other = event.other_mmsi;
 
   return h(
     "div",
@@ -505,6 +559,15 @@ function meetingProof(event: LiveEvent): HTMLElement {
         sog !== null ? h("span", { class: "event-detail__stat-note" }, `at ${fmt1(sog)} kn`) : null,
       ),
     ),
+    other !== null
+      ? h(
+          "p",
+          { class: "event-detail__caption" },
+          "The other ship: ",
+          h("span", { class: "event-detail__mono" }, vesselName(other, vessels)),
+          ` (MMSI ${other}).`,
+        )
+      : null,
     h(
       "p",
       { class: "event-detail__caption" },
@@ -513,14 +576,24 @@ function meetingProof(event: LiveEvent): HTMLElement {
   );
 }
 
-function spoofProof(event: LiveEvent): HTMLElement {
+function spoofProof(event: LiveEvent, vessels: LiveVessel[]): HTMLElement {
+  // Engine keys (core/spoofing.py): vessels [{mmsi, n_reports, first, last}], n_vessels, on_land, inland_km.
   const mmsis = evidenceMmsis(event.evidence);
   if (mmsis.length === 0) return missingPicture();
 
   const list = h("ul", { class: "event-detail__mmsis" });
   for (const mmsi of mmsis) {
-    list.append(h("li", { class: "event-detail__mmsi" }, String(mmsi)));
+    list.append(
+      h(
+        "li",
+        { class: "event-detail__mmsi" },
+        h("span", { class: "event-detail__mmsi-name" }, vesselName(mmsi, vessels)),
+        h("span", { class: "event-detail__mmsi-id" }, `MMSI ${mmsi}`),
+      ),
+    );
   }
+
+  const onLand = flag(event.evidence, "on_land");
 
   return h(
     "div",
@@ -529,27 +602,29 @@ function spoofProof(event: LiveEvent): HTMLElement {
     h(
       "p",
       { class: "event-detail__caption" },
-      "These ships all reported one position that cannot be real.",
+      onLand === true
+        ? "These ships all reported one position that lies inside land, where no ship can be."
+        : "These ships all reported one position that cannot be real.",
     ),
   );
 }
 
 function proofPicture(
   event: LiveEvent,
-  vessel: LiveVessel | null,
   coverage: { start: string; end: string },
+  vessels: LiveVessel[],
 ): HTMLElement {
   switch (event.kind) {
     case "jump":
-      return jumpProof(event, vessel);
+      return jumpProof(event);
     case "silence":
       return silenceProof(event, coverage);
     case "clone":
       return cloneProof(event);
     case "meeting":
-      return meetingProof(event);
+      return meetingProof(event, vessels);
     default:
-      return spoofProof(event);
+      return spoofProof(event, vessels);
   }
 }
 
@@ -557,52 +632,67 @@ function proofPicture(
  * 7: the numbers
  * ---------------------------------------------------------------------- */
 
-function tableRow(label: string, value: string): HTMLElement {
+function tableRow(label: string, value: string | null): HTMLElement | null {
+  if (value === null) return null;
   return h("div", { class: "event-detail__row" }, h("dt", null, label), h("dd", null, value));
 }
 
-function numbersTable(event: LiveEvent): HTMLElement {
+/**
+ * The numbers behind the picture, read with the engine's own key names. A row
+ * whose key is absent is dropped: the table never prints a dash.
+ */
+function numbersTable(event: LiveEvent): HTMLElement | null {
   const evidence = event.evidence;
-  const rows: Array<[string, string]> = [];
+  const rows: Array<[string, string | null]> = [];
 
   if (event.kind === "jump") {
-    rows.push([
-      "Distance between positions",
-      unitValue(num(evidence, "distance_km"), "km"),
-    ]);
+    rows.push(["Distance between positions", unitValue(num(evidence, "km"), "km")]);
     rows.push(["Time between them", unitValue(num(evidence, "minutes"), "min")]);
     rows.push(["Speed needed", unitValue(num(evidence, "implied_kn"), "kn")]);
     rows.push(["Class maximum", unitValue(num(evidence, "cap_kn"), "kn")]);
   } else if (event.kind === "silence") {
+    const minutes = num(evidence, "minutes");
+    rows.push(["Silent for", minutes === null ? null : formatDuration(minutes)]);
     rows.push(["Last heard", clockValue(event.start)]);
     rows.push(["Heard again", clockValue(event.end)]);
-    rows.push(["Speed before going quiet", unitValue(num(evidence, "implied_kn"), "kn")]);
+    rows.push(["Implied speed across the gap", unitValue(num(evidence, "implied_kn"), "kn")]);
     rows.push([
       "Distance between last and next fix",
       unitValue(num(evidence, "distance_km"), "km"),
     ]);
-    rows.push([
-      "Heard by receivers nearby",
-      countValue(num(evidence, "local_other_vessels")),
-    ]);
+    rows.push(["Other ships nearby", countValue(num(evidence, "local_other_vessels"))]);
   } else if (event.kind === "clone") {
     rows.push(["Separation", unitValue(num(evidence, "separation_km"), "km")]);
     rows.push(["Switches", countValue(num(evidence, "flips"))]);
     rows.push(["Max implied speed", unitValue(num(evidence, "max_implied_kn"), "kn")]);
+    rows.push(["Position A", coordValue(coord(evidence, "cluster_a"))]);
+    rows.push(["Position B", coordValue(coord(evidence, "cluster_b"))]);
   } else if (event.kind === "meeting") {
     rows.push(["Closest distance", unitValue(num(evidence, "min_distance_m"), "m")]);
     rows.push(["Widest distance", unitValue(num(evidence, "max_distance_m"), "m")]);
     rows.push(["Duration", unitValue(num(evidence, "minutes"), "min")]);
+    rows.push(["Mean speed", unitValue(num(evidence, "mean_sog"), "kn")]);
     rows.push(["Offshore", unitValue(num(evidence, "offshore_km"), "km")]);
+    const twin = flag(evidence, "twin_transponders");
+    rows.push(["One hull, two transponders", twin === true ? "Yes" : null]);
   } else {
     const mmsis = evidenceMmsis(evidence);
-    const ships = mmsis.length > 0 ? mmsis.length : num(evidence, "count");
+    const ships = num(evidence, "n_vessels") ?? (mmsis.length > 0 ? mmsis.length : null);
     rows.push(["Ships", countValue(ships)]);
+    const onLand = flag(evidence, "on_land");
+    rows.push(["Inside land", onLand === null ? null : onLand ? "Yes" : "No"]);
+    // inland_km comes from a coarse coastline without lakes; we show only "on land", not a distance.
+    rows.push(["Ghost position", coordValue(coord(evidence, "centre"))]);
   }
 
-  const list = h("dl", { class: "event-detail__table" });
-  for (const [label, value] of rows) list.append(tableRow(label, value));
-  return list;
+  const built: HTMLElement[] = [];
+  for (const [label, value] of rows) {
+    const row = tableRow(label, value);
+    if (row !== null) built.push(row);
+  }
+  if (built.length === 0) return null;
+
+  return h("dl", { class: "event-detail__table" }, ...built);
 }
 
 /* -------------------------------------------------------------------------
@@ -669,18 +759,21 @@ function caveatsBlock(event: LiveEvent): HTMLElement {
 export function eventDetail(props: EventDetailProps): HTMLElement {
   const { event, vessels, watch, window: coverage } = props;
   const vessel = vessels.find((v) => v.mmsi === event.mmsi) ?? null;
+  const table = numbersTable(event);
 
   return h(
     "section",
     { class: "event-detail" },
     headBlock(props, vessel),
-    h("div", { class: "event-detail__block" }, proofPicture(event, vessel, coverage)),
-    h(
-      "div",
-      { class: "event-detail__block" },
-      h("h3", { class: "event-detail__heading" }, "The numbers"),
-      numbersTable(event),
-    ),
+    h("div", { class: "event-detail__block" }, proofPicture(event, coverage, vessels)),
+    table !== null
+      ? h(
+          "div",
+          { class: "event-detail__block" },
+          h("h3", { class: "event-detail__heading" }, "The numbers"),
+          table,
+        )
+      : null,
     sourcesBlock(watch, coverage),
     caveatsBlock(event),
   );

@@ -479,6 +479,47 @@
   min-width: 0;
 }
 
+/* ---------- event markers (SVG overlay above the vessel field) ---------- */
+
+/* Shapes are drawn in the DOM, not by MapLibre, because the offline style has
+   no glyphs; the overlay itself ignores the pointer so pans still work. */
+.live-marker {
+  outline: none;
+}
+
+/* A transparent disc wide enough to click: the ring itself is 7 px. */
+.live-marker-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+  cursor: pointer;
+}
+
+/* Keyboard focus is the same white ring as everywhere else, drawn on the hit
+   shape so it hugs the glyph instead of the whole translucent disc. */
+.live-marker:focus-visible .live-marker-hit {
+  stroke: var(--c-focus);
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+}
+
+/* Rank numbers match the rail's 1..7; the halo keeps them readable over dots. */
+.live-marker-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--c-text-1);
+  stroke: var(--c-bg);
+  stroke-width: 3px;
+  paint-order: stroke;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-map-marker-svg {
+  pointer-events: none;
+}
+
 /* ---------- focus ---------- */
 
 .live-row:focus-visible,

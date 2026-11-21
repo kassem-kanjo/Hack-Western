@@ -367,7 +367,9 @@ def _event_from_core(
         "shared device is wrong."
     )
     if on_land:
-        explanation += f" The point lies {inland_km:.0f} km inland."
+        # Say only what is verified: the coarse 50 m coastline has no large lakes, so a km figure
+        # would overstate (the real St Petersburg point is ~25 km from Lake Ladoga, not 53).
+        explanation += " The point is on land."
 
     evidence: dict[str, Any] = {
         "vessels": [

@@ -426,7 +426,7 @@ export function renderLive(
               "span",
               { class: "live-row-head" },
               h("span", { class: "live-row-vessel" }, vesselName(event.mmsi, vessels)),
-              h("span", { class: "live-row-mmsi" }, String(event.mmsi)),
+              h("span", { class: "live-row-mmsi" }, `MMSI ${event.mmsi}`),
             ),
             h("span", { class: "live-row-why" }, event.explanation),
             watch !== null
@@ -500,7 +500,8 @@ export function renderLive(
 
     /** Push the filtered markers and the current selection to the map. */
     function pushMap(capped: LiveEvent[]): void {
-      map.setEvents(capped, selectedEvent());
+      // The first LIST_ROWS markers carry the same 1..7 rank as the rail's rows.
+      map.setEvents(capped, selectedEvent(), LIST_ROWS);
     }
 
     function applyFilter(): void {
