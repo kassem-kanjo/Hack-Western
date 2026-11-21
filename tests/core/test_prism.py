@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from darkfleet.core.geo import GEOD, KNOT_KM_H, Fix, distance_km
@@ -14,6 +14,7 @@ from darkfleet.core.prism import (
     in_lens,
     is_consistent,
     lens_polygon,
+    unwrap_lon,
 )
 from darkfleet.core.speeds import max_speed_knots
 
@@ -67,6 +68,24 @@ def _scatter(a, b, v, rng, n=200):
     r = rng.uniform(0, reach, n) * 1000
     lons, lats, _ = GEOD.fwd(np.full(n, a.lon), np.full(n, a.lat), az, r)
     return lats, lons
+
+
+@st.composite
+def dateline_gaps(draw):
+    """Consistent gaps whose centre is within a degree of the antimeridian, so their
+    footprint and lenses straddle it."""
+    lat = draw(st.floats(-55, 55))
+    centre = draw(st.one_of(st.floats(-180.0, -179.0), st.floats(179.0, 180.0)))
+    hours = draw(st.floats(12, 38))
+    v = draw(st.floats(15, 25))
+    reach = v * KNOT_KM_H * hours
+    half = reach * draw(st.floats(0.05, 0.25)) / 2.0
+    az = draw(st.floats(0, 360))
+    lon0, lat0, _ = GEOD.fwd(centre, lat, (az + 180) % 360, half * 1000)
+    lon1, lat1, _ = GEOD.fwd(centre, lat, az, half * 1000)
+    a = Fix(float(lat0), float(lon0), T0)
+    b = Fix(float(lat1), float(lon1), T0 + timedelta(hours=hours))
+    return a, b, v
 
 
 @SET
@@ -158,10 +177,11 @@ def test_polygon_agrees_with_predicate(g, frac, seed):
     a, b, v = g
     t = a.t + (b.t - a.t) * frac
     poly = lens_polygon(a, b, v, t)
+    lon_ref = float(poly.centroid.x)
     rng = np.random.default_rng(seed)
     lats, lons = _scatter(a, b, v, rng, 200)
     for lat, lon in zip(lats, lons, strict=True):
-        inside_poly = poly.contains(Point(lon, lat))
+        inside_poly = poly.contains(Point(float(unwrap_lon(lon, lon_ref)), lat))
         exact = in_lens(a, b, v, lat, lon, t)
         if inside_poly != exact:
             # boundary tolerance: disagreement only within 0.5 km of the edge
@@ -176,18 +196,86 @@ def test_polygon_agrees_with_predicate(g, frac, seed):
 
 @SET
 @given(gaps(), st.integers(0, 10_000))
+@example(
+    (
+        Fix(4.0, 170.0, T0),
+        Fix(4.000000000000001, 170.0, T0 + timedelta(days=2)),
+        25.0,
+    ),
+    0,
+)
 def test_footprint_agrees_with_predicate(g, seed):
     from shapely.geometry import Point
 
     a, b, v = g
     poly = footprint_polygon(a, b, v)
     total = v * KNOT_KM_H * (b.t - a.t).total_seconds() / 3600
+    lon_ref = float(poly.centroid.x)
     rng = np.random.default_rng(seed)
     lats, lons = _scatter(a, b, v, rng, 100)
     for lat, lon in zip(lats, lons, strict=True):
-        if poly.contains(Point(lon, lat)) != in_footprint(a, b, v, lat, lon):
+        inside_poly = poly.contains(Point(float(unwrap_lon(lon, lon_ref)), lat))
+        if inside_poly != in_footprint(a, b, v, lat, lon):
             s = distance_km(a.lat, a.lon, lat, lon) + distance_km(lat, lon, b.lat, b.lon)
             assert abs(s - total) < 1.0
+
+
+@SET
+@given(st.floats(-540, 540), st.floats(-540, 540))
+def test_unwrap_lon_is_nearest_congruent(lon, ref):
+    out = unwrap_lon(lon, ref)
+    assert abs(out - ref) <= 180.0 + 1e-9
+    k = (out - lon) / 360.0
+    assert abs(k - round(k)) < 1e-9
+    # vectorised: one value per input, same answer as the scalar path
+    vec = unwrap_lon(np.array([lon, ref, 0.0]), ref)
+    assert vec.shape == (3,)
+    assert float(vec[0]) == out
+
+
+@SET
+@given(dateline_gaps(), st.floats(0.35, 0.65), st.integers(0, 10_000))
+@example(
+    (
+        Fix(4.0, 170.0, T0),
+        Fix(4.000000000000001, 170.0, T0 + timedelta(days=2)),
+        25.0,
+    ),
+    0.5,
+    0,
+)
+def test_dateline_polygons_valid_and_agree_with_predicates(g, frac, seed):
+    from shapely.geometry import Point
+
+    a, b, v = g
+    rng = np.random.default_rng(seed)
+    total = v * KNOT_KM_H * (b.t - a.t).total_seconds() / 3600
+
+    foot = footprint_polygon(a, b, v)
+    assert foot.is_valid and foot.geom_type == "Polygon"
+    foot_ref = float(foot.centroid.x)
+    lats, lons = _scatter(a, b, v, rng, 40)
+    for lat, lon in zip(lats, lons, strict=True):
+        inside = foot.contains(Point(float(unwrap_lon(lon, foot_ref)), lat))
+        if inside != in_footprint(a, b, v, lat, lon):
+            s = distance_km(a.lat, a.lon, lat, lon) + distance_km(lat, lon, b.lat, b.lon)
+            assert abs(s - total) < 1.0
+
+    t = a.t + (b.t - a.t) * frac
+    lens = lens_polygon(a, b, v, t)
+    assert lens.is_valid and lens.geom_type == "Polygon"
+    lens_ref = float(lens.centroid.x)
+    lats, lons = _scatter(a, b, v, rng, 40)
+    for lat, lon in zip(lats, lons, strict=True):
+        inside = lens.contains(Point(float(unwrap_lon(lon, lens_ref)), lat))
+        if inside != in_lens(a, b, v, lat, lon, t):
+            r1 = v * KNOT_KM_H * (t - a.t).total_seconds() / 3600
+            r2 = v * KNOT_KM_H * (b.t - t).total_seconds() / 3600
+            m = min(
+                abs(distance_km(a.lat, a.lon, lat, lon) - r1),
+                abs(distance_km(lat, lon, b.lat, b.lon) - r2),
+            )
+            assert m < 0.5
 
 
 def test_day_lens_covers_each_instant():

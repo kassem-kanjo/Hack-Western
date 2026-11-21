@@ -41,7 +41,12 @@ import scan_regions as sr  # noqa: E402  (shares the cache, gap fetch and SAR fe
 
 from darkfleet.core.geo import KNOT_KM_H, Fix, distance_km, distance_km_array  # noqa: E402
 from darkfleet.core.match import SarCell, candidate_sightings  # noqa: E402
-from darkfleet.core.prism import day_lens_polygon, footprint_polygon, in_lens  # noqa: E402
+from darkfleet.core.prism import (  # noqa: E402
+    day_lens_polygon,
+    footprint_polygon,
+    in_lens,
+    unwrap_lon,
+)
 from darkfleet.core.speeds import max_speed_knots  # noqa: E402
 from darkfleet.core.validation import (  # noqa: E402
     allowed_shifts,
@@ -309,7 +314,11 @@ def build_cases(events: list[dict], per_vessel: int = 3) -> list[dict]:
 
 def _hits(poly, lat: float, lon: float) -> bool:
     h = 0.005  # same 0.01 degree radar cell as core.match
-    return (not poly.is_empty) and poly.intersects(box(lon - h, lat - h, lon + h, lat + h))
+    if poly.is_empty:
+        return False
+    # polygon vertices are unwrapped around their own centre; test the cell in that frame
+    lon = float(unwrap_lon(lon, float(poly.centroid.x)))
+    return poly.intersects(box(lon - h, lat - h, lon + h, lat + h))
 
 
 def score_cases(cases: list[dict], seed: int, n_offsets: int = 20) -> dict:

@@ -14,7 +14,15 @@ from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 from .geo import GEOD, Fix, distance_km, distance_km_array
-from .prism import _reach_km, day_lens_polygon, footprint_polygon, is_consistent, lens_polygon
+from .prism import (
+    _reach_km,
+    day_lens_polygon,
+    footprint_polygon,
+    is_consistent,
+    lens_polygon,
+    unwrap_lon,
+    unwrap_polygon,
+)
 
 Gap = tuple[Fix, Fix, float]
 
@@ -89,7 +97,12 @@ def candidate_sightings(
             day_polys[c.day] = day_lens_polygon(a, b, v_kn, c.day, step_minutes)
         poly = day_polys[c.day]
         h = c.size_deg / 2.0
-        if poly.is_empty or not poly.intersects(box(c.lon - h, c.lat - h, c.lon + h, c.lat + h)):
+        if poly.is_empty:
+            continue
+        # Polygons are unwrapped relative to their own centre, so test the cell in the
+        # same longitude frame (this is what makes a cell just across 180° match).
+        clon = float(unwrap_lon(c.lon, float(poly.centroid.x)))
+        if not poly.intersects(box(clon - h, c.lat - h, clon + h, c.lat + h)):
             continue
         if any(
             t.date() == c.day and float(distance_km_array(lat, lon, c.lat, c.lon)) <= clear_km
@@ -118,7 +131,8 @@ def verdict_at_scene(
     if lens.is_empty:
         return (False, 0.0, "no lens at scene time")
     h = cell.size_deg / 2.0
-    square = box(cell.lon - h, cell.lat - h, cell.lon + h, cell.lat + h)
+    clon = float(unwrap_lon(cell.lon, float(lens.centroid.x)))
+    square = box(clon - h, cell.lat - h, clon + h, cell.lat + h)
     if not lens.intersects(square):
         return (False, 0.0, "outside lens at scene time")
     r1 = _reach_km(v_kn, (scene_time - a.t).total_seconds())
@@ -152,7 +166,12 @@ def rendezvous_windows(
     if t_end < t_start or not (is_consistent(ax, bx, vx) and is_consistent(ay, by, vy)):
         return []
     # Cheap prefilter: if the whole-gap footprints are disjoint, no instant can overlap.
-    if not footprint_polygon(ax, bx, vx, 64).intersects(footprint_polygon(ay, by, vy, 64)):
+    foot_x = footprint_polygon(ax, bx, vx, 64)
+    foot_y = footprint_polygon(ay, by, vy, 64)
+    if foot_x.is_empty or foot_y.is_empty:
+        return []
+    foot_y = unwrap_polygon(foot_y, float(foot_x.centroid.x))
+    if not foot_x.intersects(foot_y):
         return []
     times, t = [], t_start
     while t < t_end:
@@ -171,7 +190,13 @@ def rendezvous_windows(
             run.clear()
 
     for t in times:
-        inter = lens_polygon(ax, bx, vx, t).intersection(lens_polygon(ay, by, vy, t))
+        lens_x = lens_polygon(ax, bx, vx, t)
+        lens_y = lens_polygon(ay, by, vy, t)
+        if lens_x.is_empty or lens_y.is_empty:
+            flush()
+            continue
+        lens_y = unwrap_polygon(lens_y, float(lens_x.centroid.x))
+        inter = lens_x.intersection(lens_y)
         if inter.is_empty:
             flush()
             continue

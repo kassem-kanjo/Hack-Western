@@ -123,3 +123,24 @@ def test_slack_in_unit_range():
     mid = SarCell(24.75, 57.0, date(2026, 10, 7))
     _, slack_outside, _ = verdict_at_scene(A, B, V, mid, T0 + timedelta(hours=30))
     assert 0.0 <= slack_outside <= 1.0
+
+
+def test_cell_across_dateline_is_matched():
+    """A radar cell just east of 180° still matches a prism centred on the dateline."""
+    a = Fix(0.0, 179.6, T0)
+    b = Fix(0.0, -179.6, T0 + timedelta(hours=12))
+    v = 20.0
+    cell = SarCell(0.0, -179.75, date(2026, 10, 7))
+    assert [c.cell for c in candidate_sightings(a, b, v, [cell])] == [cell]
+    inside, slack, _ = verdict_at_scene(a, b, v, cell, T0 + timedelta(hours=6))
+    assert inside is True
+    assert 0.0 <= slack <= 1.0
+
+
+def test_rendezvous_across_dateline():
+    """Two prisms that meet on opposite sides of 180° still overlap."""
+    x = (Fix(0.0, 179.8, T0), Fix(0.0, -179.8, T0 + timedelta(hours=8)), 20.0)
+    y = (Fix(0.4, 179.9, T0), Fix(-0.4, -179.9, T0 + timedelta(hours=8)), 20.0)
+    ws = rendezvous_windows(x, y)
+    assert ws
+    assert all(w.max_overlap_km2 > 0 for w in ws)
