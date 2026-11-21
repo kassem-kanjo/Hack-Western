@@ -19,6 +19,13 @@ This script imports those helpers and adds only what the watch contract needs:
   unknown-type hulls; a contact only counts as ``could_meet`` when its representative ping was
   stopped, offshore and outside a routine anchorage; ``sanctioned_stop`` only for stops that
   lasted 30 minutes and happened offshore or inside a watched area;
+* the same edge-case gates ``core.watch`` applies to ongoing gaps, applied to *ended* ones
+  too: no alert for an identity that cannot be a real MMSI, and none for a hull whose last fix
+  was leaving its listening box. A dark hull's ``speed_cap_kn`` follows its own track
+  (``effective_cap_kn``), not only the class it filed, and its contacts use that cap;
+* the ``recording`` freshness block: the newest fix, how many seconds old it is on the build's
+  clock, and every receiver outage longer than three minutes, so the UI can say "last update
+  N min ago" and draw the holes honestly;
 * the ``sanctioned_stop`` rule, which needs the sanctions join and the anchorage table;
 * the ``trail`` each alert carries (the ship's last six hours of fixes, capped at 60 points);
 * the ``radar_unmatched`` alert, read from ``data/snapshot/hormuz_unseen.json`` and always
@@ -72,10 +79,13 @@ from darkfleet.core.watch import (
     MIN_OFFSHORE_KM,
     contact_could_meet,
     dark_type_allowed,
+    effective_cap_kn,
     in_reach,
+    left_coverage,
     offshore_km,
     open_silences,
     possible_contacts,
+    valid_mmsi,
 )
 from darkfleet.core.water import load_land
 from darkfleet.ingest.ais_tracks import coverage, iter_files
@@ -140,6 +150,17 @@ TRAIL_MAX_POINTS = 60
 
 REFRESH_SECONDS = 300
 """The loop interval the UI advertises; also written to the snapshot as ``refresh_s``."""
+
+OUTAGE_MIN_MINUTES = 3.0
+"""A receiver quiet run longer than this is an outage the UI should show as a gap."""
+
+OUTAGE_MAX_MSGS_PER_MIN = 0
+"""A minute at or below this many messages counts as the receiver being down.
+
+Absolute rather than a fraction of the region's own median: a sparsely subscribed box (the
+Laconian Gulf) legitimately hears a handful of messages a minute, so a relative floor would
+report it as permanently out and lie about the recording.
+"""
 
 SUSPICIOUS_CATEGORIES = frozenset({"sanctioned", "shadow_fleet"})
 """The two watchlist categories the contract exposes; detention is context, not an accusation."""
@@ -415,6 +436,35 @@ def _write_watch_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def _listening_box(lat: float, lon: float) -> list[float] | None:
+    """The first listening box containing `(lat, lon)`, or None when no box covers the fix.
+
+    The same selection :func:`core.watch.open_silences` makes with its default ``areas``, so the
+    ended and ongoing dark paths cannot disagree about which receiver footprint a last fix is
+    leaving. None of the current boxes straddle the antimeridian, so a plain comparison is exact.
+    """
+    for area in LISTENING:
+        min_lon, min_lat, max_lon, max_lat = area["bbox"]
+        if min_lon <= lon <= max_lon and min_lat <= lat <= max_lat:
+            return area["bbox"]
+    return None
+
+
+def _leaving_coverage(event: Event, tracks: dict[int, list[Ping]]) -> bool:
+    """Whether this dark event's last fix was already driving out of our receivers.
+
+    ``kinematics.silences`` events have no notion of our footprint - only
+    ``open_silences`` applies :func:`core.watch.left_coverage` - so an ended gap that ends at
+    the box edge would otherwise be reported as a switch-off. A missing fix cannot prove the
+    ship was leaving, so it never suppresses the alert.
+    """
+    last = _last_ping(tracks.get(event.mmsi, []), event.start)
+    if last is None:
+        return False
+    box = _listening_box(last.lat, last.lon)
+    return box is not None and left_coverage(last, box)
+
+
 def _watchlisted_could_meet(
     event: Event,
     *,
@@ -437,7 +487,9 @@ def _watchlisted_could_meet(
     """
     if not categories:
         return False
-    cap_kn = max_speed_knots(classes.get(event.mmsi, "default"))
+    # The same cap ``_alert_payload`` draws the reach with: a fast hull declared slow must not
+    # look unreachable to this pre-check and lose the alert its contacts would have earned.
+    cap_kn = effective_cap_kn(max_speed_knots(classes.get(event.mmsi, "default")), tracks.get(event.mmsi, []))
     ping = _last_ping(tracks.get(event.mmsi, []), event.start)
     last = (
         Fix(lat=ping.lat, lon=ping.lon, t=ping.t)
@@ -484,6 +536,8 @@ def _contact_rows(
     ``possible_contacts`` already caps its own list; asking for more than the contract's 20
     lets the watchlist reorder happen before the cut, so a sanctioned hull that sits a little
     further out is still shown. ``land`` drives the offshore gate inside ``could_meet``.
+    Identities that cannot be real MMSIs are dropped here too: an artefact is not a ship the
+    screen may name as a possible meeting.
     """
     contacts = possible_contacts(
         dark_mmsi,
@@ -492,7 +546,7 @@ def _contact_rows(
         cap_kn,
         t_start,
         t_end,
-        tracks,
+        {mmsi: track for mmsi, track in tracks.items() if valid_mmsi(mmsi)},
         max_contacts=MAX_CONTACTS * 5,
         land=land,
         min_offshore_km=OFFSHORE_KM,
@@ -586,11 +640,16 @@ def _alert_payload(
     field, and the UI reads the same fact from ``contacts[].watchlist`` / the ship row.
     """
     mmsi = event.mmsi
-    cap_kn = round(max_speed_knots(classes.get(mmsi, "default")), 3)
+    track = tracks.get(mmsi, [])
+    class_cap_kn = max_speed_knots(classes.get(mmsi, "default"))
+    # A dark hull's reach must match what its own track proves it can do, not only the class
+    # it filed: a fast ship declaring a slow class otherwise gets a reach circle too small to
+    # hold the contacts that were genuinely inside it. Other kinds keep the class cap.
+    cap_kn = round(effective_cap_kn(class_cap_kn, track) if kind == "dark" else class_cap_kn, 3)
     contacts: list[dict[str, Any]] = []
     next_fix: Fix | None = None
 
-    last_fix = _last_ping(tracks.get(mmsi, []), event.start)
+    last_fix = _last_ping(track, event.start)
     if kind == "dark":
         if event.end is not None:
             next_lat = event.evidence.get("next_lat")
@@ -713,6 +772,10 @@ def _sanctioned_stops(
     for mmsi, category in sorted(categories.items()):
         track = scan.tracks.get(mmsi)
         if not track:
+            continue
+        if not valid_mmsi(mmsi):
+            if tally is not None:
+                tally.drop("invalid MMSI")
             continue
         stopped = [ping for ping in track if ping.sog is not None and ping.sog <= STOP_SOG_KN]
         if not stopped:
@@ -968,6 +1031,70 @@ def _routine_quiet(
     return count
 
 
+def _gap_row(region: str, start: datetime, end: datetime) -> dict[str, str] | None:
+    """One outage row for a quiet run of minutes, or None when the run is short enough to ignore.
+
+    Both ends are inclusive minute labels, matching ``build_live._coverage_summary``'s holes, so
+    the UI can draw the same interval from either snapshot. A run of N minutes spans N - 1
+    minutes between its labels, hence the +1 when comparing with :data:`OUTAGE_MIN_MINUTES`.
+    """
+    minutes = (end - start).total_seconds() / 60.0 + 1.0
+    if minutes <= OUTAGE_MIN_MINUTES:
+        return None
+    return {"region": region, "start": _iso(start), "end": _iso(end)}
+
+
+def _receiver_gaps(region: str, rows: Sequence[CoverageMinute]) -> list[dict[str, str]]:
+    """Receiver outages longer than :data:`OUTAGE_MIN_MINUTES` inside one region's window.
+
+    The window is the span the region reported anything at all: leading and trailing quiet time
+    has no coverage to be missing from, so it is not claimed as an outage (the snapshot's
+    ``lag_s`` is what tells the UI the recording itself is stale). A minute with no row, or one
+    at or below :data:`OUTAGE_MAX_MSGS_PER_MIN`, is down; adjacent down minutes merge into one
+    gap so a ten-minute hole is one row, not ten.
+    """
+    counts: dict[datetime, int] = {}
+    for row in rows:
+        minute = row.minute.replace(second=0, microsecond=0)
+        counts[minute] = counts.get(minute, 0) + row.n_msgs
+    if not counts:
+        return []
+    gaps: list[dict[str, str]] = []
+    run_start: datetime | None = None
+    minute = min(counts)
+    last = max(counts)
+    while minute <= last:
+        down = counts.get(minute, 0) <= OUTAGE_MAX_MSGS_PER_MIN
+        if down and run_start is None:
+            run_start = minute
+        elif not down and run_start is not None:
+            row = _gap_row(region, run_start, minute - timedelta(minutes=1))
+            if row is not None:
+                gaps.append(row)
+            run_start = None
+        minute += timedelta(minutes=1)
+    if run_start is not None:
+        row = _gap_row(region, run_start, last)
+        if row is not None:
+            gaps.append(row)
+    return gaps
+
+
+def _recording(regions: Sequence[_Region], scans: Sequence[_Scan], stamp: datetime) -> dict[str, Any]:
+    """The freshness block: how old the newest fix is, and where the receivers themselves were out.
+
+    ``lag_s`` is measured against the build's own clock (`stamp`, the same instant as
+    ``generated_at``), not the recording-derived ``now``: the UI's "last update N min ago" must
+    keep growing while the recorder is stopped, which a clock read back out of the recording can
+    never show. It is clamped at zero so a recording dated in the future reads as "now" rather
+    than as a negative age.
+    """
+    latest = max((max(ping.t for ping in region.pings) for region in regions if region.pings), default=None)
+    lag_s = None if latest is None else max(0, int(round((stamp - latest).total_seconds())))
+    gaps = [gap for scan in scans for gap in _receiver_gaps(scan.region.name, scan.rows)]
+    return {"latest_t": _iso(latest) if latest is not None else None, "lag_s": lag_s, "gaps": gaps}
+
+
 def _ships(
     tracks: dict[int, list[Ping]],
     vessels: dict[int, VesselInfo],
@@ -989,6 +1116,9 @@ def _ships(
         ships.append(
             {
                 "mmsi": mmsi,
+                # Kept in the list, but flagged: an identity that cannot be a real MMSI is a
+                # data artefact, so the map may draw it while the alert pipeline never names it.
+                "valid": valid_mmsi(mmsi),
                 "name": info.name if info else None,
                 "lat": last.lat,
                 "lon": last.lon,
@@ -1018,8 +1148,11 @@ def build(
     candidates each rule removed for ``--explain``. It never changes what is written.
     """
     regions = _load_regions(Path(ais_dir), hours)
-    latest = max((max(ping.t for ping in region.pings) for region in regions), default=None)
+    latest = max((max(ping.t for ping in region.pings) for region in regions if region.pings), default=None)
     now = (latest or datetime.now(UTC)).replace(second=0, microsecond=0)
+    # The build's own clock: shared by generated_at and the freshness lag, so the two can never
+    # disagree about when this snapshot was made.
+    stamp = datetime.now(UTC).replace(microsecond=0)
 
     vessels: dict[int, VesselInfo] = {}
     for region in regions:
@@ -1054,7 +1187,21 @@ def build(
             tally = explain.tally(kind) if explain is not None else None
             if tally is not None:
                 tally.candidates += 1
+            # No alert of any kind for an identity that cannot be a real MMSI: it is a decode
+            # artefact, and naming it would invent a ship the screen would ask the crew about.
+            if not valid_mmsi(event.mmsi):
+                hidden += 1
+                if tally is not None:
+                    tally.drop("invalid MMSI")
+                continue
             if kind == "dark":
+                # An ended gap has no footprint test of its own (only open_silences has), so a
+                # hull that crossed the box edge westbound would be reported as a switch-off.
+                if _leaving_coverage(event, scan.tracks):
+                    hidden += 1
+                    if tally is not None:
+                        tally.drop("left coverage")
+                    continue
                 info = scan.region.vessels.get(event.mmsi)
                 if not dark_type_allowed(info.ship_type if info is not None else None):
                     hidden += 1
@@ -1131,8 +1278,11 @@ def build(
     payload = {
         # The build's own clock, not the recording's: the SSE client compares this value to
         # decide a new file is worth refetching, so it must change on every run.
-        "generated_at": _iso(datetime.now(UTC).replace(microsecond=0)),
+        "generated_at": _iso(stamp),
         "refresh_s": REFRESH_SECONDS,
+        # How live the recording is, and where the receivers themselves were out: the UI says
+        # "last update N min ago" from this instead of trusting the snapshot's own age.
+        "recording": _recording(regions, scans, stamp),
         "areas": [dict(area) for area in [*LISTENING, *WATCHED]],
         "ships": ships,
         "alerts": alerts,
