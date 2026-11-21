@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 00:45 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
+Updated: Sat 21 Nov, 00:24 ET · next checkpoint: CP1 briefing Sat 9 AM · plan: docs/plan.md v2.1
 
 ## In flight
 - #27 rescue test (Brownian bridge, pre-registered) on branch feat/validation-bb.
