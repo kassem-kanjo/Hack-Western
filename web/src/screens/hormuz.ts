@@ -176,7 +176,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
 
   app.replaceChildren(
     topBar({
-      active: "overview",
+      active: "hormuz",
       mode: "SNAPSHOT",
       generatedAt: null,
       caseHref: null,

@@ -231,7 +231,13 @@ export function fetchLiveVessels(region: string, signal?: AbortSignal): Promise<
 // ---- Watch (docs/watch-contract.md; issue #86) ----
 
 /** The five suspicious kinds the watch snapshot can carry. */
-export type WatchAlertKind = "dark" | "spoof" | "jump" | "meeting" | "sanctioned_stop";
+export type WatchAlertKind =
+  | "dark"
+  | "spoof"
+  | "jump"
+  | "meeting"
+  | "sanctioned_stop"
+  | "radar_unmatched";
 export type WatchAlertStatus = "ongoing" | "ended";
 export type WatchAreaKind = "listening" | "watched";
 export type WatchlistTag = "sanctioned" | "shadow_fleet" | null;
@@ -303,8 +309,20 @@ export interface WatchAlert {
   next: WatchNextFix | null;
   speed_cap_kn: number;
   contacts: WatchContact[];
+  /** Own AIS path, `[lon, lat, "t"]` in time order; empty for radar alerts. */
+  trail?: [number, number, string][];
   /** Kind-specific numbers; never parsed as markup. */
   evidence: Record<string, unknown>;
+}
+
+/** One stretch when our receivers were not listening. Both shapes are accepted. */
+export type WatchGap = { start: string; end: string } | [string, string];
+
+/** How fresh the recording behind the snapshot is. Absent on older snapshots. */
+export interface WatchRecording {
+  latest_t: string;
+  lag_s: number;
+  gaps?: WatchGap[];
 }
 
 export interface WatchCounts {
@@ -321,6 +339,7 @@ export interface WatchResponse {
   ships: WatchShip[];
   alerts: WatchAlert[];
   counts: WatchCounts;
+  recording?: WatchRecording | null;
 }
 
 /**
@@ -500,4 +519,51 @@ async function postEdgeControl(name: string, signal?: AbortSignal): Promise<Edge
     throw new Error(`POST /api/edge/${name} failed: HTTP ${res.status}`);
   }
   return (await res.json()) as EdgeKillResponse;
+}
+
+// ---- Hormuz radar picture (api/hormuz.py; frozen snapshot files) ----
+
+/** One person or hull in a GFW event. */
+export interface GfwParty {
+  name: string | null;
+  mmsi: string | null;
+  flag?: string | null;
+  type?: string | null;
+}
+
+/** A GFW ship-to-ship encounter. */
+export interface GfwEncounter {
+  id: string;
+  start: string;
+  end: string;
+  lat: number;
+  lon: number;
+  vessel: GfwParty;
+  other: GfwParty;
+  median_distance_km?: number;
+}
+
+export interface HormuzUnseenFile {
+  daily: { day: string; seen: number; broadcasting: number; dark: number; dark_share: number }[];
+  grid: { lat: number; lon: number; n: number }[];
+  summary: {
+    headline_share?: number | null;
+    median_dark_share?: number | null;
+    n_days_used?: number;
+    excluded_days?: string[];
+  };
+}
+
+export interface HormuzHistoryFile {
+  encounters: GfwEncounter[];
+  hotspots: { lat: number; lon: number; n: number }[];
+  counts?: { encounters?: number; loitering?: number };
+}
+
+export function fetchHormuzUnseen(signal?: AbortSignal): Promise<HormuzUnseenFile> {
+  return getJson<HormuzUnseenFile>("/api/hormuz/unseen", signal);
+}
+
+export function fetchHormuzHistory(signal?: AbortSignal): Promise<HormuzHistoryFile> {
+  return getJson<HormuzHistoryFile>("/api/hormuz/history", signal);
 }

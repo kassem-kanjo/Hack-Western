@@ -17,7 +17,7 @@ export const DEFAULT_LIVE_REGION = "BALTIC_WATCH";
  * a "Start demo" button.
  */
 export function topBar(opts: {
-  active: "overview" | "case" | "live" | "patrol" | "watch";
+  active: "overview" | "case" | "live" | "patrol" | "watch" | "hormuz";
   mode: ConsoleMode;
   generatedAt: string | null;
   caseHref?: string | null;
@@ -27,11 +27,13 @@ export function topBar(opts: {
   const tab = (label: string, href: string, isActive: boolean): HTMLElement =>
     h("a", { class: `tab${isActive ? " is-active" : ""}`, href }, label);
 
-  // The overview and the case file are the same place as far as the bar is
-  // concerned: both are under Watch now.
-  const watchActive = opts.active === "watch" || opts.active === "overview" || opts.active === "case";
+  // Evidence is the old Global funnel and the case files behind it; the radar
+  // picture of the strait has its own tab because it is the strongest single view.
+  const evidenceActive = opts.active === "overview" || opts.active === "case";
   const tabs = [
-    tab("Watch", "#/", watchActive),
+    tab("Hormuz", "#/hormuz", opts.active === "hormuz"),
+    tab("Watch", "#/watch", opts.active === "watch"),
+    tab("Evidence", "#/evidence", evidenceActive),
     tab("Patrol unit", "#/patrol", opts.active === "patrol"),
   ];
 

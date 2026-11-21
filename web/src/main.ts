@@ -126,7 +126,7 @@ function route(): void {
   const watch = parseWatchRoute(location.hash);
   if (watch !== null && currentWatch !== null) {
     // Same screen, only the selected alert changed: keep the map and the camera.
-    currentWatch.select(watch.alertId);
+    currentWatch.select(watch.alertId, watch.areaId ?? null);
     return;
   }
 

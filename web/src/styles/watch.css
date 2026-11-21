@@ -777,23 +777,23 @@
 }
 
 .watch-nearby-table th:nth-child(1) {
-  width: 28%;
+  width: 27%;
 }
 
 .watch-nearby-table th:nth-child(2) {
-  width: 22%;
+  width: 21%;
 }
 
 .watch-nearby-table th:nth-child(3) {
-  width: 14%;
+  width: 11%;
 }
 
 .watch-nearby-table th:nth-child(4) {
-  width: 15%;
+  width: 18%;
 }
 
 .watch-nearby-table th:nth-child(5) {
-  width: 21%;
+  width: 23%;
 }
 
 .watch-nearby-table th {
@@ -811,8 +811,8 @@
   overflow: hidden;
   border-bottom: 1px solid var(--c-line);
   color: var(--c-text-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .watch-nearby-table tbody tr {
@@ -987,5 +987,648 @@
   .watch-layers {
     top: 96px;
     right: 8px;
+  }
+}
+
+/* =========================================================================
+   Operations-console layer: status bar, panel headers, live motion, radar.
+   Spacing steps are multiples of 4 px; headers are small caps with a count.
+   ========================================================================= */
+
+/* Status bar: one row under the three columns. */
+.main.watch-main {
+  grid-template-rows: minmax(0, 1fr) 24px;
+}
+
+.watch-events {
+  grid-row: 1;
+}
+
+.watch-status {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 12px;
+  background: var(--c-panel);
+  border-top: 1px solid var(--c-line);
+  font-size: 11px;
+  color: var(--c-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.watch-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.watch-status-k {
+  margin-right: 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
+  opacity: 0.8;
+}
+
+.watch-status a {
+  color: var(--c-text-2);
+  text-decoration: none;
+}
+
+.watch-status a:hover {
+  text-decoration: underline;
+}
+
+.watch-status .watch-mono {
+  color: var(--c-text-2);
+}
+
+.watch-status-item.is-keys {
+  margin-left: auto;
+}
+
+.watch-status-item.is-clock {
+  padding-left: 12px;
+  border-left: 1px solid var(--c-line);
+}
+
+.watch-kbd {
+  display: inline-block;
+  min-width: 16px;
+  margin: 0 2px 0 4px;
+  padding: 0 4px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: var(--c-text-2);
+}
+
+/* Freshness chip: amber only when the recorder is behind. */
+.watch-live.is-delayed {
+  color: var(--c-gap);
+  border-color: var(--c-gap);
+}
+
+.watch-live.is-delayed .watch-live-dot {
+  background: var(--c-gap);
+}
+
+/* Panel headers: small caps and a count, a hairline under. */
+.watch-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border-top: 1px solid var(--c-line);
+  border-bottom: 1px solid var(--c-line);
+  background: var(--c-panel-raised);
+}
+
+.watch-section-head h3 {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+}
+
+.watch-nearby {
+  padding: 0;
+}
+
+.watch-nearby > .watch-none,
+.watch-nearby > .watch-nearby-table {
+  margin: 8px 10px 8px;
+  width: calc(100% - 20px);
+}
+
+.watch-events-head.is-sub {
+  border-top: 1px solid var(--c-line);
+  height: 28px;
+  background: var(--c-panel-raised);
+}
+
+/* Reserve the filter block's height before the data arrives. */
+.watch-filters.is-loading {
+  min-height: 94px;
+}
+
+.watch-search {
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  background: var(--c-bg);
+  color: var(--c-text-1);
+  font: inherit;
+  font-size: 12px;
+}
+
+.watch-search::placeholder {
+  color: var(--c-text-3);
+}
+
+.watch-search:focus {
+  outline: 1px solid var(--c-focus);
+  outline-offset: -1px;
+}
+
+/* Watched areas in the rail: every area on the map is also a row. */
+.watch-areas {
+  flex: none;
+  border-top: 1px solid var(--c-line);
+}
+
+.watch-areas-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-area-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watch-area-row:hover {
+  background: var(--c-panel-raised);
+  color: var(--c-text-1);
+}
+
+.watch-area-row[aria-current="true"] {
+  border-left-color: var(--c-focus);
+  background: var(--c-panel-raised);
+  color: var(--c-text-1);
+}
+
+.watch-area-row:focus-visible,
+.watch-radar-row:focus-visible,
+.watch-radar-play:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: -1px;
+}
+
+.watch-area-row-n {
+  color: var(--c-text-3);
+}
+
+.watch-area-row-n.is-hot {
+  color: var(--c-text-1);
+}
+
+.watch-rows.is-inline {
+  flex: none;
+  overflow: visible;
+}
+
+.watch-area-empty {
+  padding: 12px 10px;
+}
+
+.watch-gapnote {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-gap);
+}
+
+/* "Also in reach": closed by default, so the answer stays above the fold. */
+.watch-also {
+  border-top: 1px solid var(--c-line);
+}
+
+.watch-also summary {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 10px;
+  line-height: 28px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-text-2);
+  cursor: pointer;
+  list-style: none;
+  background: var(--c-panel-raised);
+}
+
+.watch-also summary::-webkit-details-marker {
+  display: none;
+}
+
+.watch-also summary::before {
+  content: "+";
+  display: inline-block;
+  width: 12px;
+  font-family: var(--font-mono);
+  color: var(--c-text-3);
+}
+
+.watch-also[open] summary::before {
+  content: "\2212";
+}
+
+.watch-also > .watch-nearby-table,
+.watch-also > .watch-none {
+  margin: 8px 10px 12px;
+  width: calc(100% - 20px);
+}
+
+/* Skeleton rows: same height as a real row, so nothing jumps on load. */
+.watch-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 36px;
+  padding: 8px 10px;
+}
+
+.watch-skel-bar {
+  height: 6px;
+  background: var(--c-line);
+  opacity: 0.6;
+}
+
+.watch-skel-bar.is-wide {
+  width: 62%;
+}
+
+.watch-skel-bar.is-narrow {
+  width: 34%;
+  opacity: 0.35;
+}
+
+/* New alert rows slide in and carry a brief highlight. */
+.watch-rows > li.is-new {
+  animation:
+    watch-slide 280ms ease-out,
+    watch-flash 2400ms ease-out;
+}
+
+@keyframes watch-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes watch-flash {
+  from {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* ---------- map: live pulse, markers, trail ------------------------------- */
+
+.watch-pulse {
+  fill: none;
+  stroke: var(--c-ais);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: watch-pulse 1200ms ease-out forwards;
+}
+
+@keyframes watch-pulse {
+  from {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+.watch-area-mark-box {
+  stroke: var(--c-text-2);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+
+.watch-area-mark:hover .watch-area-mark-box {
+  stroke: var(--c-text-1);
+  opacity: 1;
+}
+
+.watch-enc-ring {
+  stroke: var(--c-text-1);
+  stroke-width: 1;
+}
+
+.watch-radar-mark:hover .watch-enc-ring,
+.watch-radar-mark.is-selected .watch-enc-ring {
+  stroke: var(--c-focus);
+  stroke-width: 1.5;
+}
+
+.watch-hot-mark {
+  stroke: var(--c-text-2);
+  stroke-width: 1;
+}
+
+.watch-radar-mark:hover .watch-hot-mark {
+  stroke: var(--c-text-1);
+}
+
+.watch-radar-mark,
+.watch-area-mark {
+  cursor: pointer;
+}
+
+/* ---------- Hormuz radar panel --------------------------------------------- */
+
+.watch-radar-dark {
+  color: var(--c-risk-high);
+}
+
+.watch-radar-chartbox {
+  padding: 8px 10px 8px;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.watch-radar-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-radar-play {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--c-line-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.watch-radar-play:hover {
+  background: var(--c-panel-raised);
+}
+
+.watch-radar-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 4px;
+  overflow: visible;
+}
+
+.watch-radar-bar {
+  fill: var(--c-risk-high);
+}
+
+.watch-radar-bar.is-muted {
+  fill: var(--c-text-3);
+  opacity: 0.4;
+}
+
+.watch-radar-bar.is-selected {
+  stroke: var(--c-focus);
+  stroke-width: 1;
+}
+
+.watch-radar-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.watch-radar-hit:focus-visible {
+  outline: 1px solid var(--c-focus);
+}
+
+.watch-radar-median {
+  stroke: var(--c-text-2);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.watch-radar-playhead {
+  fill: var(--c-focus);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.watch-radar-axis {
+  fill: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+
+.watch-radar-note {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--c-text-3);
+}
+
+.watch-radar-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-radar-list > li {
+  border-bottom: 1px solid var(--c-line);
+}
+
+.watch-radar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--c-text-1);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.watch-radar-row:hover {
+  background: var(--c-panel-raised);
+}
+
+.watch-radar-row[aria-current="true"] {
+  border-left-color: var(--c-focus);
+  background: var(--c-panel-raised);
+}
+
+.watch-radar-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-radar-row-time {
+  color: var(--c-text-3);
+}
+
+.watch-radar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 16px;
+  font-size: 11px;
+  color: var(--c-text-3);
+}
+
+.watch-radar-foot a {
+  color: var(--c-sar);
+  text-decoration: none;
+}
+
+.watch-radar-foot a:hover {
+  text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-rows > li.is-new,
+  .watch-pulse {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .main.watch-main,
+  .main.watch-main.is-focus {
+    grid-template-rows: 55vh auto auto;
+  }
+
+  .main.watch-main.is-focus {
+    grid-template-rows: 72vh auto auto;
+  }
+
+  .watch-status {
+    grid-row: 3;
+    gap: 12px;
+  }
+
+  .watch-status-item:first-child,
+  .watch-status-item.is-keys {
+    display: none;
+  }
+
+  .watch-status-item.is-clock {
+    margin-left: auto;
+    border-left: 0;
+  }
+
+  .main.watch-main > .watch-events {
+    grid-row: 2;
+  }
+}
+
+/* ---------- audit fixes: chips, names, spoof table, phone legend ---------- */
+
+.watch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.watch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--c-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.watch-chip .watch-mono {
+  color: var(--c-text-3);
+}
+
+.watch-chip:hover {
+  background: var(--c-panel-raised);
+}
+
+.watch-chip[aria-pressed="true"] {
+  border-color: var(--c-focus);
+  color: var(--c-text-1);
+}
+
+.watch-chip:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: -1px;
+}
+
+/* Names wrap instead of truncating; the other columns stay on one line. */
+.watch-nearby-table td.watch-nearby-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+
+.watch-spoof-table th:nth-child(1) {
+  width: 40%;
+}
+
+.watch-spoof-table th:nth-child(2),
+.watch-spoof-table th:nth-child(3),
+.watch-spoof-table th:nth-child(4) {
+  width: 20%;
+}
+
+.watch-spoof-table th:nth-child(n + 2) {
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  /* The legend would cover a quarter of a phone map: the layers stay at their defaults. */
+  .watch-layers {
+    display: none;
   }
 }
