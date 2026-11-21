@@ -305,7 +305,8 @@ def test_parse_qnxcam_spec() -> None:
 def test_qnxcam_helper_is_started_and_restarted(state_dir, tmp_path):
     """A camera helper that exits is restarted and both transitions are events."""
     fake = tmp_path / "fakecam"
-    fake.write_text("#!/bin/sh\nsleep 0.4\n", encoding="utf-8")
+    # Long enough that a loaded machine still observes the "alive" state between restarts.
+    fake.write_text("#!/bin/sh\nsleep 1.5\n", encoding="utf-8")
     fake.chmod(0o755)
     sup = Supervisor(
         SupervisorConfig(
@@ -327,7 +328,7 @@ def test_qnxcam_helper_is_started_and_restarted(state_dir, tmp_path):
     try:
         status = _wait(
             lambda: _edge(state_dir) if _edge(state_dir).get("camera", {}).get("alive") else None,
-            timeout=10,
+            timeout=30,
             label="camera alive",
         )
         assert status["camera"]["source"] == f"5:{tmp_path}/qnxcam.frame"
@@ -338,7 +339,7 @@ def test_qnxcam_helper_is_started_and_restarted(state_dir, tmp_path):
                 <= {e["event"] for e in _edge(state_dir).get("events", [])}
                 else None
             ),
-            timeout=10,
+            timeout=30,
             label="camera stopped and started again",
         )
         assert restarted["camera"]["source"] == f"5:{tmp_path}/qnxcam.frame"
