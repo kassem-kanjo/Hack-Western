@@ -324,6 +324,12 @@ def run(args: argparse.Namespace) -> int:
             level = f"nice+{args.nice}"
     except OSError:
         pass
+    if args.rt_priority > 0:
+        # Guarded unit: the AI gets a guaranteed slot above ordinary work but below the safety
+        # core (30) and the supervisor (25), so a runaway load cannot stretch its inference.
+        applied, _ = realtime.try_rr(args.rt_priority)
+        if applied:
+            level = f"SCHED_RR {args.rt_priority}"
     sched = realtime.current_schedule()
     print(f"detector priority: {level} ({realtime.describe(sched)})", file=sys.stderr)
 
@@ -382,6 +388,7 @@ def run(args: argparse.Namespace) -> int:
     index = 0
     try:
         while True:
+            loop_start = time.monotonic()
             img: np.ndarray | None = None
             if frames is not None:
                 t_capture = time.monotonic()
@@ -413,7 +420,9 @@ def run(args: argparse.Namespace) -> int:
             index += 1
             if frames is not None and index >= len(frames) and args.once:
                 return 0
-            link.pause(interval)
+            # Pace to the target rate, counting the time inference already took: a 110 ms
+            # inference at 10 fps must not be followed by another 100 ms nap.
+            link.pause(max(0.0, interval - (time.monotonic() - loop_start)))
     except OSError as exc:
         print(f"detector: send failed: {exc}", file=sys.stderr)
         return 1
@@ -447,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--heartbeat-s", type=float, default=0.1)
     parser.add_argument("--once", action="store_true", help="exit 0 when the source is exhausted")
     parser.add_argument("--nice", type=int, default=10)
+    parser.add_argument("--rt-priority", type=int, default=0, help="SCHED_RR priority (0 = ordinary class)")
     parser.add_argument("--score-min", type=float, default=0.3)
     parser.add_argument("--input-size", type=int, default=INPUT_SIZE, help="network input, multiple of 32")
     parser.add_argument(

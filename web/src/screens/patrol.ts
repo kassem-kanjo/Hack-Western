@@ -19,6 +19,8 @@
 import "../styles/patrol.css";
 
 import type {
+  EdgeAb,
+  EdgeAbArm,
   EdgeAi,
   EdgeDecision,
   EdgeEvent,
@@ -28,6 +30,7 @@ import type {
 } from "../api";
 import {
   edgeFrameUrl,
+  fetchEdgeAb,
   fetchEdgeDecision,
   fetchEdgeStatus,
   killEdgeDetector,
@@ -164,8 +167,41 @@ function aiText(ai: EdgeAi | null | undefined): string {
   return `${box.label} ${pct}%`;
 }
 
+type BannerLevel = EdgeVerdictLevel | "blind";
+
 function verdictLevel(value: unknown): EdgeVerdictLevel {
   return value === "alert" || value === "ok" ? value : "idle";
+}
+
+/**
+ * What the banner says. The safety core's own stats win for BLIND (it knows first); otherwise the
+ * decision's alarm drives it. Range and time-to-collision are estimates and are labelled so.
+ */
+function banner(
+  status: EdgeStatus | null,
+  decision: EdgeDecision | null,
+): { level: BannerLevel; text: string; sub: string } {
+  if (status?.alarm?.blind === true || decision?.alarm?.level === "blind") {
+    return { level: "blind", text: "LOOKOUT BLIND \u2014 manual watch", sub: "no frames: the lookout cannot see" };
+  }
+  if (decision === null) return { level: "idle", text: "Waiting for a decision", sub: "" };
+  const alarm = decision.alarm;
+  if (alarm && (alarm.level === "warning" || alarm.level === "critical")) {
+    const parts: string[] = [];
+    if (alarm.trend === "closing") parts.push("closing");
+    else if (alarm.trend === "opening") parts.push("opening");
+    else if (alarm.trend === "steady") parts.push("steady");
+    if (typeof alarm.ttc_s === "number") parts.push(`~${Math.round(alarm.ttc_s)} s at this rate`);
+    if (typeof alarm.range_m === "number") parts.push(`range ~${fmtInt(alarm.range_m)} m (estimate)`);
+    const text = (alarm.text ?? "VESSEL NOT ON AIS \u2014 alert bridge").replace(/ \u00b7 closing$/, "");
+    return { level: "alert", text, sub: parts.join(" \u00b7 ") };
+  }
+  const matched = typeof decision.verdict?.text === "string" && decision.verdict.text.startsWith("Matches AIS");
+  return {
+    level: matched ? "ok" : "idle",
+    text: "WATCHING",
+    sub: matched ? decision.verdict.text : "",
+  };
 }
 
 /** The safety core step: what AIS knew when the verdict was made. */
@@ -210,6 +246,8 @@ export function renderPatrol(app: HTMLElement): void {
 
   /** Latest good payloads; the screen keeps the last decision while a fetch fails. */
   let status: EdgeStatus | null = null;
+  let ab: EdgeAb | null = null;
+  let abPolledAt = 0;
   let decision: EdgeDecision | null = null;
   /** The last frame id we asked the camera for, so a still unit costs one request. */
   let lastFrameId: number | null = null;
@@ -362,6 +400,37 @@ export function renderPatrol(app: HTMLElement): void {
     { class: "patrol-verdict is-idle", role: "status" },
     "Waiting for a decision",
   );
+  const verdictSub = h("p", { class: "patrol-alarm-sub", hidden: true });
+
+  function metric(label: string): { box: HTMLElement; value: HTMLElement } {
+    const value = h("span", { class: "patrol-metric-value" }, "\u2014");
+    const box = h(
+      "div",
+      { class: "patrol-metric" },
+      h("span", { class: "patrol-metric-label" }, label),
+      value,
+    );
+    return { box, value };
+  }
+  const latencyMetric = metric("Alarm latency p99 / deadline");
+  const onTimeMetric = metric("Alarms on time");
+  const blindMetric = metric("Blind raised on time");
+  const metrics = h("div", { class: "patrol-metrics" }, latencyMetric.box, onTimeMetric.box, blindMetric.box);
+
+  const abBody = h("tbody", null);
+  const abNote = h("p", { class: "patrol-ab-note" }, "");
+  const abBox = h(
+    "div",
+    { class: "patrol-ab-box", hidden: true },
+    h("h3", { class: "patrol-h" }, "Priority guard, same load"),
+    h(
+      "table",
+      { class: "patrol-ab" },
+      h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "No guard"), h("th", null, "Guard"))),
+      abBody,
+    ),
+    abNote,
+  );
   const positionEl = h("p", { class: "patrol-position" }, "Patrol position: \u2014");
 
   function field(label: string): { dt: HTMLElement; dd: HTMLElement } {
@@ -391,7 +460,11 @@ export function renderPatrol(app: HTMLElement): void {
     restarts.dd,
   );
 
-  const underLoad = h("p", { class: "patrol-load", hidden: true }, "AI under load");
+  const underLoad = h(
+    "p",
+    { class: "patrol-load", hidden: true },
+    "Runaway load on the Pi: the alarm path is guarded",
+  );
 
   const killBtn = h(
     "button",
@@ -401,7 +474,7 @@ export function renderPatrol(app: HTMLElement): void {
   const stressBtn = h(
     "button",
     { class: "btn patrol-stress", type: "button", hidden: true },
-    "Stress the AI (10 s)",
+    "Overload the Pi (10 s)",
   );
   const hint = h("p", { class: "patrol-hint", hidden: true });
   const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
@@ -409,12 +482,15 @@ export function renderPatrol(app: HTMLElement): void {
   const side = h(
     "aside",
     { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
-    chain,
     verdictEl,
+    verdictSub,
+    metrics,
     positionEl,
+    chain,
     h("h3", { class: "patrol-h" }, "Reliability"),
     fields,
     underLoad,
+    abBox,
     actions,
     hint,
   );
@@ -485,7 +561,7 @@ export function renderPatrol(app: HTMLElement): void {
     stressBtn.hidden = !controls;
     if (!controls) return;
     stressBtn.disabled = stressing || stressActive;
-    stressBtn.textContent = stressing ? "Stressing the AI\u2026" : "Stress the AI (10 s)";
+    stressBtn.textContent = stressing ? "Overloading the Pi\u2026" : "Overload the Pi (10 s)";
   }
 
   /** Scheduling, loop lateness, recovery/restart counts, stress and controls. */
@@ -591,22 +667,73 @@ export function renderPatrol(app: HTMLElement): void {
   }
 
   function paintVerdict(d: EdgeDecision | null): void {
-    const level = d === null ? "idle" : verdictLevel(d.verdict?.level);
-    const text = verdictText(d);
-    const key = `${level}|${text}`;
+    const b = banner(status, d);
+    const key = `${b.level}|${b.text}`;
+    verdictSub.textContent = b.sub;
+    verdictSub.hidden = b.sub === "";
     if (key === lastVerdictKey) return;
 
     const first = lastVerdictKey === null;
     lastVerdictKey = key;
-    verdictEl.className = `patrol-verdict is-${level}`;
-    verdictEl.textContent = d === null ? text : `${level.toUpperCase()} \u00b7 ${text}`;
+    verdictEl.className = `patrol-verdict is-${b.level}`;
+    verdictEl.textContent = b.text;
 
-    // Motion only to explain: a fade marks a new decision, nothing idles.
+    // Motion only to explain: a fade marks a new state, nothing idles.
     if (!first && !noMotion.matches) {
       verdictEl.classList.remove("is-fading");
       void verdictEl.offsetWidth;
       verdictEl.classList.add("is-fading");
     }
+  }
+
+  /** The guarantee as three numbers: latency against the deadline, alarms on time, blind raised on time. */
+  function paintMetrics(s: EdgeStatus): void {
+    const a = s.alarm;
+    if (!a) {
+      latencyMetric.value.textContent = "\u2014";
+      onTimeMetric.value.textContent = "\u2014";
+      blindMetric.value.textContent = "\u2014";
+      return;
+    }
+    const p99 = finiteOrNull(a.p99_latency_ms);
+    latencyMetric.value.textContent =
+      p99 === null ? `\u2014 / ${a.deadline_ms} ms` : `${Math.round(p99)} / ${a.deadline_ms} ms`;
+    latencyMetric.box.classList.toggle("is-bad", p99 !== null && p99 > a.deadline_ms);
+    onTimeMetric.value.textContent = `${fmtInt(a.on_time)}/${fmtInt(a.decisions)}`;
+    onTimeMetric.box.classList.toggle("is-bad", a.on_time < a.decisions);
+    blindMetric.value.textContent = `${fmtInt(a.blind_on_time)}/${fmtInt(a.blind_episodes)}`;
+    blindMetric.box.classList.toggle("is-bad", a.blind_on_time < a.blind_episodes);
+  }
+
+  function armCells(arm: EdgeAbArm): string[] {
+    const worst = finiteOrNull(arm.worst_latency_ms);
+    return [
+      `${fmtInt(arm.on_time)}/${fmtInt(arm.alarm_frames)}`,
+      worst === null ? "\u2014" : `${Math.round(worst)} ms`,
+      `${fmtMs(finiteOrNull(arm.worst_tick_late_ms) ?? 0)} ms`,
+    ];
+  }
+
+  /** The recorded result of the priority-guard test; nothing is shown until one has been run. */
+  function paintAb(result: EdgeAb | null): void {
+    abBox.hidden = result === null;
+    if (result === null) return;
+    const off = armCells(result.unguarded);
+    const on = armCells(result.guarded);
+    const labels = ["Alarms on time", "Worst alarm latency", "Worst loop lateness"];
+    abBody.replaceChildren(
+      ...labels.map((label, k) =>
+        h(
+          "tr",
+          null,
+          h("th", { scope: "row" }, label),
+          // Only the first row is coloured: "alarms on time" is the claim.
+          h("td", { class: k === 0 && result.unguarded.late > 0 ? "is-bad" : "" }, off[k] ?? ""),
+          h("td", null, on[k] ?? ""),
+        ),
+      ),
+    );
+    abNote.textContent = `${result.load}, ${fmtInt(result.stress_s)} s. Deadline ${result.deadline_ms} ms. Fixed priorities: no adaptive partitioning on this image.`;
   }
 
   function paintPosition(d: EdgeDecision | null): void {
@@ -623,6 +750,7 @@ export function renderPatrol(app: HTMLElement): void {
 
   function paint(): void {
     if (status === null) return;
+    paintMetrics(status);
     cameraOffline = isCameraOffline(status, decision);
     syncFrame();
     paintReliability(status);
@@ -630,6 +758,7 @@ export function renderPatrol(app: HTMLElement): void {
     paintChain(status, decision);
     paintVerdict(decision);
     paintPosition(decision);
+    paintAb(ab);
 
     if (decision !== null) {
       const id = finiteOrNull(decision.frame_id);
@@ -683,6 +812,13 @@ export function renderPatrol(app: HTMLElement): void {
 
       const [decisionResult] = await Promise.allSettled([fetchEdgeDecision()]);
       if (disposed) return;
+      // The A/B result changes only when someone runs it: look every 30 s, and only until found.
+      if (Date.now() - abPolledAt > 30000) {
+        abPolledAt = Date.now();
+        const [abResult] = await Promise.allSettled([fetchEdgeAb()]);
+        if (disposed) return;
+        ab = abResult.status === "fulfilled" ? abResult.value : ab;
+      }
 
       lastOkMs = Date.now();
       if (!online) {

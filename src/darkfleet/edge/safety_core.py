@@ -10,8 +10,16 @@ The safety core owns three things and nothing heavy:
 It never blocks on the detector: every wait is a `select` with a short timeout, and a
 detector message that is malformed drops that connection, not the core.
 
-Rule (v1): a frame with a "boat" box raises ALERT "VESSEL NOT BROADCASTING" unless some cached
-AIS vessel lies within `match_km` of the unit's own position. The camera bearing is not used yet.
+AI lookout: a vessel box from the AI with no cached AIS vessel within `match_km` of the unit
+raises "VESSEL NOT ON AIS - alert bridge" (alarm kind ``not_on_ais``). Severity is "critical" when
+the box is growing across frames ("closing"), else "warning". Range and time-to-collision come
+from the box width and its growth and are ESTIMATES (they assume a 100 m vessel and a 60 degree
+camera). The alarm has a hard deadline: frame timestamp to decision <= `deadline_ms` (200), every
+alarm's measured latency is kept and the status reports "alarms on time N/N".
+
+Fail-safe, not fail-silent: if no frame has reached the core for 500 ms (AI dead or stalled, camera
+stale, link lost, still loading) the core raises "LOOKOUT BLIND - manual watch" from its own 20 Hz
+tick and keeps it until frames return. The camera bearing is not used.
 
 The core also owns the decision file: after every DETECTIONS message it builds
 ``<state-dir>/latest_decision.json`` (AI boxes, patrol position, nearby AIS, verdict) and
@@ -45,10 +53,19 @@ from . import protocol, realtime
 
 STATE_OK = "OK"
 STATE_DEGRADED = "DEGRADED"
-ALERT_KIND = "VESSEL NOT BROADCASTING"
+ALERT_KIND = "not_on_ais"
+BLIND_KIND = "lookout_blind"
 VESSEL_LABELS = frozenset({"boat", "ship"})
 DECISION_NAME = "latest_decision.json"
-BLIND_TEXT = "AI DOWN \u2014 sensor blind, manual watch"
+NOT_ON_AIS_TEXT = "VESSEL NOT ON AIS \u2014 alert bridge"
+BLIND_TEXT = "LOOKOUT BLIND \u2014 manual watch"
+BLIND_AFTER_S = 0.5  # no frame for this long: the lookout is blind
+BLIND_DEADLINE_MS = 100.0  # the blind alarm must be up within this long after the 500 ms
+ASSUMED_VESSEL_M = 100.0  # range estimate only: how long we pretend the vessel is
+CAMERA_HFOV_DEG = 60.0  # Logitech C270, roughly
+CLOSING_RATIO = 1.12  # box width grew by 12 % over the last 0.5-2 s: closing
+OPENING_RATIO = 0.89
+_TRACK_WINDOW_S = 2.0
 VERDICT_ALERT = "alert"
 VERDICT_OK = "ok"
 VERDICT_IDLE = "idle"
@@ -90,6 +107,7 @@ class CoreConfig:
     score_min: float = 0.3
     tick_hz: float = TICK_HZ
     ais_max_age_s: float = 900.0
+    frame_width_px: int = 640  # width the box coordinates refer to (range estimate)
 
     @property
     def silence_s(self) -> float:
@@ -165,6 +183,18 @@ class SafetyCore:
         self.detector_sched: dict[str, Any] | None = None  # the detector's own scheduling class
         self.transitions: list[dict[str, Any]] = []
         self.last_frame_id = 0
+        # Alarm path: what the unit is raising now, and how fast it raised it.
+        self.alarm_level = "none"  # none | warning | critical | blind
+        self.alarm_text = ""
+        self.blind = False
+        self._last_frame_mono: float | None = None  # when the last DETECTIONS reached the core
+        self._alarm_lat: deque[tuple[float, float]] = deque()  # (mono, latency ms), last 60 s
+        self.alarm_decisions = 0
+        self.alarm_on_time = 0
+        self.blind_episodes = 0
+        self.blind_on_time = 0
+        self._track: deque[tuple[float, float]] = deque()  # (t_capture, box width px)
+        self.pending_records: list[dict[str, Any]] = []  # blind alarms, drained by run()
         self.last_decision: dict[str, Any] | None = None  # written to latest_decision.json by run()
         self.snapshot_t: str = _iso_z(time.time())  # when the AIS cache was last loaded
         # Rolling statistics: safety-check latency, frame arrivals and deadline misses.
@@ -198,6 +228,7 @@ class SafetyCore:
     def start(self, now: float) -> None:
         self._started_mono = now
         self._last_msg_mono = now
+        self._last_frame_mono = now  # the blind clock starts now: no frames yet is blind
 
     def on_connect(self, now: float) -> None:
         self.detector_connected = True
@@ -210,7 +241,31 @@ class SafetyCore:
         self._set_state(STATE_DEGRADED, "detector link lost", now)
 
     def tick(self, now: float) -> None:
-        """Called every loop turn. Silence longer than 3x the deadline means DEGRADED."""
+        """Called every loop turn. Silence longer than 3x the deadline means DEGRADED.
+
+        It also owns the fail-safe: 500 ms without a frame raises the BLIND alarm, here, on the
+        core's own tick, so it does not depend on the detector doing anything at all.
+        """
+        if (
+            self._last_frame_mono is not None
+            and not self.blind
+            and now - self._last_frame_mono > BLIND_AFTER_S
+        ):
+            late_ms = (now - self._last_frame_mono - BLIND_AFTER_S) * 1000.0
+            self.blind = True
+            self.alarm_level, self.alarm_text = "blind", BLIND_TEXT
+            self.blind_episodes += 1
+            on_time = late_ms <= BLIND_DEADLINE_MS
+            self.blind_on_time += int(on_time)
+            self.pending_records.append(
+                {
+                    "kind": BLIND_KIND,
+                    "t_wall": time.time(),
+                    "latency_ms": round(late_ms, 1),
+                    "deadline_ms": BLIND_DEADLINE_MS,
+                    "on_time": on_time,
+                }
+            )
         if self._last_msg_mono is None:
             return
         if now - self._last_msg_mono > self.config.silence_s:
@@ -243,8 +298,24 @@ class SafetyCore:
         if now - msg["t_capture"] > self.config.deadline_s:
             self.deadline_misses += 1
             self._miss_at.append(now)
-        records = self._evaluate(msg, now)
-        self.last_decision = self.build_decision(msg)
+        self._last_frame_mono = now
+        self.blind = False
+        decision = self.build_decision(msg)
+        alarm = decision["alarm"]
+        latency_ms = None
+        if alarm["level"] in ("warning", "critical"):
+            # Frame timestamp -> decision made: age on arrival plus the core's own processing time.
+            latency_ms = (now - msg["t_capture"] + (time.perf_counter() - started)) * 1000.0
+            deadline_ms = self.config.deadline_s * 1000.0
+            alarm["latency_ms"] = round(latency_ms, 1)
+            alarm["deadline_ms"] = round(deadline_ms)
+            alarm["on_time"] = latency_ms <= deadline_ms
+            self.alarm_decisions += 1
+            self.alarm_on_time += int(alarm["on_time"])
+            self._alarm_lat.append((now, latency_ms))
+        self.alarm_level, self.alarm_text = alarm["level"], alarm.get("text", "")
+        records = self._evaluate(msg, now, alarm, latency_ms)
+        self.last_decision = decision
         self.last_frame_id = int(msg["frame_id"])
         self._frame_at.append(now)
         self._latency_ms.append((now, (time.perf_counter() - started) * 1000.0))
@@ -294,6 +365,9 @@ class SafetyCore:
             for box in msg["boxes"]
             if box["cls"].lower() in VESSEL_LABELS and box["score"] >= cfg.score_min
         ]
+        alarm: dict[str, Any] = {"level": "none", "kind": None, "text": ""}
+        best = max(vessel_boxes, key=lambda b: b["score"]) if vessel_boxes else None
+        closing = self._closing(float(msg["t_capture"]), best)
         if not vessel_boxes:
             verdict = {"level": VERDICT_IDLE, "text": "No vessel in view"}
         elif vessels:
@@ -304,7 +378,16 @@ class SafetyCore:
                 "text": f"Matches AIS: {name} ({float(nearest['km']):.1f} km)",
             }
         else:
-            verdict = {"level": VERDICT_ALERT, "text": "Vessel seen, not broadcasting"}
+            text = NOT_ON_AIS_TEXT + (" \u00b7 closing" if closing["trend"] == "closing" else "")
+            verdict = {"level": VERDICT_ALERT, "text": text}
+            alarm = {
+                "level": "critical" if closing["trend"] == "closing" else "warning",
+                "kind": ALERT_KIND,
+                "text": text,
+                **closing,
+                "range_m": self._range_estimate_m(best),
+                "estimate_note": "estimate from box size; assumes a 100 m vessel",
+            }
         return {
             "t": time.time(),
             "frame_id": int(msg["frame_id"]),
@@ -324,7 +407,38 @@ class SafetyCore:
             "patrol": {"lat": cfg.unit_lat, "lon": cfg.unit_lon, "name": cfg.patrol_name},
             "ais": {"nearby": vessels, "radius_km": cfg.match_km, "snapshot_t": self.snapshot_t},
             "verdict": verdict,
+            "alarm": alarm,
         }
+
+    def _range_estimate_m(self, box: dict[str, Any] | None) -> int | None:
+        """Pinhole estimate: range = assumed length x focal length / box width. Rough, by design."""
+        if box is None or float(box["w"]) <= 1.0:
+            return None
+        focal_px = self.config.frame_width_px / (2.0 * math.tan(math.radians(CAMERA_HFOV_DEG / 2.0)))
+        return int(min(20000.0, max(10.0, ASSUMED_VESSEL_M * focal_px / float(box["w"]))) // 10 * 10)
+
+    def _closing(self, t_capture: float, box: dict[str, Any] | None) -> dict[str, Any]:
+        """Closing / opening / steady from how the box width changed over the last 0.5-2 s.
+
+        Time to collision is the scale rule tau = w / (dw/dt): it needs no vessel size, only the
+        growth. It is an estimate for a bridge to weigh, not a closest-point-of-approach claim.
+        """
+        track = self._track
+        if box is None:
+            if track and t_capture - track[-1][0] > 1.0:
+                track.clear()
+            return {"trend": None, "ttc_s": None}
+        track.append((t_capture, float(box["w"])))
+        while track and t_capture - track[0][0] > _TRACK_WINDOW_S:
+            track.popleft()
+        t0, w0 = track[0]
+        dt, w = t_capture - t0, float(box["w"])
+        if len(track) < 3 or dt < 0.5 or w0 <= 1.0:
+            return {"trend": None, "ttc_s": None}
+        ratio = w / w0
+        if ratio >= CLOSING_RATIO:
+            return {"trend": "closing", "ttc_s": round(dt * w / (w - w0), 1)}
+        return {"trend": "opening" if ratio <= OPENING_RATIO else "steady", "ttc_s": None}
 
     def build_blind_decision(self) -> dict[str, Any]:
         """The decision file while the AI is down: the safety core still answers, and says so.
@@ -347,9 +461,16 @@ class SafetyCore:
                 "snapshot_t": self.snapshot_t,
             },
             "verdict": {"level": VERDICT_ALERT, "text": BLIND_TEXT},
+            "alarm": {"level": "blind", "kind": BLIND_KIND, "text": BLIND_TEXT},
         }
 
-    def _evaluate(self, msg: dict[str, Any], now: float) -> list[dict[str, Any]]:
+    def _evaluate(
+        self,
+        msg: dict[str, Any],
+        now: float,
+        alarm: dict[str, Any] | None = None,
+        latency_ms: float | None = None,
+    ) -> list[dict[str, Any]]:
         boats = [b for b in msg["boxes"] if b["cls"] == "boat"]
         if not boats:
             return []
@@ -368,6 +489,12 @@ class SafetyCore:
             "unit": {"lat": self.config.unit_lat, "lon": self.config.unit_lon},
             "nearest_ais_km": nearest,
             "ais_records": len(self.vessels),
+            "latency_ms": None if latency_ms is None else round(latency_ms, 1),
+            "deadline_ms": round(self.config.deadline_s * 1000),
+            "on_time": None if latency_ms is None else latency_ms <= self.config.deadline_s * 1000,
+            "trend": (alarm or {}).get("trend"),
+            "ttc_s": (alarm or {}).get("ttc_s"),
+            "range_m": (alarm or {}).get("range_m"),
         }
         self.alerts_total += 1
         self.last_alert = record
@@ -399,6 +526,8 @@ class SafetyCore:
             self._latency_ms.popleft()
         while self._tick_late_ms and now - self._tick_late_ms[0][0] > _STATS_WINDOW_S:
             self._tick_late_ms.popleft()
+        while self._alarm_lat and now - self._alarm_lat[0][0] > _STATS_WINDOW_S:
+            self._alarm_lat.popleft()
 
     def _tick_stats(self, now: float) -> dict[str, Any]:
         """Lateness of the core's own 20 Hz loop (not end-to-end frame time)."""
@@ -414,6 +543,25 @@ class SafetyCore:
             "ticks_60s": len(lateness),
             "max_late_ms": 0.0 if not lateness else round(max(lateness), 3),
             "late_count_60s": sum(1 for late in lateness if late > LATE_TOLERANCE_MS),
+        }
+
+    def _alarm_stats(self, now: float) -> dict[str, Any]:
+        """The guarantee, as numbers: how many alarms met their deadline and how fast they were."""
+        self._prune(now)
+        lat = [ms for _, ms in self._alarm_lat]
+        p99 = _percentile(lat, 0.99)
+        return {
+            "level": self.alarm_level,
+            "text": self.alarm_text,
+            "deadline_ms": round(self.config.deadline_s * 1000),
+            "decisions": self.alarm_decisions,
+            "on_time": self.alarm_on_time,
+            "p99_latency_ms": None if p99 is None else round(p99, 1),
+            "max_latency_ms": None if not lat else round(max(lat), 1),
+            "blind": self.blind,
+            "blind_episodes": self.blind_episodes,
+            "blind_on_time": self.blind_on_time,
+            "blind_deadline_ms": BLIND_DEADLINE_MS,
         }
 
     def _stats(self, now: float) -> dict[str, Any]:
@@ -468,6 +616,7 @@ class SafetyCore:
             "ais_records": len(self.vessels),
             "ais_error": ais_error,
             "safety_tick": self._tick_stats(now),
+            "alarm": self._alarm_stats(now),
             "transitions": self.transitions,
         }
 
@@ -724,7 +873,10 @@ def run(
                 core.note_tick((now - next_tick) * 1000.0, now)
                 core.tick(now)
                 core.expire_ais(time.time())
-                if core.state == STATE_DEGRADED and now - last_blind >= 0.25:
+                for record in core.pending_records:
+                    alerts.append(record)
+                core.pending_records.clear()
+                if core.blind and now - last_blind >= 0.1:
                     last_blind = now
                     writer.submit(config.decision_path, core.build_blind_decision())
                 while next_tick <= now:

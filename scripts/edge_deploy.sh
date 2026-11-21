@@ -31,6 +31,8 @@ REMOTE_BIND="0.0.0.0"
 
 # Optional deployment extras, set by the flags below.
 QNX_ARG=""
+ACT_LED=""
+NO_GUARD=""
 PATROL_LAT=""
 PATROL_LON=""
 PATROL_NAME=""
@@ -46,6 +48,8 @@ usage() {
     echo "  --camera             use camera:0 on the Pi instead of net:7070" >&2
     echo "  --qnxcam UNIT[:flip]  QNX USB webcam through qnxcam (unit 5, optional 180 flip)" >&2
     echo "  --lat N --lon N       unit position (patrol verdict radius)" >&2
+    echo "  --act-led             drive the Pi 5 ACT LED from the alarm (solid = alert, blink = blind)" >&2
+    echo "  --no-guard            A/B baseline: no priority guard" >&2
     echo "  --patrol-name NAME    label for the patrol position" >&2
     echo "  --ais FILE            AIS snapshot JSON copied to the Pi" >&2
 }
@@ -64,6 +68,14 @@ while [ "$#" -gt 0 ]; do
             fi
             QNX_ARG="$2"
             shift 2
+            ;;
+        --act-led)
+            ACT_LED=1
+            shift
+            ;;
+        --no-guard)
+            NO_GUARD=1
+            shift
             ;;
         --lat|--lon|--patrol-name|--ais)
             if [ "$#" -lt 2 ]; then
@@ -257,6 +269,12 @@ if [ -n "$PATROL_LON" ]; then
 fi
 if [ -n "$PATROL_NAME" ]; then
     SUPERVISOR_ARGS="$SUPERVISOR_ARGS --patrol-name $(shell_quote "$PATROL_NAME")"
+fi
+if [ -n "$ACT_LED" ]; then
+    SUPERVISOR_ARGS="$SUPERVISOR_ARGS --act-led"
+fi
+if [ -n "$NO_GUARD" ]; then
+    SUPERVISOR_ARGS="$SUPERVISOR_ARGS --no-guard"
 fi
 if [ -n "$AIS_SRC" ]; then
     SUPERVISOR_ARGS="$SUPERVISOR_ARGS --ais \$HOME/$REMOTE_DIR/patrol_ais.json"

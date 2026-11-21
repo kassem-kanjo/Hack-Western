@@ -68,7 +68,7 @@ def test_decision_contract_shape_and_alert_verdict() -> None:
 
     decision = core.last_decision
     assert decision is not None
-    assert set(decision) == {"t", "frame_id", "source", "ai", "patrol", "ais", "verdict"}
+    assert set(decision) == {"t", "frame_id", "source", "ai", "patrol", "ais", "verdict", "alarm"}
     assert decision["frame_id"] == 1
     assert decision["source"] == "qnxcam:5"  # the deployment label beats the detector's spec
     assert decision["ai"]["engine"] == "opencv-dnn 4.12.0"
@@ -82,7 +82,7 @@ def test_decision_contract_shape_and_alert_verdict() -> None:
     assert decision["ais"]["radius_km"] == 2.0
     assert decision["ais"]["nearby"] == []
     assert decision["ais"]["snapshot_t"].endswith("Z")
-    assert decision["verdict"] == {"level": "alert", "text": "Vessel seen, not broadcasting"}
+    assert decision["verdict"] == {"level": "alert", "text": "VESSEL NOT ON AIS \u2014 alert bridge"}
 
 
 def test_decision_ok_when_the_nearest_ais_vessel_matches() -> None:
@@ -247,6 +247,77 @@ def test_blind_decision_says_the_ai_is_down_and_keeps_the_ais_check() -> None:
     core = SafetyCore(_config(), [near])
     decision = core.build_blind_decision()
     assert decision["verdict"]["level"] == "alert"
-    assert "AI DOWN" in decision["verdict"]["text"]
+    assert "LOOKOUT BLIND" in decision["verdict"]["text"]
+    assert decision["alarm"]["level"] == "blind"
     assert decision["ai"]["down"] is True and decision["ai"]["boxes"] == []
     assert [v["name"] for v in decision["ais"]["nearby"]] == ["NEAR"]
+
+
+def _boxed_frame(frame_id: int, t_capture: float, width: float) -> dict:
+    return _frame(
+        frame_id=frame_id,
+        t_capture=t_capture,
+        boxes=[{"cls": "boat", "score": 0.8, "x": 100.0, "y": 100.0, "w": width, "h": width / 2}],
+    )
+
+
+def test_not_on_ais_alarm_has_latency_and_deadline() -> None:
+    core = SafetyCore(_config(), vessels=[])
+    core.start(0.0)
+    core.on_message(_boxed_frame(1, 0.5, 100.0), now=0.62)
+    alarm = core.last_decision["alarm"]
+    assert alarm["level"] == "warning" and alarm["kind"] == "not_on_ais"
+    assert alarm["on_time"] is True and 100 <= alarm["latency_ms"] < 200
+    assert alarm["range_m"] is not None and "estimate" in alarm["estimate_note"]
+    # a frame that reaches the core already 250 ms old misses the 200 ms deadline, and says so
+    core.on_message(_boxed_frame(2, 0.6, 100.0), now=0.85)
+    assert core.last_decision["alarm"]["on_time"] is False
+    status = core.status(priority="t", ais_error=None, now_wall=1.0, now_mono=0.9)
+    assert status["alarm"]["decisions"] == 2 and status["alarm"]["on_time"] == 1
+
+
+def test_growing_box_is_closing_and_critical() -> None:
+    core = SafetyCore(_config(), vessels=[])
+    core.start(0.0)
+    for i, width in enumerate((100.0, 104.0, 110.0, 118.0, 130.0)):
+        t = 0.5 + 0.2 * i
+        core.on_message(_boxed_frame(i, t, width), now=t + 0.1)
+    alarm = core.last_decision["alarm"]
+    assert alarm["trend"] == "closing" and alarm["level"] == "critical"
+    assert alarm["ttc_s"] is not None and alarm["ttc_s"] > 0
+    assert "closing" in core.last_decision["verdict"]["text"]
+
+
+def test_shrinking_box_is_opening_and_a_matching_ais_ship_clears_the_alarm() -> None:
+    core = SafetyCore(_config(), vessels=[])
+    core.start(0.0)
+    for i, width in enumerate((130.0, 120.0, 112.0, 104.0, 98.0)):
+        t = 0.5 + 0.2 * i
+        core.on_message(_boxed_frame(i, t, width), now=t + 0.1)
+    assert core.last_decision["alarm"]["trend"] == "opening"
+    assert core.last_decision["alarm"]["level"] == "warning"
+    matched = SafetyCore(_config(), vessels=[_vessel(1.0, "ON AIS")])
+    matched.start(0.0)
+    matched.on_message(_boxed_frame(1, 0.5, 100.0), now=0.6)
+    assert matched.last_decision["alarm"]["level"] == "none"
+
+
+def test_no_frame_for_500_ms_raises_lookout_blind_on_the_next_tick() -> None:
+    core = SafetyCore(_config(), vessels=[])
+    core.start(0.0)
+    core.on_message(_frame(), now=0.1)
+    core.tick(0.55)
+    assert not core.blind
+    core.tick(0.65)
+    assert core.blind and core.alarm_level == "blind"
+    assert core.blind_episodes == 1 and core.blind_on_time == 1  # 50 ms past the threshold
+    assert core.pending_records[0]["kind"] == "lookout_blind"
+    core.on_message(_frame(frame_id=2, t_capture=0.9), now=0.95)  # frames are back
+    assert not core.blind and core.alarm_level != "blind"
+
+
+def test_a_late_blind_tick_is_counted_as_a_miss() -> None:
+    core = SafetyCore(_config(), vessels=[])
+    core.start(0.0)
+    core.tick(1.0)  # the loop woke 500 ms after the threshold: far past the 100 ms budget
+    assert core.blind_episodes == 1 and core.blind_on_time == 0

@@ -27,6 +27,7 @@ router = APIRouter(prefix="/api/edge", tags=["edge"])
 STATUS_FILE = "edge_status.json"
 LATEST_FRAME = "latest.jpg"
 DECISION_FILE = "latest_decision.json"
+AB_FILE = "ab_result.json"
 CONTROL_DIR = "control"
 KILL_FILE = "kill_detector"
 STRESS_FILE = "stress_ai"
@@ -238,6 +239,26 @@ def get_decision() -> dict[str, Any]:
         payload = local if isinstance(local, dict) else None
     if payload is None:
         raise HTTPException(status_code=404, detail="no decision")
+    return payload
+
+
+@router.get("/ab")
+def get_ab() -> dict[str, Any]:
+    """The last priority-guard A/B result (written by the Pi's ab_test), or 404 if none yet."""
+    host = edge_host()
+    payload: dict[str, Any] | None = None
+    if host:
+        try:
+            payload = json.loads(_relay(_edge_url(host, AB_FILE), DECISION_MAX_BYTES))
+        except (httpx.HTTPError, ValueError, _RelayTooLarge):
+            payload = None
+    else:
+        try:
+            payload = json.loads((status_path().parent / AB_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=404, detail="no A/B result yet")
     return payload
 
 

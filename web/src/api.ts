@@ -560,6 +560,7 @@ export interface EdgeStatus {
   stress?: EdgeStress | null;
   /** The safety core's own loop lateness (20 Hz), not end-to-end frame time. */
   safety_tick?: EdgeSafetyTick | null;
+  alarm?: EdgeAlarmStats | null;
   /** Alert shape is owned by the safety core; the patrol screen shows the count only. */
   last_alert: unknown;
   last_frame_age_ms: number | null;
@@ -622,6 +623,56 @@ export interface EdgeAis {
   snapshot_t: string;
 }
 
+/** The safety core's alarm for one decision (see safety_core.py). Range and TTC are estimates. */
+export interface EdgeAlarm {
+  level: "none" | "warning" | "critical" | "blind";
+  kind?: string | null;
+  text?: string;
+  trend?: "closing" | "opening" | "steady" | null;
+  ttc_s?: number | null;
+  range_m?: number | null;
+  latency_ms?: number;
+  deadline_ms?: number;
+  on_time?: boolean;
+}
+
+/** `status.alarm`: the guarantee as numbers. */
+export interface EdgeAlarmStats {
+  level: string;
+  text?: string;
+  deadline_ms: number;
+  decisions: number;
+  on_time: number;
+  p99_latency_ms: number | null;
+  max_latency_ms: number | null;
+  blind: boolean;
+  blind_episodes: number;
+  blind_on_time: number;
+  blind_deadline_ms: number;
+}
+
+/** One arm of the priority-guard A/B. */
+export interface EdgeAbArm {
+  alarm_frames: number;
+  on_time: number;
+  late: number;
+  worst_latency_ms: number | null;
+  p99_latency_ms: number | null;
+  worst_tick_late_ms: number | null;
+  ticks_over_5ms: number | null;
+  peak_inference_ms: number;
+}
+
+/** `GET /api/edge/ab`: the same alarm path under the same load, without and with the guard. */
+export interface EdgeAb {
+  ran_at: string;
+  stress_s: number;
+  deadline_ms: number;
+  load: string;
+  unguarded: EdgeAbArm;
+  guarded: EdgeAbArm;
+}
+
 export type EdgeVerdictLevel = "alert" | "ok" | "idle";
 
 /** The safety core's one-line decision. */
@@ -645,6 +696,7 @@ export interface EdgeDecision {
   patrol: EdgePatrol;
   ais: EdgeAis;
   verdict: EdgeVerdict;
+  alarm?: EdgeAlarm;
 }
 
 /** Newest supervisor status, with controls and frame availability. */
@@ -655,6 +707,11 @@ export function fetchEdgeStatus(signal?: AbortSignal): Promise<EdgeStatus> {
 /** The latest decision (what the unit saw and what the safety core concluded). */
 export function fetchEdgeDecision(signal?: AbortSignal): Promise<EdgeDecision> {
   return getJson<EdgeDecision>("/api/edge/decision", signal);
+}
+
+/** The last priority-guard A/B result; rejects (404) until one has been run. */
+export function fetchEdgeAb(signal?: AbortSignal): Promise<EdgeAb> {
+  return getJson<EdgeAb>("/api/edge/ab", signal);
 }
 
 /**
