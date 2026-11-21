@@ -403,6 +403,17 @@ def _event_from_core(
     )
 
 
+def _segment_offset_km(track: Sequence[Ping], segment: Sequence[Ping]) -> float:
+    """How far the teleported visit lies from the vessel's real track (the fixes before and after)."""
+    ordered = list(track)
+    i = ordered.index(segment[0])
+    j = ordered.index(segment[-1])
+    ends = [ordered[k] for k in (i - 1, j + 1) if 0 <= k < len(ordered)]
+    if not ends:
+        return 0.0
+    return min(distance_km(segment[0].lat, segment[0].lon, e.lat, e.lon) for e in ends)
+
+
 def ghost_points(
     tracks: Mapping[int, Sequence[Ping]],
     *,
@@ -410,8 +421,14 @@ def ghost_points(
     radius_m: float = 500,
     min_vessels: int = 3,
     min_inland_km: float = 1.0,
+    min_offset_km: float = 20.0,
 ) -> list[Event]:
     """Find points that several unrelated vessels teleported to and back from.
+
+    Only vessels that themselves made an impossible out-and-back detour of at least
+    ``min_offset_km`` from their real track are counted and listed. (Found on real data: a busy
+    river berth on the Neva, which the coarse coastline calls land, collected normal traffic plus
+    a few GPS jitters of 1-15 km; real spoofing displaced ships 48 km.)
 
     ``tracks`` is the output of :func:`darkfleet.core.kinematics.split_tracks`: clean, time-sorted
     pings per MMSI. Vessels that never make an impossible out-and-back detour contribute nothing,
@@ -439,12 +456,11 @@ def ghost_points(
         all_cells.setdefault(_cell(ping.lat, ping.lon), []).append(ping)
 
     radius_km = radius_m / 1000.0
-    outliers = [
-        ping
-        for track in tracks.values()
-        for segment in _teleport_segments(track, radius_km)
-        for ping in segment
-    ]
+    outliers = []
+    for track in tracks.values():
+        for segment in _teleport_segments(track, radius_km):
+            if _segment_offset_km(track, segment) >= min_offset_km:
+                outliers.extend(segment)
     if not outliers:
         return []
 
@@ -482,6 +498,9 @@ def ghost_points(
         # Once several independent hulls have teleported to this point, every fix inside the
         # disk belongs to the same physical ghost: the position itself is what is falsified.
         nearby = _pings_near(lat, lon, radius_km, all_cells, rows, cols)
+        # Count and list only vessels that teleported here, never ordinary traffic at the same spot.
+        teleported = {ping.mmsi for ping in component_pings}
+        nearby = [ping for ping in nearby if ping.mmsi in teleported]
         if len({ping.mmsi for ping in nearby}) < min_vessels:
             continue
         events.append(_event_from_core(nearby, lat, lon, tracks, land, min_inland_km))

@@ -71,7 +71,10 @@ export function funnelCounts(
   };
 }
 
-/** The case the topbar "Case file" tab opens: the top-ranked unexplained one. */
+/**
+ * The top-ranked unexplained case. Kept as a shared helper: a caller that needs a
+ * default case file (rather than a clicked row) can use it.
+ */
 export function bestCandidateId(ranked: CaseSummary[]): string | null {
   const best = ranked.find((c) => c.status === "candidate");
   return best ? best.id : null;
@@ -185,8 +188,6 @@ export function renderOverview(
 ): { destroy(): void } {
   const ranked = rankCases(data.cases);
   const counts = funnelCounts(data.cases, data.totals?.gaps_scanned ?? 0, data.totals);
-  const best = bestCandidateId(ranked);
-  const demo = demoCaseId(ranked);
 
   // The map shows only the cases we cannot explain; the 90 cleared gaps stay
   // hidden until the list switch asks for them.
@@ -307,8 +308,6 @@ export function renderOverview(
       active: "overview",
       mode: "SNAPSHOT",
       generatedAt: data.generated_at,
-      caseHref: best !== null ? `#/case/${encodeURIComponent(best)}` : null,
-      demoHref: demo !== null ? `#/case/${encodeURIComponent(demo)}` : null,
     }),
     h("main", { class: "main" }, stage, rail),
   );

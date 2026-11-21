@@ -69,7 +69,9 @@ def test_real_fixture_has_exactly_one_ghost_point() -> None:
     ghost = ghosts[0]
     assert ghost.kind == "spoof"
     assert ghost.other_mmsi is None
-    assert ghost.evidence["n_vessels"] >= 5
+    # Strict count: only ships that themselves teleported >= 20 km in AND out (3 in this 5 h sample);
+    # the earlier ">= 5" counted ordinary vessels that merely passed near the point.
+    assert ghost.evidence["n_vessels"] >= 3
     assert abs(ghost.lat - 60.309) < 0.01
     assert abs(ghost.lon - 30.489) < 0.01
     assert ghost.start < ghost.end

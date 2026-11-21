@@ -13,10 +13,27 @@
 
 import "./present.css";
 
+import { fetchCases, fetchLiveEvents, fetchLiveSummary, fetchStats } from "../api";
 import { h } from "../components/dom";
-import { PRESENT_STEPS } from "./steps";
+import type { LiveEvent } from "../model/live";
+import { unusualCount } from "../model/liveFacts";
+import { PRESENT_STEPS, type PresentCaption, type PresentStep, type PresentToken } from "./steps";
 
 const TOTAL = PRESENT_STEPS.length;
+const BALTIC_REGION = "BALTIC_WATCH";
+const HORMUZ_UNSEEN_URL = "/api/hormuz/unseen";
+const TOKEN = /\{([a-z_]+)\}/g;
+const INTEGER = new Intl.NumberFormat("en-US");
+const EVENT_COUNT_KEYS = ["silences", "jumps", "clones", "meetings", "spoofs"] as const;
+
+/**
+ * Live values for the caption tokens. A missing key means "no number from the
+ * API", and the step falls back to its number-free sentence. Null means the
+ * fetch has not answered yet.
+ */
+type TokenValues = Partial<Record<PresentToken, string>>;
+let tokenValues: TokenValues | null = null;
+let loadingTokens = false;
 
 let active = false;
 let index = 0;
@@ -63,18 +80,175 @@ function setProgress(step: number): void {
   }
 }
 
+/** A finite number or null; one guard for every optional field on the wire. */
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function integerToken(value: number | null): string | undefined {
+  return value === null ? undefined : INTEGER.format(Math.round(value));
+}
+
+function ratioToken(value: number | null): string | undefined {
+  return value === null ? undefined : value.toFixed(2);
+}
+
+/** The spoof event the "physics" beat is about: highest severity, as the API sorts. */
+function topSpoof(events: LiveEvent[]): LiveEvent | null {
+  let best: LiveEvent | null = null;
+  for (const event of events) {
+    if (event.kind !== "spoof") continue;
+    if (best === null || event.severity > best.severity) best = event;
+  }
+  return best;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`GET ${path} failed: HTTP ${response.status}`);
+  return (await response.json()) as T;
+}
+
+/** Hormuz's snapshot is local to its block; presentation needs only these fields. */
+interface HormuzSummaryLite {
+  days?: number;
+  dark_share_mean?: number | null;
+  headline_share?: number | null;
+  n_days_used?: number;
+}
+
+interface HormuzUnseenLite {
+  summary?: HormuzSummaryLite;
+}
+
+/**
+ * Fetch every number the captions may print, once per presentation run. The
+ * calls are independent (`allSettled`) so one dead endpoint only removes its
+ * own numbers; each step then reads its fallback sentence.
+ */
+async function loadTokenValues(): Promise<TokenValues> {
+  const [cases, stats, live, events, hormuz] = await Promise.allSettled([
+    fetchCases({ limit: 200, status: "all" }),
+    fetchStats(),
+    fetchLiveSummary(BALTIC_REGION),
+    fetchLiveEvents(BALTIC_REGION),
+    getJson<HormuzUnseenLite>(HORMUZ_UNSEEN_URL),
+  ]);
+
+  const values: TokenValues = {};
+
+  if (cases.status === "fulfilled") {
+    const { totals, cases: rows } = cases.value;
+    // candidates_final is optional on older snapshots; the listed cases are the fallback.
+    const final = finite((totals as { candidates_final?: unknown }).candidates_final);
+    const unexplained =
+      final ?? (rows.length > 0 ? rows.filter((row) => row.status === "candidate").length : null);
+
+    values.gaps_scanned = integerToken(finite(totals.gaps_scanned));
+    values.radar_nearby = integerToken(finite(totals.with_candidates));
+    values.cleared = integerToken(finite(totals.ruled_out));
+    values.unexplained = integerToken(unexplained);
+  }
+
+  if (stats.status === "fulfilled") {
+    const validation = stats.value.validation;
+    values.null_ratio = ratioToken(finite(validation?.null_ratio));
+    values.bridge_auc = ratioToken(finite(validation?.bridge_auc));
+  }
+
+  if (live.status === "fulfilled") {
+    const counts = live.value.counts ?? {};
+    values.baltic_ships = integerToken(finite(counts.vessels));
+    values.alerts = integerToken(finite(counts.watchlist_alerts));
+
+    const hasEventCounts = EVENT_COUNT_KEYS.some((key) => finite(counts[key]) !== null);
+    if (hasEventCounts) {
+      values.baltic_events = integerToken(unusualCount(counts));
+    }
+  }
+
+  if (events.status === "fulfilled") {
+    const spoof = topSpoof(events.value);
+    if (spoof !== null) {
+      const listed = Array.isArray(spoof.evidence["vessels"]) ? spoof.evidence["vessels"].length : null;
+      values.spoof_ships = integerToken(finite(spoof.evidence["n_vessels"]) ?? listed);
+    }
+  }
+
+  if (hormuz.status === "fulfilled") {
+    const summary = hormuz.value.summary;
+    const share = finite(summary?.headline_share) ?? finite(summary?.dark_share_mean);
+    if (share !== null) values.hormuz_share_pct = String(Math.round(share * 100));
+    values.hormuz_days_used = integerToken(finite(summary?.n_days_used) ?? finite(summary?.days));
+  }
+
+  return values;
+}
+
+function ensureTokenValues(): void {
+  if (loadingTokens) return;
+  loadingTokens = true;
+  void loadTokenValues()
+    .then((values) => {
+      tokenValues = values;
+      // Repaint the beat the presenter is on; navigation is a no-op for the same route.
+      if (active) show(index);
+    })
+    .catch(() => {
+      // Keep the fallbacks; a failed fetch must never put "undefined" on screen.
+    })
+    .finally(() => {
+      loadingTokens = false;
+    });
+}
+
+/**
+ * Replace every `{token}` with its live value. Null when any token is unknown
+ * (including before the fetch answers), so the caller can use the fallback.
+ */
+function fill(template: string, values: TokenValues | null): string | null {
+  let missing = false;
+  const text = template.replace(TOKEN, (_match, name: string) => {
+    const value = values?.[name as PresentToken];
+    if (value === undefined) {
+      missing = true;
+      return "";
+    }
+    return value;
+  });
+  return missing ? null : text;
+}
+
+/** Last-resort safety: never show a raw placeholder if a step forgot its fallback. */
+function stripTokens(template: string): string {
+  return template
+    .replace(TOKEN, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([.,;:])/g, "$1")
+    .trim();
+}
+
+function captionFor(beat: PresentStep): PresentCaption {
+  return {
+    headline: fill(beat.headline, tokenValues) ?? beat.fallback?.headline ?? stripTokens(beat.headline),
+    line: fill(beat.line, tokenValues) ?? beat.fallback?.line ?? stripTokens(beat.line),
+    proof: fill(beat.proof, tokenValues) ?? beat.fallback?.proof ?? stripTokens(beat.proof),
+  };
+}
+
 /** Swap the caption to one step and replay its 200 ms fade-in. */
 function show(step: number): void {
   const beat = PRESENT_STEPS[step];
   if (beat === undefined || root === null) return;
 
+  const text = captionFor(beat);
   index = step;
   navigate(beat.route);
 
   if (stepLabel !== null) stepLabel.textContent = `${step + 1} / ${TOTAL}`;
-  if (proofLabel !== null) proofLabel.textContent = beat.proof;
-  if (headline !== null) headline.textContent = beat.headline;
-  if (line !== null) line.textContent = beat.line;
+  if (proofLabel !== null) proofLabel.textContent = text.proof;
+  if (headline !== null) headline.textContent = text.headline;
+  if (line !== null) line.textContent = text.line;
   setProgress(step);
 
   // Removing and re-adding in the same frame restarts the CSS animation; the
@@ -142,10 +316,13 @@ function buildOverlay(): HTMLElement {
 export function startPresent(): void {
   if (!active) {
     startHash = location.hash;
+    // The recording grows between runs: fetch a fresh set of numbers, once per run.
+    tokenValues = null;
     root = buildOverlay();
     document.body.append(root);
     document.body.classList.add("is-presenting");
     active = true;
+    ensureTokenValues();
   }
   show(0);
 }

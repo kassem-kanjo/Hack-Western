@@ -164,9 +164,6 @@
 
 /* 6. Proof picture ------------------------------------------------------- */
 
-/* Every picture here is intrinsically small; the clone schematic is the only
-   element with real height, so it alone gets the 180px cap. */
-
 .event-detail__heading {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-label);
@@ -180,45 +177,152 @@
   color: var(--c-text-3);
 }
 
-/* Bars: shared track, numeric percent fill. */
-.event-detail__bar-row + .event-detail__bar-row {
-  margin-top: var(--sp-3);
+/* Each picture is one SVG: every frame is a number we can redraw, so the first
+   play and a replay are the same code path. Scene text is sized in viewBox
+   units (360 wide); at the rail's width it renders near the caption sizes. */
+.event-detail__scene {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
 
-.event-detail__bar-head {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-1);
-  font-size: var(--fs-label);
-  color: var(--c-text-2);
+.event-detail__scene-label {
+  fill: var(--c-text-2);
+  font-size: 11px;
 }
 
-.event-detail__bar-label {
-  min-width: 0;
+.event-detail__scene-note {
+  fill: var(--c-text-3);
+  font-size: 10px;
 }
 
-.event-detail__bar-value {
+.event-detail__scene-value {
+  fill: var(--c-text-1);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--c-text-1);
-  white-space: nowrap;
+  font-size: 11px;
 }
 
-.event-detail__bar {
-  height: 6px;
-  background: var(--c-line);
-  border-radius: var(--r-1);
-  overflow: hidden;
+.event-detail__scene-ratio {
+  fill: var(--c-text-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
 }
 
-.event-detail__bar-fill {
-  height: 100%;
-  background: var(--c-text-1);
+.event-detail__scene-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
-.event-detail__bar-fill.is-muted {
-  background: var(--c-text-3);
+.event-detail__scene-value.is-strong {
+  fill: var(--c-text-2);
+  stroke: var(--c-panel);
+  stroke-width: 4px;
+  paint-order: stroke;
+}
+
+/* Jump: the two bars share one scale. White is what the gap demands; grey is
+   the ship's own maximum. */
+.event-detail__scene-track {
+  fill: var(--c-line);
+}
+
+.event-detail__scene-fill {
+  fill: var(--c-text-1);
+}
+
+.event-detail__scene-fill.is-muted {
+  fill: var(--c-text-3);
+}
+
+/* Silence: heard dots, the other ships' ticks, and the amber silent minutes. */
+.event-detail__scene-dot {
+  fill: var(--c-ais);
+}
+
+.event-detail__scene-tick {
+  stroke: var(--c-text-3);
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+}
+
+.event-detail__scene-gap-box {
+  fill: none;
+  stroke: var(--c-gap);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.event-detail__scene-hatch {
+  stroke: var(--c-gap);
+  stroke-width: 1;
+  stroke-opacity: 0.55;
+}
+
+.event-detail__scene-gap-backing {
+  fill: var(--c-panel);
+}
+
+.event-detail__scene-gap-label {
+  fill: var(--c-gap);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+}
+
+/* Spoof: real departures (AIS green) and the white tracks to the false point. */
+.event-detail__scene-ais {
+  fill: var(--c-ais);
+}
+
+.event-detail__scene-candidate {
+  fill: var(--c-candidate);
+}
+
+.event-detail__scene-candidate-line {
+  fill: none;
+  stroke: var(--c-candidate);
+  stroke-width: 1.4;
+  stroke-opacity: 0.8;
+}
+
+.event-detail__scene-centre {
+  fill: var(--c-panel);
+  stroke: var(--c-candidate);
+  stroke-width: 1.6;
+}
+
+.event-detail__scene-cross {
+  stroke: var(--c-candidate);
+  stroke-width: 1.4;
+}
+
+/* Meeting: two radar-pink hulls closing to their closest approach. */
+.event-detail__scene-rdv {
+  fill: var(--c-rdv);
+}
+
+.event-detail__scene-rdv-ring {
+  fill: none;
+  stroke: var(--c-rdv);
+  stroke-width: 1.2;
+  stroke-opacity: 0.55;
+}
+
+/* Clone: two reported places and the dashed hop one ID makes between them. */
+.event-detail__scene-rule {
+  fill: none;
+  stroke: var(--c-line-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.event-detail__scene-place {
+  fill: var(--c-panel);
+  stroke: var(--c-candidate);
+  stroke-width: 1.6;
 }
 
 .event-detail__caption {
@@ -234,158 +338,45 @@
   color: var(--c-text-2);
 }
 
-/* Silence: one time axis, two rows. */
-.event-detail__time-grid {
-  display: grid;
-  grid-template-columns: 120px 1fr;
+/* The one control under a picture; quiet until hovered or focused. */
+.event-detail__proof-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--sp-2);
+}
+
+.event-detail__replay {
+  display: inline-flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-label);
-  color: var(--c-text-2);
-}
-
-.event-detail__time-name {
-  min-width: 0;
-}
-
-.event-detail__track {
-  position: relative;
-  height: 22px;
-}
-
-/* A dotted rule reads as "was being heard"; no fill, so it cannot be mistaken
-   for a bar. */
-.event-detail__dots {
-  position: absolute;
-  top: 9px;
-  height: 0;
-  border-top: 2px dotted var(--c-ais);
-}
-
-.event-detail__gap {
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px dashed var(--c-gap);
-  overflow: hidden;
-}
-
-.event-detail__hatch {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.event-detail__hatch-line {
-  stroke: var(--c-gap);
-  stroke-width: 1;
-  stroke-opacity: 0.55;
-}
-
-.event-detail__gap-label {
-  position: relative;
-  padding: 0 var(--sp-1);
-  background: var(--c-panel);
-  font-family: var(--font-mono);
-  font-size: var(--fs-caption);
-  color: var(--c-gap);
-  white-space: nowrap;
-}
-
-/* Many thin ticks: the other ships kept being heard across the whole axis. */
-.event-detail__tick {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  width: 1px;
-  background: var(--c-text-3);
-  opacity: 0.7;
-}
-
-.event-detail__axis {
-  display: grid;
-  grid-template-columns: 120px 1fr;
-  gap: var(--sp-2);
-  margin-top: 2px;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-caption);
-  color: var(--c-text-3);
-}
-
-.event-detail__axis-times {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-
-/* Clone schematic. */
-.event-detail__schematic {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 180px;
-}
-
-.event-detail__schema-line {
-  stroke: var(--c-line-strong);
-  stroke-width: 1.5;
-  stroke-dasharray: 3 3;
-}
-
-.event-detail__schema-dot {
-  fill: var(--c-text-1);
-}
-
-.event-detail__schema-label {
-  fill: var(--c-text-3);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.event-detail__schema-label.is-strong {
-  fill: var(--c-text-2);
-  stroke: var(--c-panel);
-  stroke-width: 4px;
-  paint-order: stroke;
-}
-
-/* Meeting: two figures side by side. */
-.event-detail__pair {
-  display: flex;
-  gap: var(--sp-3);
-}
-
-.event-detail__stat {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--sp-3);
+  gap: 6px;
+  padding: 3px var(--sp-2);
   border: 1px solid var(--c-line);
-  border-radius: var(--r-2);
-}
-
-.event-detail__stat-label {
-  font-size: var(--fs-caption);
+  border-radius: var(--r-pill);
+  background: none;
   color: var(--c-text-3);
-}
-
-.event-detail__stat-value {
-  font-size: var(--fs-num-m);
-  line-height: var(--lh-tight);
-  color: var(--c-text-1);
-  font-variant-numeric: tabular-nums;
-}
-
-.event-detail__stat-note {
+  font-family: inherit;
   font-size: var(--fs-caption);
-  color: var(--c-text-2);
+  line-height: var(--lh-tight);
+  cursor: pointer;
+}
+
+.event-detail__replay:hover {
+  color: var(--c-text-1);
+  border-color: var(--c-line-strong);
+}
+
+.event-detail__replay:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.event-detail__replay-icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Spoof: the MMSIs that shared one impossible position. */
@@ -396,6 +387,11 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Under a picture the list needs air; alone it would sit on the heading. */
+.event-detail__proof .event-detail__mmsis {
+  margin-top: var(--sp-3);
 }
 
 .event-detail__mmsi {

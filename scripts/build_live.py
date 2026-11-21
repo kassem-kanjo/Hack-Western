@@ -30,13 +30,14 @@ import json
 import sys
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any
 
 from darkfleet.core import kinematics
+from darkfleet.core.anchorages import context_for
 from darkfleet.core.encounters import meetings
 from darkfleet.core.geo import distance_km
 from darkfleet.core.speeds import max_speed_knots
@@ -274,6 +275,77 @@ def _split_watchlist(rows: Sequence[dict[str, Any]]) -> dict[str, list[dict[str,
     return {"alerts": alerts, "info": info}
 
 
+def _meeting_context(meeting_events: Sequence[Event], alerts: Sequence[dict[str, Any]]) -> list[Event]:
+    """Re-read each meeting with the water it happened in and the hulls that were in it.
+
+    Two join decisions, both about a meeting's *context* rather than its geometry:
+
+    * a meeting inside a known anchorage is probably routine refuelling, so its severity is
+      halved and the anchorage is named in the evidence. The box is hand-drawn, which the note
+      says out loud;
+    * a meeting where either hull is a sanctions or shadow-fleet alert is worth a look whatever
+      the water: severity is floored at 0.9 and the alert categories are attached. This is
+      checked after the anchorage discount, so a sanctioned pair bunkering in Singapore still
+      ranks high.
+
+    ``Event`` is frozen, so each changed finding is rebuilt with :func:`dataclasses.replace`;
+    a meeting that matches neither rule is passed through unchanged.
+    """
+    categories: dict[int, list[str]] = {}
+    for row in alerts:
+        mmsi = int(row.get("mmsi") or 0)
+        category = row.get("category")
+        if mmsi and category:
+            categories.setdefault(mmsi, []).append(str(category))
+
+    contextualised: list[Event] = []
+    for event in meeting_events:
+        severity = event.severity
+        explanation = event.explanation
+        evidence = dict(event.evidence)
+        changed = False
+
+        context = context_for(event.lat, event.lon)
+        if context is not None:
+            severity = severity / 2.0
+            evidence["context"] = {
+                "name": context["name"],
+                "kind": context["kind"],
+                "note": context["note"],
+            }
+            explanation += (
+                f" In a known anchorage ({context['name']}): likely routine refuelling "
+                f"(bunkering); transfers outside such areas deserve a closer look."
+            )
+            changed = True
+
+        watchlist_categories: list[str] = []
+        for mmsi in (event.mmsi, event.other_mmsi):
+            if mmsi is None:
+                continue
+            for category in categories.get(mmsi, []):
+                if category not in watchlist_categories:
+                    watchlist_categories.append(category)
+        if watchlist_categories:
+            severity = max(severity, 0.9)
+            evidence["watchlist"] = watchlist_categories
+            explanation += " One vessel is on a sanctions list."
+            changed = True
+
+        if not changed:
+            contextualised.append(event)
+            continue
+        contextualised.append(
+            replace(
+                event,
+                severity=round(min(1.0, max(0.0, severity)), 3),
+                explanation=explanation,
+                evidence=evidence,
+            )
+        )
+    return contextualised
+
+
 def _event_payload(event: Event) -> dict[str, Any]:
     """Event as a JSON dict, with datetimes rendered as ISO strings."""
     row = asdict(event)
@@ -351,6 +423,9 @@ def build(
 
     watch = _watchlist_rows(tracks, vessels, sanctions)
     watchlist = _split_watchlist(watch)
+    # Anchorage context and sanctions alerts are read after the detectors because both need
+    # data the geometry alone does not have: where the meeting was, and who was in it.
+    meeting_events = _meeting_context(meeting_events, watchlist["alerts"])
 
     events = [*silences, *jump_events, *clone_events, *meeting_events, *spoof_events]
     payload_events = sorted((_event_payload(event) for event in events), key=_event_sort_key)
