@@ -26,6 +26,10 @@ import { parseLiveRoute, renderLive, type LiveRoute, type LiveScreen } from "./s
 import { renderPatrol } from "./screens/patrol";
 import { initPresent } from "./present/present";
 
+// Phone overrides go last on purpose: they must outrank the stylesheets the
+// screen modules import (overview.css, hormuz.css) at equal specificity.
+import "./styles/phone.css";
+
 // MapLibre's worker is a sibling file in the package: point it at the copy Vite
 // emits so it is served locally (offline, no CDN).
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";

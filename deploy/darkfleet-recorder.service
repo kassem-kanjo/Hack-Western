@@ -1,0 +1,20 @@
+[Unit]
+Description=Dark Fleet AIS recorder (six regions, hourly gzip)
+Documentation=https://github.com/kassem-kanjo/Hack-Western
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=darkfleet
+Group=darkfleet
+WorkingDirectory=/opt/darkfleet
+# The AISSTREAM key is read from /opt/darkfleet/.env by scripts/record_ais.py.
+ExecStart=/opt/darkfleet/.venv/bin/python scripts/record_ais.py --regions BALTIC_WATCH,HORMUZ,MALAYSIA_EOPL,LACONIA,RED_SEA,BLACK_SEA --out /opt/darkfleet/data/ais
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

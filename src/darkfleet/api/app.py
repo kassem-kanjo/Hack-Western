@@ -13,8 +13,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.staticfiles import StaticFiles
 
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
@@ -144,3 +146,40 @@ def health() -> dict[str, Any]:
         "cases": len(payload.get("cases", [])),
         "source": str(data_dir()),
     }
+
+
+def web_dist() -> Path | None:
+    """Resolve the optional built web app; unset or missing means API-only."""
+    raw = os.environ.get("DARKFLEET_WEB_DIST", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_dir() else None
+
+
+@lru_cache(maxsize=4)
+def _static_app(directory: str) -> StaticFiles:
+    """One StaticFiles instance per directory; switching directories is rare."""
+    return StaticFiles(directory=directory, html=True)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_web(full_path: str, request: Request) -> Response:
+    """Serve the built SPA on every non-API path, with index.html as the fallback.
+
+    Registered after the API routes so ``/api`` always wins. Unknown ``/api`` paths stay
+    404 JSON instead of turning into the SPA; the browser needs to see real API errors.
+    """
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    directory = web_dist()
+    if directory is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    static = _static_app(str(directory))
+    try:
+        return await static.get_response(full_path, request.scope)
+    except StarletteHTTPException as exc:
+        if exc.status_code != 404:
+            raise
+    # Client-side routes such as /live/BALTIC_WATCH are not files; hand back the app.
+    return await static.get_response("index.html", request.scope)
