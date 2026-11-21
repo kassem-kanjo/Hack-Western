@@ -50,3 +50,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 6:** ~95% DeepSeek; Chief wrote the shared contract (tracks.py), the multi-region recorder, the gzip-tail fix.
 - **Rule breaks:** none new beyond the above.
 - **Change for next 30 min:** wait loops only via a function with `return` (never `exit`); before dispatch, grep all queued briefs for overlapping file paths.
+
+## Sat 21 Nov, 05:19 ET (audit 8, covers 04:40-05:19)
+- **Went well:** the browser gate caught 4 UI defects the builder's green build missed (0-px map from MapLibre CSS precedence, crash on a changed watchlist shape, a catch that hid render errors, rounding); real-data runs cut spoof false positives 784 → 1 and exposed "clones" that were spoof victims; an OpenStreetMap check stopped an overstated claim ("53 km inland") before any judge saw it; Hormuz headline moved to a robust median (41%).
+- **Went wrong:** the UI lead reported done without running the browser; two lanes disagreed on a data contract (watchlist list vs {alerts, info}) because a backend lane changed a shape the UI consumed; I estimated a time ("~05:30") in a message once more.
+- **Code share since audit 7:** ~90% DeepSeek; Chief: integration wiring (spoof into pipeline, spoofed-clone folding), 3 UI bug fixes found in the browser gate, wording fix.
+- **Rule breaks:** a backend brief changed a public JSON shape without updating the consumer or the schema doc.
+- **Change for next 30 min:** any brief that changes an API/JSON shape must update docs/api-schema.md (or baltic-spec.md) and name every consumer file; UI leads' briefs keep the browser gate mandatory and their return must include screenshot paths or it is not done.
