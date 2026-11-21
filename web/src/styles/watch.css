@@ -1,23 +1,24 @@
-/* Watch screen (#86): a maritime analyst tool. Events left, map middle, field
-   table right. Flat panels, 1 px hairlines, system UI type, mono for every id
-   and time. Tokens only; no rounded cards, glows, pills or gradients. */
+/* Watch screen (#86, #200): the maritime analyst console on the V3 "Dark Fleet"
+   tokens. Events rail left, map stage in the middle, field table right, status
+   bar under all three. Chrome is grey, colour is state, selection is ice-white,
+   corners stop at --r-2. Tokens only. */
+
+/* ---------- shell -------------------------------------------------------- */
 
 .main.watch-main {
-  grid-template-columns: 330px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: var(--rail-l-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--statusbar-h);
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-variant-numeric: var(--numeric);
+  color: var(--text-2);
 }
 
-.main.watch-main.is-focus {
-  grid-template-columns: 330px minmax(0, 1fr) 380px;
-}
+.main.watch-main.is-focus { grid-template-columns: var(--rail-l-w) minmax(0, 1fr) var(--rail-r-w); }
 
 /* The loading line and the one error banner span the whole split. */
 .main.watch-main > .empty,
@@ -38,47 +39,78 @@
 
 /* MapLibre needs an absolutely positioned, sized container. The prefix
    outranks MapLibre's own ".maplibregl-map { position: relative }". */
-.watch-stage .watch-map {
-  position: absolute;
-  inset: 0;
+.watch-stage .watch-map { position: absolute; inset: 0; }
+
+/* ---------- status bar --------------------------------------------------- */
+
+.watch-status {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  height: var(--statusbar-h);
+  padding: 0 var(--sp-3);
+  background: var(--surface-1);
+  border-top: 1px solid var(--line-1);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-/* ---------- top bar, watch only ----------------------------------------- */
-
-.topbar.is-watch {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+.watch-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
 }
 
-.topbar.is-watch .brand {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+.watch-status-k {
+  margin-right: var(--sp-1);
+  font-size: var(--fs-11);
+  color: var(--text-4);
 }
 
-.topbar.is-watch .tab {
-  font-size: 12px;
+.watch-status a { color: var(--text-2); text-decoration: none; }
+
+.watch-status a:hover { text-decoration: underline; }
+
+.watch-status .watch-mono { color: var(--text-2); }
+
+.watch-status-item.is-keys { margin-left: auto; }
+
+.watch-status-item.is-clock { padding-left: var(--sp-3); border-left: 1px solid var(--line-1); }
+
+.watch-kbd {
+  display: inline-block;
+  min-width: 16px;
+  margin: 0 2px 0 var(--sp-1);
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 14px;
+  text-align: center;
+  color: var(--text-2);
 }
 
-.topbar.is-watch .present-btn {
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 0;
-  font-size: 11px;
-}
+/* ---------- map: floating panels ----------------------------------------- */
 
-.topbar.is-watch .kbd {
-  border-radius: 0;
-  font-size: 10px;
+/* Every panel that sits on the sea is surface-2 under a hairline, lifted by the
+   float shadow. Nothing else on this screen casts one. */
+.watch-live,
+.watch-cursor,
+.watch-map-controls,
+.watch-layers,
+.watch-contact-label {
+  background: var(--surface-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  box-shadow: var(--edge-hi), var(--shadow-float);
 }
-
-.topbar.is-watch .mode-badge {
-  padding: 2px 7px;
-  border-radius: 0;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-}
-
-/* ---------- overlays: live chip, attribution, cursor, controls ----------- */
 
 .watch-live {
   position: absolute;
@@ -90,13 +122,10 @@
   gap: 6px;
   height: 22px;
   max-width: calc(100% - 220px);
-  padding: 0 7px;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  padding: 0 var(--sp-2);
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  color: var(--text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -107,35 +136,13 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--c-live);
+  background: var(--st-ok);
 }
 
-.watch-attrib {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  z-index: 3;
-  max-width: calc(100% - 220px);
-  padding: 1px 5px;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line);
-  border-radius: 0;
-  font-size: 11px;
-  color: var(--c-text-3);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* Freshness: amber only when the recorder is behind. */
+.watch-live.is-delayed { color: var(--st-degraded); border-color: var(--st-degraded); }
 
-/* The one external link uses the console's link token, not the UA blue. */
-.watch-attrib a {
-  color: var(--c-sar);
-  text-decoration: none;
-}
-
-.watch-attrib a:hover {
-  text-decoration: underline;
-}
+.watch-live.is-delayed .watch-live-dot { background: var(--st-degraded); }
 
 /* Cursor position: bottom-left, mono, above the scale bar. */
 .watch-cursor {
@@ -143,18 +150,15 @@
   left: 10px;
   bottom: 34px;
   z-index: 4;
-  padding: 1px 5px;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  padding: 1px var(--sp-1);
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  color: var(--text-3);
   white-space: nowrap;
   pointer-events: none;
 }
 
-/* Standard controls, drawn flat: zoom, compass reset. */
+/* Zoom group: one stacked segmented control, top-right. */
 .watch-map-controls {
   position: absolute;
   top: 10px;
@@ -162,67 +166,48 @@
   z-index: 4;
   display: flex;
   flex-direction: column;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  overflow: hidden;
 }
 
 .watch-map-btn {
-  width: 26px;
-  height: 26px;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--c-line);
-  border-radius: 0;
+  border-bottom: 1px solid var(--line-1);
   background: transparent;
-  color: var(--c-text-2);
+  color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--fs-13);
   line-height: 1;
   cursor: pointer;
 }
 
-.watch-map-btn:last-child {
-  border-bottom: 0;
-}
+.watch-map-btn:last-child { border-bottom: 0; }
 
-.watch-map-btn:hover {
-  background: var(--c-panel-raised);
-  color: var(--c-text-1);
-}
+.watch-map-btn:hover { background: var(--surface-3); color: var(--text-1); }
 
-.watch-map-btn.is-compass {
-  font-size: 11px;
-  font-weight: 500;
-}
+.watch-map-btn.is-compass { font-size: var(--fs-11); font-weight: var(--fw-medium); }
 
-.watch-map-btn:focus-visible {
-  outline: 1px solid var(--c-focus);
-  outline-offset: -1px;
-}
-
-/* Layer toggles: a small checkbox panel under the controls, top-right. */
+/* Layer legend: a small panel under the zoom group. */
 .watch-layers {
   position: absolute;
-  top: 98px;
+  top: 106px;
   right: 10px;
   z-index: 4;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 6px 8px;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  padding: var(--sp-2);
 }
 
 .watch-layer {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 14px;
-  color: var(--c-text-2);
+  color: var(--text-2);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -231,16 +216,38 @@
   width: 11px;
   height: 11px;
   margin: 0;
-  accent-color: var(--c-text-2);
+  accent-color: var(--text-2);
 }
 
-/* MapLibre's scale bar, made to match the flat chrome. */
+/* Attribution stays a quiet line: the status bar owns the full sources. */
+.watch-attrib {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 3;
+  max-width: calc(100% - 220px);
+  padding: 1px var(--sp-1);
+  background: var(--surface-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  font-size: var(--fs-11);
+  color: var(--text-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-attrib a { color: var(--text-3); text-decoration: none; }
+
+.watch-attrib a:hover { text-decoration: underline; }
+
+/* MapLibre's scale bar, made to match the chrome. */
 .watch-stage .maplibregl-ctrl-scale {
-  background: var(--c-panel);
-  border-color: var(--c-line-strong);
-  color: var(--c-text-3);
+  background: var(--surface-2);
+  border-color: var(--line-2);
+  color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-11);
   line-height: 12px;
 }
 
@@ -251,50 +258,48 @@
   position: absolute;
   left: 0;
   top: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
   line-height: 1;
-  text-transform: uppercase;
   white-space: nowrap;
   pointer-events: none;
   will-change: transform;
+  text-shadow: 0 2px 0 var(--geo-halo), 0 -2px 0 var(--geo-halo), 2px 0 0 var(--geo-halo), -2px 0 0 var(--geo-halo);
 }
 
-.watch-area-label.is-listening {
-  color: var(--c-text-3);
-}
+.watch-area-label.is-listening { color: var(--text-3); }
 
 .watch-area-label.is-watched {
-  color: var(--c-text-2);
+  color: var(--text-2);
+  outline: 1px dashed var(--map-area);
+  outline-offset: 3px;
 }
 
-/* Contact names sit beside their dot; the table on the right lists the rest. */
+/* Contact names sit beside their dot, in the same floating panel language. */
 .watch-contact-label {
   position: absolute;
   left: 0;
   top: 0;
-  padding: 1px 4px;
-  background: var(--c-panel);
-  border: 1px solid var(--c-line-strong);
-  border-radius: 0;
-  font-size: 11px;
-  font-weight: 500;
+  padding: 1px var(--sp-1);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
   line-height: 1.2;
-  color: var(--c-text-1);
+  color: var(--text-1);
   white-space: nowrap;
   pointer-events: none;
   will-change: transform;
 }
+
+.watch-contact-label.is-sanctioned { border-color: var(--st-sanctioned); color: var(--st-sanctioned); }
+
+.watch-contact-label.is-focus { border-color: var(--accent); }
 
 /* ---------- map shapes --------------------------------------------------- */
 
 .watch-map-overlay,
 .watch-map-labels,
-.watch-map-svg {
-  pointer-events: none;
-}
+.watch-map-svg { pointer-events: none; }
 
 /* A transparent disc wide enough for a thumb; the dot itself is 6 px across. */
 .watch-alert-hit {
@@ -304,13 +309,76 @@
   cursor: pointer;
 }
 
-.watch-alert-dot:hover circle:first-child {
-  stroke: var(--c-text-1);
+.watch-alert-dot:hover circle:first-child { stroke: var(--text-1); }
+
+.watch-alert-dot.is-selected circle:first-child { stroke: var(--accent); stroke-width: 1.5; }
+
+.watch-pulse {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
-.watch-alert-dot.is-selected circle:first-child {
-  stroke: var(--c-focus);
-  stroke-width: 1.5;
+.watch-area-mark-box {
+  stroke: var(--text-2);
+  stroke-width: 1;
+  opacity: 0.8;
+}
+
+.watch-area-mark:hover .watch-area-mark-box { stroke: var(--text-1); opacity: 1; }
+
+.watch-enc-ring { stroke: var(--text-1); stroke-width: 1; }
+
+.watch-radar-mark:hover .watch-enc-ring,
+.watch-radar-mark.is-selected .watch-enc-ring { stroke: var(--accent); stroke-width: 1.5; }
+
+.watch-hot-mark { stroke: var(--text-2); stroke-width: 1; }
+
+.watch-radar-mark:hover .watch-hot-mark { stroke: var(--text-1); }
+
+.watch-radar-mark,
+.watch-area-mark { cursor: pointer; }
+
+/* ---------- timeline: map timeline, receivers under the ships ------------- */
+
+.watch-timeline {
+  height: 56px;
+  padding: var(--sp-1) var(--sp-4);
+  background: var(--surface-1);
+  border-top: 1px solid var(--line-1);
+}
+
+.watch-timeline-lane {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 22px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+.watch-timeline-track {
+  position: relative;
+  flex: 1;
+  height: 14px;
+}
+
+.watch-outage {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--st-degraded-weak);
+  border-bottom: 2px solid var(--st-degraded);
+}
+
+.watch-dark-gap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--st-dark-weak);
+  border: 1px dashed var(--st-dark);
 }
 
 /* ---------- events rail -------------------------------------------------- */
@@ -323,8 +391,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--c-panel);
-  border-right: 1px solid var(--c-line);
+  background: var(--surface-1);
+  border-right: 1px solid var(--line-1);
 }
 
 .watch-events-head {
@@ -333,119 +401,116 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  height: 32px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--c-line);
+  height: 36px;
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--line-1);
 }
 
 .watch-events-head h2 {
   margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
 }
+
+.watch-events-head.is-sub { height: 30px; background: var(--surface-2); }
 
 .watch-count {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
 .watch-filters {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--c-line);
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line-1);
 }
 
+/* Reserve the filter block's height before the data arrives. */
+.watch-filters.is-loading { min-height: 116px; }
+
+.watch-search {
+  width: 100%;
+  height: var(--ctl-h);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+}
+
+.watch-search::placeholder { color: var(--text-4); }
+
+/* Kind chips: one grid row, dashed when off, ice when on. */
 .watch-filter-kinds {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, auto);
   gap: 4px;
+  justify-content: space-between;
 }
 
 .watch-kind {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 21px;
-  padding: 0 5px;
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  gap: 2px;
+  height: 22px;
+  padding: 0 3px;
+  border: 1px dashed var(--line-1);
+  border-radius: var(--r-1);
   background: transparent;
-  color: var(--c-text-3);
-  font-family: inherit;
-  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.watch-kind:hover {
-  border-color: var(--c-line-strong);
-  color: var(--c-text-2);
-}
+.watch-kind:hover { border-color: var(--line-3); color: var(--text-2); }
 
 .watch-kind[aria-pressed="true"] {
-  border-color: var(--c-line-strong);
-  background: var(--c-panel-raised);
-  color: var(--c-text-1);
+  border: 1px solid var(--line-2);
+  background: var(--surface-sel);
+  color: var(--text-1);
 }
 
 .watch-kind-count {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--c-text-3);
-}
-
-.watch-filter-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.watch-select {
-  flex: 1;
-  min-width: 0;
-  height: 23px;
-  padding: 0 4px;
-  border: 1px solid var(--c-line);
-  border-radius: 0;
-  background: var(--c-panel);
-  color: var(--c-text-2);
-  font-family: inherit;
-  font-size: 11px;
-}
-
-.watch-window {
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}.watch-seg {
   display: flex;
   flex: none;
-}
-
-.watch-window-btn {
-  height: 23px;
-  padding: 0 6px;
-  border: 1px solid var(--c-line);
-  border-radius: 0;
+  height: var(--ctl-h);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}.watch-seg > * {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  padding: 0 var(--sp-2);
+  border: 0;
   background: transparent;
-  color: var(--c-text-3);
+  color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-11);
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
+}.watch-seg > * + * { border-left: 1px solid var(--line-1); }.watch-seg > [aria-pressed="true"] {
+  background: var(--surface-sel);
+  box-shadow: inset 0 -1px 0 var(--accent);
+  color: var(--text-1);
 }
 
-.watch-window-btn + .watch-window-btn {
-  border-left: 0;
-}
-
-.watch-window-btn[aria-pressed="true"] {
-  background: var(--c-panel-raised);
-  color: var(--c-text-1);
-}
+/* ---------- queue rows --------------------------------------------------- */
 
 .watch-rows {
   flex: 1;
@@ -456,24 +521,21 @@
   list-style: none;
 }
 
-.watch-rows > li {
-  border-bottom: 1px solid var(--c-line);
-}
+.watch-rows > li { border-bottom: 1px solid var(--line-1); }
 
-/* A dense table row as a button: square, name, live dot, UTC + relative time,
-   then tag and area underneath. */
+/* A queue row: state gutter, name over tag, time over area. */
 .watch-row {
   display: grid;
-  grid-template-columns: 7px minmax(0, 1fr) auto auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
-  column-gap: 6px;
-  row-gap: 1px;
+  column-gap: var(--sp-1);
+  row-gap: 2px;
   align-items: center;
+  align-content: center;
   width: 100%;
-  min-height: 36px;
-  padding: 5px 10px 5px 8px;
+  height: var(--row-h-list);
+  padding: 0 var(--sp-4);
   border: 0;
-  border-left: 2px solid transparent;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -481,84 +543,60 @@
   cursor: pointer;
 }
 
-.watch-row:hover {
-  background: var(--c-panel-raised);
-}
+.watch-row:hover { background: var(--surface-2); }
 
-.watch-row[aria-current="true"] {
-  border-left-color: var(--c-focus);
-  background: var(--c-panel-raised);
-}
-
-.watch-square {
-  display: inline-block;
-  flex: none;
-  width: 6px;
-  height: 6px;
-  background: var(--c-text-3);
-}
-
-.watch-row .watch-square {
-  grid-column: 1;
-  grid-row: 1 / 3;
-  align-self: start;
-  margin-top: 5px;
-}
+.watch-row[aria-current="true"] { background: var(--surface-sel); box-shadow: inset 2px 0 0 var(--accent); }
 
 .watch-row-name {
   grid-column: 2;
   grid-row: 1;
   min-width: 0;
+  padding-right: 10px;
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-medium);
   line-height: 1.2;
-  color: var(--c-text-1);
+  color: var(--text-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .watch-row-live {
-  grid-column: 3;
+  grid-column: 2;
   grid-row: 1;
   justify-self: end;
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--c-live);
+  background: var(--st-ok);
 }
 
 .watch-row-time {
-  grid-column: 4;
-  grid-row: 1 / 3;
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 1px;
+  justify-self: end;
   font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.15;
-  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  line-height: 1.2;
+  color: var(--text-2);
   white-space: nowrap;
 }
 
-.watch-row-utc {
-  font-variant-numeric: tabular-nums;
-}
+.watch-row-utc { font-variant-numeric: var(--numeric); }
 
-.watch-row-rel {
-  font-size: 10px;
-  color: var(--c-text-3);
-}
+.watch-row-rel { font-size: var(--fs-11); color: var(--text-3); }
 
 .watch-row-tag {
   grid-column: 2;
   grid-row: 2;
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.2;
-  color: var(--c-text-3);
+  color: var(--text-3);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -569,40 +607,24 @@
   justify-self: end;
   max-width: 120px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.2;
-  color: var(--c-text-3);
+  color: var(--text-3);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Colour means the kind, and it is the same on the map, the square and the tag. */
-.watch-row.is-dark .watch-square,
-.watch-kind.is-dark .watch-square {
-  background: var(--c-risk-high);
-}
-
-.watch-row.is-spoof .watch-square,
-.watch-kind.is-spoof .watch-square {
-  background: var(--c-prism-stroke);
-}
-
-.watch-row.is-jump .watch-square,
-.watch-kind.is-jump .watch-square {
-  background: var(--c-risk-high);
-}
-
-.watch-row.is-meeting .watch-square,
-.watch-kind.is-meeting .watch-square,
-.watch-row.is-sanctioned_stop .watch-square,
-.watch-kind.is-sanctioned_stop .watch-square {
-  background: var(--c-gap);
+/* Group header: sentence case, quiet, no rule. */
+.watch-group-head {
+  padding: var(--sp-3) var(--sp-4) 6px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
 .watch-empty {
-  padding: 16px 10px;
-  font-size: 12px;
-  color: var(--c-text-3);
+  padding: var(--sp-4);
+  font-size: var(--fs-12);
+  color: var(--text-3);
 }
 
 /* Pinned to the bottom of the rail: what the list deliberately left out. */
@@ -610,31 +632,115 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--c-line);
-  font-size: 11px;
-  color: var(--c-text-3);
+  gap: var(--sp-1);
+  height: 36px;
+  padding: 0 var(--sp-4);
+  border-top: 1px solid var(--line-1);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
-.watch-foot-sep {
-  color: var(--c-line-strong);
-}
+.watch-foot-sep { color: var(--text-4); }
 
 .watch-export {
   margin-left: auto;
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--c-sar);
-  font-family: inherit;
-  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
   cursor: pointer;
 }
 
-.watch-export:hover {
-  text-decoration: underline;
+.watch-export:hover { color: var(--text-1); text-decoration: underline; }
+
+/* Skeleton rows: same height as a real row, so nothing jumps on load. */
+.watch-skel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  height: var(--row-h-list);
+  padding: 0 var(--sp-4);
 }
+
+.watch-skel-bar {
+  height: 6px;
+  background: var(--line-2);
+  opacity: 0.6;
+}
+
+.watch-skel-bar.is-wide { width: 62%; }
+
+.watch-skel-bar.is-narrow { width: 34%; opacity: 0.35; }
+
+/* New rows slide in and carry a brief ice flash. */
+@keyframes watch-slide {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes watch-flash {
+  from {
+    background: var(--accent-weak);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* ---------- watched areas in the rail ------------------------------------ */
+
+.watch-areas { flex: none; border-top: 1px solid var(--line-1); }
+
+.watch-areas-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-area-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.watch-area-row:hover { background: var(--surface-2); color: var(--text-1); }
+
+.watch-area-row[aria-current="true"] {
+  background: var(--surface-sel);
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text-1);
+}
+
+.watch-area-row-n {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+.watch-area-row-n.is-hot { color: var(--text-1); }
+
+.watch-rows.is-inline { flex: none; overflow: visible; }
+
+.watch-area-empty { padding: var(--sp-3) 0; }
 
 /* ---------- event details ------------------------------------------------ */
 
@@ -643,91 +749,85 @@
   grid-row: 1;
   min-width: 0;
   overflow-y: auto;
-  background: var(--c-panel);
-  border-left: 1px solid var(--c-line);
+  background: var(--surface-1);
+  border-left: 1px solid var(--line-1);
 }
 
-.watch-details[hidden] {
-  display: none;
-}
+.watch-details[hidden] { display: none; }
 
 .watch-details-head {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 32px;
-  padding: 0 10px;
-  background: var(--c-panel);
-  border-bottom: 1px solid var(--c-line);
+  gap: var(--sp-3);
+  height: 44px;
+  padding: 0 var(--sp-4);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--line-1);
 }
 
 .watch-back {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--c-text-2);
-  font-family: inherit;
-  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
   cursor: pointer;
 }
 
-.watch-back:hover {
-  color: var(--c-text-1);
-}
+.watch-back:hover { color: var(--text-1); }
 
 .watch-details-title {
   margin-left: auto;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-3);
+  overflow: hidden;
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  line-height: 1.15;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Label / value, two columns, one hairline between rows. */
+.watch-details-body { padding: var(--sp-4); }
+
+/* Label / value, 112 px keys, one hairline between rows and none after the last. */
 .watch-fields {
   display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
+  grid-template-columns: 112px minmax(0, 1fr);
   margin: 0;
-  padding: 2px 10px;
-  border-bottom: 1px solid var(--c-line);
 }
 
 .watch-fields dt,
 .watch-fields dd {
   min-width: 0;
   margin: 0;
-  padding: 5px 0;
-  border-top: 1px solid var(--c-line);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line-1);
 }
 
-.watch-fields dt:nth-of-type(1),
-.watch-fields dd:nth-of-type(1) {
-  border-top: 0;
-}
+.watch-fields dt:last-of-type,
+.watch-fields dd:last-of-type { border-bottom: 0; }
 
 .watch-fields dt {
-  padding-right: 8px;
-  font-size: 11px;
-  color: var(--c-text-3);
+  padding-right: var(--sp-2);
+  font-size: var(--fs-13);
+  color: var(--text-3);
 }
 
 .watch-fields dd {
-  font-size: 12px;
-  color: var(--c-text-1);
+  font-size: var(--fs-13);
+  color: var(--text-1);
   overflow-wrap: anywhere;
 }
 
-.watch-vessel {
-  font-weight: 500;
-}
+.watch-vessel { font-size: var(--fs-14); font-weight: var(--fw-medium); }
 
 .watch-mono {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric);
 }
 
 .watch-time-cell {
@@ -737,145 +837,378 @@
   gap: 6px;
 }
 
-.watch-rel {
-  font-size: 11px;
-  color: var(--c-text-3);
-}
+.watch-rel { font-size: var(--fs-11); color: var(--text-3); }
 
 .watch-ongoing {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: var(--fs-13);
 }
 
-/* ---------- nearby vessels ----------------------------------------------- */
-
-.watch-nearby {
-  padding: 8px 10px 4px;
+/* The panel's figure row: three equal columns, hairlines between. */
+.watch-figs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--sp-4) 0;
 }
 
-.watch-nearby h3 {
-  margin: 0 0 5px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-3);
+.watch-fig { padding: 0 var(--sp-3); }
+
+.watch-fig + .watch-fig { border-left: 1px solid var(--line-1); }
+
+.watch-fig:first-child { padding-left: 0; }
+
+.watch-fig-value {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--fs-28);
+  font-weight: var(--fw-light);
+  line-height: 1.15;
+  color: var(--text-1);
+}
+
+.watch-fig-label {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+/* ---------- nearby vessels and data tables ------------------------------- */
+
+.watch-nearby { padding: 0; }
+
+.watch-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  height: 30px;
+  margin: var(--sp-5) calc(-1 * var(--sp-4)) var(--sp-2);
+  padding: 0 var(--sp-4);
+  border-top: 1px solid var(--line-1);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--surface-2);
+}
+
+.watch-section-head h3 {
+  margin: 0;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
 }
 
 .watch-nearby-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-12);
   table-layout: fixed;
 }
 
 .watch-nearby-table th,
 .watch-nearby-table td {
-  width: 20%;
-}
-
-.watch-nearby-table th:nth-child(1) {
-  width: 27%;
-}
-
-.watch-nearby-table th:nth-child(2) {
-  width: 21%;
-}
-
-.watch-nearby-table th:nth-child(3) {
-  width: 11%;
-}
-
-.watch-nearby-table th:nth-child(4) {
-  width: 18%;
-}
-
-.watch-nearby-table th:nth-child(5) {
-  width: 23%;
-}
-
-.watch-nearby-table th {
-  padding: 3px;
-  border-bottom: 1px solid var(--c-line-strong);
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--c-text-3);
-  text-align: left;
+  padding: 0 var(--sp-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.watch-nearby-table th {
+  height: 26px;
+  border-bottom: 1px solid var(--line-2);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-regular);
+  color: var(--text-3);
+  text-align: left;
+}
+
 .watch-nearby-table td {
-  padding: 3px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--c-line);
-  color: var(--c-text-2);
-  white-space: normal;
-  overflow-wrap: anywhere;
+  height: var(--row-h);
+  border-bottom: 1px solid var(--line-1);
+  color: var(--text-2);
 }
 
-.watch-nearby-table tbody tr {
-  cursor: pointer;
-}
+.watch-nearby-table th:nth-child(1) { width: 22%; }
+.watch-nearby-table th:nth-child(2) { width: 27%; }
+.watch-nearby-table th:nth-child(3) { width: 11%; }
+.watch-nearby-table th:nth-child(4) { width: 17%; }
+.watch-nearby-table th:nth-child(5) { width: 23%; }
 
-.watch-nearby-table tbody tr:hover {
-  background: var(--c-panel-raised);
-}
+.watch-nearby-table tbody tr { cursor: pointer; }
+
+.watch-nearby-table tbody tr:hover { background: var(--surface-2); }
 
 .watch-nearby-table tbody tr[aria-current="true"] {
-  outline: 1px solid var(--c-focus);
+  background: var(--surface-sel);
+  outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
 
-.watch-nearby-name {
-  color: var(--c-text-1);
+.watch-nearby-name { color: var(--text-1); }
+
+.watch-nearby-table .watch-num { text-align: right; font-variant-numeric: var(--numeric); }
+
+.watch-nearby-table th:nth-child(3) { text-align: right; }
+
+/* A sanctioned contact is a state tag on its own cell, not a tinted row. */
+.watch-nearby-table tbody tr.is-sanctioned td:last-child { color: var(--st-sanctioned); }
+
+.tag.sanc {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--st-sanctioned);
+  border-radius: var(--r-1);
+  background: var(--st-sanctioned-weak);
+  color: var(--st-sanctioned);
+  font-size: var(--fs-11);
+  line-height: 16px;
+  white-space: nowrap;
 }
 
-.watch-nearby-table .watch-num,
-.watch-nearby-table th:last-child {
-  text-align: right;
+/* Names wrap instead of truncating; the other columns stay on one line. */
+.watch-nearby-table td.watch-nearby-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
-/* Red is reserved for the sanctions hit, the one thing on this panel that is. */
-.watch-nearby-table tbody tr.is-sanctioned td {
-  color: var(--c-risk-high);
-}
+.watch-spoof-table th:nth-child(1) { width: 40%; }
+.watch-spoof-table th:nth-child(2),
+.watch-spoof-table th:nth-child(3),
+.watch-spoof-table th:nth-child(4) { width: 20%; }
+.watch-spoof-table th:nth-child(n + 2) { text-align: right; }
 
 .watch-none {
-  padding: 4px 0;
-  font-size: 12px;
-  color: var(--c-text-3);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-12);
+  color: var(--text-3);
 }
 
 .watch-other {
-  padding: 8px 10px 16px;
-  font-size: 11px;
-  color: var(--c-text-3);
+  padding: var(--sp-2) 0 var(--sp-4);
+  font-size: var(--fs-11);
+  color: var(--text-3);
 }
 
-/* ---------- focus -------------------------------------------------------- */
+.watch-gapnote {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-left: 2px solid var(--st-degraded);
+  background: var(--st-degraded-weak);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--st-degraded);
+}
 
-.watch-row:focus-visible,
+/* "Also in reach": closed by default, so the answer stays above the fold. */
+.watch-also { margin-top: var(--sp-4); border-top: 1px solid var(--line-1); }
+
+.watch-also summary {
+  height: 32px;
+  padding: 0;
+  font-size: var(--fs-12);
+  line-height: 32px;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.watch-also summary::-webkit-details-marker { display: none; }
+
+.watch-also summary::before {
+  content: "+";
+  display: inline-block;
+  width: 14px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.watch-also[open] summary::before { content: "\2212"; }
+
+/* ---------- Hormuz radar panel ------------------------------------------- */
+
+.watch-radar-dark { color: var(--st-dark); }
+
+.watch-radar-chartbox { padding: var(--sp-2) 0; border-bottom: 1px solid var(--line-1); }
+
+.watch-radar-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+.watch-radar-play {
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.watch-radar-play:hover { background: var(--surface-2); }
+
+.watch-radar-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: var(--sp-1);
+  overflow: visible;
+}
+
+.watch-radar-bar { fill: var(--st-radar); }
+
+.watch-radar-bar.is-muted { fill: var(--text-4); opacity: 0.5; }
+
+.watch-radar-bar.is-selected { stroke: var(--accent); stroke-width: 1; }
+
+.watch-radar-hit { fill: transparent; cursor: pointer; }
+
+.watch-radar-median {
+  stroke: var(--text-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.watch-radar-playhead {
+  fill: var(--accent);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.watch-radar-axis {
+  fill: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.watch-radar-note {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+.watch-radar-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watch-radar-list > li { border-bottom: 1px solid var(--line-1); }
+
+.watch-radar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: center;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.watch-radar-row:hover { background: var(--surface-2); }
+
+.watch-radar-row[aria-current="true"] {
+  background: var(--surface-sel);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.watch-radar-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-radar-row-time { color: var(--text-3); }
+
+.watch-radar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+
+.watch-radar-foot a { color: var(--text-2); text-decoration: none; }
+
+.watch-radar-foot a:hover { text-decoration: underline; }.watch-row:focus-visible,
 .watch-back:focus-visible,
 .watch-kind:focus-visible,
-.watch-window-btn:focus-visible,
+.watch-seg > *:focus-visible,
 .watch-export:focus-visible,
-.watch-select:focus-visible,
-.watch-nearby-table tbody tr:focus-visible {
-  outline: 1px solid var(--c-focus);
-  outline-offset: -1px;
+.watch-search:focus,
+.watch-area-row:focus-visible,
+.watch-radar-row:focus-visible,
+.watch-radar-play:focus-visible,
+.watch-radar-hit:focus-visible,
+.watch-map-btn:focus-visible,
+.watch-nearby-table tbody tr:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* ---------- motion: only when the viewer allows it ------------------------ */
+
+@media (prefers-reduced-motion: no-preference) {.watch-row,
+.watch-area-row,
+.watch-radar-row,
+.watch-kind {
+    transition: background-color 160ms ease-out, box-shadow 160ms ease-out, border-color 160ms ease-out;
+  }
+
+  .watch-details:not([hidden]) {
+    animation: watch-focus-in 240ms ease-out;
+  }
+
+  .watch-rows > li.is-new {
+    animation: watch-slide 280ms ease-out, watch-flash 2400ms ease-out;
+  }
+
+  .watch-pulse {
+    animation: watch-pulse 1200ms ease-out forwards;
+  }
 }
 
-.watch-nearby-table tbody tr:focus-visible {
-  outline-offset: -1px;
+@keyframes watch-focus-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-/* ---------- narrower desktops: the event list yields to the detail panel -- */
+@keyframes watch-pulse {
+  from {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3);
+  }
+}
+
+/* ---------- narrower desktops: the queue yields to the field table ------- */
 
 @media (max-width: 1180px) {
   .main.watch-main.is-focus {
-    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1fr) var(--rail-r-w);
   }
 
   .main.watch-main.is-focus > .watch-events {
@@ -891,19 +1224,19 @@
   }
 }
 
-/* ---------- phone: map on top, events below, details as a sheet ---------- */
+/* ---------- phone: map on top, queue below, focus as a sheet ------------- */
 
 @media (max-width: 760px) {
   .main.watch-main,
   .main.watch-main.is-focus {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 55vh auto;
+    grid-template-rows: 55vh auto var(--statusbar-h);
     height: auto;
     overflow: visible;
   }
 
   .main.watch-main.is-focus {
-    grid-template-rows: 72vh auto;
+    grid-template-rows: 72vh auto var(--statusbar-h);
   }
 
   .main.watch-main > .watch-stage {
@@ -925,628 +1258,20 @@
     max-height: none;
     overflow: visible;
     border-right: 0;
-    border-top: 1px solid var(--c-line);
+    border-top: 1px solid var(--line-1);
   }
 
   .main.watch-main.is-focus > .watch-events {
     display: none;
   }
 
-  .watch-row {
-    min-height: 44px;
-  }
-
   .watch-rows {
     overflow: visible;
   }
 
-  .watch-foot {
-    margin-top: 0;
-  }
-
-  .watch-back {
-    min-height: 32px;
-    font-size: 12px;
-  }
-
-  .watch-nearby-table tbody tr {
-    min-height: 36px;
-  }
-
-  /* Focus is a sheet over the bottom of the map, not a second column. */
-  .watch-details {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    max-height: 60vh;
-    border-left: 0;
-    border-top: 1px solid var(--c-line-strong);
-    border-radius: 0;
-    background: var(--c-panel);
-  }
-
-  .watch-details[hidden] {
-    display: none;
-  }
-
-  .watch-live {
-    top: 8px;
-    left: 8px;
-    max-width: calc(100% - 56px);
-  }
-
-  .watch-attrib {
-    left: 8px;
-    right: auto;
-    bottom: 8px;
-    max-width: calc(100% - 56px);
-  }
-
-  .watch-layers {
-    top: 96px;
-    right: 8px;
-  }
-}
-
-/* =========================================================================
-   Operations-console layer: status bar, panel headers, live motion, radar.
-   Spacing steps are multiples of 4 px; headers are small caps with a count.
-   ========================================================================= */
-
-/* Status bar: one row under the three columns. */
-.main.watch-main {
-  grid-template-rows: minmax(0, 1fr) 24px;
-}
-
-.watch-events {
-  grid-row: 1;
-}
-
-.watch-status {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  height: 24px;
-  padding: 0 12px;
-  background: var(--c-panel);
-  border-top: 1px solid var(--c-line);
-  font-size: 11px;
-  color: var(--c-text-3);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.watch-status-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.watch-status-k {
-  margin-right: 4px;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-3);
-  opacity: 0.8;
-}
-
-.watch-status a {
-  color: var(--c-text-2);
-  text-decoration: none;
-}
-
-.watch-status a:hover {
-  text-decoration: underline;
-}
-
-.watch-status .watch-mono {
-  color: var(--c-text-2);
-}
-
-.watch-status-item.is-keys {
-  margin-left: auto;
-}
-
-.watch-status-item.is-clock {
-  padding-left: 12px;
-  border-left: 1px solid var(--c-line);
-}
-
-.watch-kbd {
-  display: inline-block;
-  min-width: 16px;
-  margin: 0 2px 0 4px;
-  padding: 0 4px;
-  border: 1px solid var(--c-line-strong);
-  border-radius: 0;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 14px;
-  text-align: center;
-  color: var(--c-text-2);
-}
-
-/* Freshness chip: amber only when the recorder is behind. */
-.watch-live.is-delayed {
-  color: var(--c-gap);
-  border-color: var(--c-gap);
-}
-
-.watch-live.is-delayed .watch-live-dot {
-  background: var(--c-gap);
-}
-
-/* Panel headers: small caps and a count, a hairline under. */
-.watch-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 28px;
-  margin: 0;
-  padding: 0 10px;
-  border-top: 1px solid var(--c-line);
-  border-bottom: 1px solid var(--c-line);
-  background: var(--c-panel-raised);
-}
-
-.watch-section-head h3 {
-  margin: 0;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-2);
-}
-
-.watch-nearby {
-  padding: 0;
-}
-
-.watch-nearby > .watch-none,
-.watch-nearby > .watch-nearby-table {
-  margin: 8px 10px 8px;
-  width: calc(100% - 20px);
-}
-
-.watch-events-head.is-sub {
-  border-top: 1px solid var(--c-line);
-  height: 28px;
-  background: var(--c-panel-raised);
-}
-
-/* Reserve the filter block's height before the data arrives. */
-.watch-filters.is-loading {
-  min-height: 94px;
-}
-
-.watch-search {
-  width: 100%;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--c-line);
-  border-radius: 0;
-  background: var(--c-bg);
-  color: var(--c-text-1);
-  font: inherit;
-  font-size: 12px;
-}
-
-.watch-search::placeholder {
-  color: var(--c-text-3);
-}
-
-.watch-search:focus {
-  outline: 1px solid var(--c-focus);
-  outline-offset: -1px;
-}
-
-/* Watched areas in the rail: every area on the map is also a row. */
-.watch-areas {
-  flex: none;
-  border-top: 1px solid var(--c-line);
-}
-
-.watch-areas-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.watch-area-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 24px;
-  padding: 0 10px 0 8px;
-  border: 0;
-  border-left: 2px solid transparent;
-  background: transparent;
-  color: var(--c-text-2);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.watch-area-row:hover {
-  background: var(--c-panel-raised);
-  color: var(--c-text-1);
-}
-
-.watch-area-row[aria-current="true"] {
-  border-left-color: var(--c-focus);
-  background: var(--c-panel-raised);
-  color: var(--c-text-1);
-}
-
-.watch-area-row:focus-visible,
-.watch-radar-row:focus-visible,
-.watch-radar-play:focus-visible {
-  outline: 1px solid var(--c-focus);
-  outline-offset: -1px;
-}
-
-.watch-area-row-n {
-  color: var(--c-text-3);
-}
-
-.watch-area-row-n.is-hot {
-  color: var(--c-text-1);
-}
-
-.watch-rows.is-inline {
-  flex: none;
-  overflow: visible;
-}
-
-.watch-area-empty {
-  padding: 12px 10px;
-}
-
-.watch-gapnote {
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--c-line);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--c-gap);
-}
-
-/* "Also in reach": closed by default, so the answer stays above the fold. */
-.watch-also {
-  border-top: 1px solid var(--c-line);
-}
-
-.watch-also summary {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 10px;
-  line-height: 28px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--c-text-2);
-  cursor: pointer;
-  list-style: none;
-  background: var(--c-panel-raised);
-}
-
-.watch-also summary::-webkit-details-marker {
-  display: none;
-}
-
-.watch-also summary::before {
-  content: "+";
-  display: inline-block;
-  width: 12px;
-  font-family: var(--font-mono);
-  color: var(--c-text-3);
-}
-
-.watch-also[open] summary::before {
-  content: "\2212";
-}
-
-.watch-also > .watch-nearby-table,
-.watch-also > .watch-none {
-  margin: 8px 10px 12px;
-  width: calc(100% - 20px);
-}
-
-/* Skeleton rows: same height as a real row, so nothing jumps on load. */
-.watch-skel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  height: 36px;
-  padding: 8px 10px;
-}
-
-.watch-skel-bar {
-  height: 6px;
-  background: var(--c-line);
-  opacity: 0.6;
-}
-
-.watch-skel-bar.is-wide {
-  width: 62%;
-}
-
-.watch-skel-bar.is-narrow {
-  width: 34%;
-  opacity: 0.35;
-}
-
-/* New alert rows slide in and carry a brief highlight. */
-.watch-rows > li.is-new {
-  animation:
-    watch-slide 280ms ease-out,
-    watch-flash 2400ms ease-out;
-}
-
-@keyframes watch-slide {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes watch-flash {
-  from {
-    background: rgba(255, 255, 255, 0.12);
-  }
-  to {
-    background: transparent;
-  }
-}
-
-/* ---------- map: live pulse, markers, trail ------------------------------- */
-
-.watch-pulse {
-  fill: none;
-  stroke: var(--c-ais);
-  stroke-width: 1;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: watch-pulse 1200ms ease-out forwards;
-}
-
-@keyframes watch-pulse {
-  from {
-    opacity: 0.9;
-    transform: scale(0.6);
-  }
-  to {
-    opacity: 0;
-    transform: scale(3);
-  }
-}
-
-.watch-area-mark-box {
-  stroke: var(--c-text-2);
-  stroke-width: 1;
-  opacity: 0.8;
-}
-
-.watch-area-mark:hover .watch-area-mark-box {
-  stroke: var(--c-text-1);
-  opacity: 1;
-}
-
-.watch-enc-ring {
-  stroke: var(--c-text-1);
-  stroke-width: 1;
-}
-
-.watch-radar-mark:hover .watch-enc-ring,
-.watch-radar-mark.is-selected .watch-enc-ring {
-  stroke: var(--c-focus);
-  stroke-width: 1.5;
-}
-
-.watch-hot-mark {
-  stroke: var(--c-text-2);
-  stroke-width: 1;
-}
-
-.watch-radar-mark:hover .watch-hot-mark {
-  stroke: var(--c-text-1);
-}
-
-.watch-radar-mark,
-.watch-area-mark {
-  cursor: pointer;
-}
-
-/* ---------- Hormuz radar panel --------------------------------------------- */
-
-.watch-radar-dark {
-  color: var(--c-risk-high);
-}
-
-.watch-radar-chartbox {
-  padding: 8px 10px 8px;
-  border-bottom: 1px solid var(--c-line);
-}
-
-.watch-radar-chart-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 24px;
-  font-size: 11px;
-  color: var(--c-text-3);
-}
-
-.watch-radar-play {
-  height: 20px;
-  padding: 0 8px;
-  border: 1px solid var(--c-line-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--c-text-1);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.watch-radar-play:hover {
-  background: var(--c-panel-raised);
-}
-
-.watch-radar-chart {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin-top: 4px;
-  overflow: visible;
-}
-
-.watch-radar-bar {
-  fill: var(--c-risk-high);
-}
-
-.watch-radar-bar.is-muted {
-  fill: var(--c-text-3);
-  opacity: 0.4;
-}
-
-.watch-radar-bar.is-selected {
-  stroke: var(--c-focus);
-  stroke-width: 1;
-}
-
-.watch-radar-hit {
-  fill: transparent;
-  cursor: pointer;
-}
-
-.watch-radar-hit:focus-visible {
-  outline: 1px solid var(--c-focus);
-}
-
-.watch-radar-median {
-  stroke: var(--c-text-2);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  pointer-events: none;
-}
-
-.watch-radar-playhead {
-  fill: var(--c-focus);
-  opacity: 0.22;
-  pointer-events: none;
-}
-
-.watch-radar-axis {
-  fill: var(--c-text-3);
-  font-family: var(--font-mono);
-  font-size: 9px;
-}
-
-.watch-radar-note {
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--c-text-3);
-}
-
-.watch-radar-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.watch-radar-list > li {
-  border-bottom: 1px solid var(--c-line);
-}
-
-.watch-radar-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-  height: 28px;
-  padding: 0 10px 0 8px;
-  border: 0;
-  border-left: 2px solid transparent;
-  background: transparent;
-  color: var(--c-text-1);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.watch-radar-row:hover {
-  background: var(--c-panel-raised);
-}
-
-.watch-radar-row[aria-current="true"] {
-  border-left-color: var(--c-focus);
-  background: var(--c-panel-raised);
-}
-
-.watch-radar-row-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.watch-radar-row-time {
-  color: var(--c-text-3);
-}
-
-.watch-radar-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px 16px;
-  font-size: 11px;
-  color: var(--c-text-3);
-}
-
-.watch-radar-foot a {
-  color: var(--c-sar);
-  text-decoration: none;
-}
-
-.watch-radar-foot a:hover {
-  text-decoration: underline;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .watch-rows > li.is-new,
-  .watch-pulse {
-    animation: none;
-  }
-}
-
-@media (max-width: 760px) {
-  .main.watch-main,
-  .main.watch-main.is-focus {
-    grid-template-rows: 55vh auto auto;
-  }
-
-  .main.watch-main.is-focus {
-    grid-template-rows: 72vh auto auto;
-  }
-
   .watch-status {
     grid-row: 3;
-    gap: 12px;
+    gap: var(--sp-3);
   }
 
   .watch-status-item:first-child,
@@ -1559,91 +1284,73 @@
     border-left: 0;
   }
 
-  .main.watch-main > .watch-events {
-    grid-row: 2;
+  .watch-back {
+    min-height: 32px;
+    font-size: var(--fs-13);
   }
-}
 
-/* ---------- audit fixes: chips, names, spoof table, phone legend ---------- */
+  .watch-nearby-table tbody td {
+    height: 36px;
+  }
 
-.watch-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+  /* Focus is a sheet over the bottom of the map, not a second column. */
+  .watch-details {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    max-height: 60vh;
+    border-left: 0;
+    border-top: 1px solid var(--line-2);
+    border-radius: var(--r-2) var(--r-2) 0 0;
+    background: var(--surface-1);
+  }
 
-.watch-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 6px;
-  border: 1px solid var(--c-line);
-  border-radius: 0;
-  background: transparent;
-  color: var(--c-text-2);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
+  .watch-live {
+    top: var(--sp-2);
+    left: var(--sp-2);
+    max-width: calc(100% - 56px);
+  }
 
-.watch-chip .watch-mono {
-  color: var(--c-text-3);
-}
+  .watch-attrib {
+    left: var(--sp-2);
+    right: auto;
+    bottom: var(--sp-2);
+    max-width: calc(100% - 56px);
+  }
 
-.watch-chip:hover {
-  background: var(--c-panel-raised);
-}
-
-.watch-chip[aria-pressed="true"] {
-  border-color: var(--c-focus);
-  color: var(--c-text-1);
-}
-
-.watch-chip:focus-visible {
-  outline: 1px solid var(--c-focus);
-  outline-offset: -1px;
-}
-
-/* Names wrap instead of truncating; the other columns stay on one line. */
-.watch-nearby-table td.watch-nearby-name {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-}
-
-.watch-spoof-table th:nth-child(1) {
-  width: 40%;
-}
-
-.watch-spoof-table th:nth-child(2),
-.watch-spoof-table th:nth-child(3),
-.watch-spoof-table th:nth-child(4) {
-  width: 20%;
-}
-
-.watch-spoof-table th:nth-child(n + 2) {
-  text-align: right;
-}
-
-@media (max-width: 760px) {
   /* The legend would cover a quarter of a phone map: the layers stay at their defaults. */
   .watch-layers {
     display: none;
   }
 }
 
-/* Area chips enriched with alerts in the last 12 h and an hourly ship-count trace (#186). */
-.watch-chip .watch-chip-alerts {
-  color: var(--c-risk-high);
+/* ---------- V3 list: group headers, kind glyphs, segments (#200) ---------- */
+.watch-group-head {
+  padding: 12px 16px 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  list-style: none;
 }
 
-.watch-chip-spark {
+.watch-glyph {
+  display: inline-flex;
   flex: none;
+  width: 16px;
+  height: 16px;
 }
 
-.watch-chip-spark polyline {
-  fill: none;
-  stroke: var(--c-text-3);
-  stroke-width: 1;
+.watch-glyph svg {
+  display: block;
+}
+
+.watch-row > .watch-glyph {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.watch-seg > * {
+  justify-content: space-between;
+  gap: var(--sp-2);
 }

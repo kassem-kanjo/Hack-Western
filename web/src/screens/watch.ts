@@ -34,7 +34,6 @@ import { onVesselFocus } from "../components/SearchBox";
 import { topBar } from "../components/TopBar";
 import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
 import { fmtUtc } from "../format";
-import { alertBreakdown, fetchAreaStats, sparkline, totalAlerts } from "../model/areaStats";
 import { timeAgo } from "../model/liveFacts";
 import { LIVE_REGIONS, openLiveFeed, type LiveFeed } from "../model/liveFeed";
 import {
@@ -137,6 +136,43 @@ const KIND_NAME: Record<WatchAlertKind, string> = {
   radar_unmatched: "Radar",
 };
 
+/** Short filter-chip labels; the row tag keeps the full kind name. */
+const KIND_CHIP: Record<WatchAlertKind, string> = {
+  dark: "Dark",
+  sanctioned_stop: "Stopped",
+  spoof: "Spoof",
+  meeting: "Meeting",
+  jump: "Jump",
+  radar_unmatched: "Radar",
+};
+
+/** Glyph shapes: shape carries the kind, colour only repeats it (readable in greyscale). */
+const GLYPH_SVG: Record<WatchAlertKind, string> = {
+  dark: '<circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="24 8" transform="rotate(-60 8 8)"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/>',
+  sanctioned_stop: '<rect x="3" y="3" width="10" height="10" fill="currentColor"/>',
+  spoof: '<rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 3L13 13M13 3L3 13" stroke="currentColor" stroke-width="1.4"/>',
+  meeting: '<circle cx="6" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/>',
+  jump: '<path d="M3.5 11.5L8 4.5L12.5 11.5" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+  radar_unmatched: '<path d="M8 2.5L13.5 8L8 13.5L2.5 8Z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="1.1" fill="currentColor"/>',
+};
+
+const GLYPH_COLOR: Record<WatchAlertKind, string> = {
+  dark: "var(--st-dark)",
+  sanctioned_stop: "var(--st-sanctioned)",
+  spoof: "var(--st-spoof)",
+  meeting: "var(--text-1)",
+  jump: "var(--text-2)",
+  radar_unmatched: "var(--st-radar)",
+};
+
+/** The kind glyph as a 16 px SVG. The markup is a constant above, never user data. */
+function kindGlyph(kind: WatchAlertKind): HTMLElement {
+  const span = h("span", { class: "watch-glyph", "aria-hidden": "true" });
+  span.style.color = GLYPH_COLOR[kind];
+  span.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16">${GLYPH_SVG[kind]}</svg>`;
+  return span;
+}
+
 /** Toggle order: what Kassem asked for first, then the remaining contract kind. */
 const KIND_ORDER: WatchAlertKind[] = [
   "dark",
@@ -174,10 +210,12 @@ function areaName(data: WatchResponse, areaId: string | null): string {
   return data.areas.find((area) => area.id === areaId)?.name ?? areaId;
 }
 
-/** Severity, then most recent: the list's one order. */
+/** Happening now first, then earlier; most recent first inside each group. */
 function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
   return [...alerts].sort((a, b) => {
-    if (b.severity !== a.severity) return b.severity - a.severity;
+    const aLive = a.status === "ongoing" ? 0 : 1;
+    const bLive = b.status === "ongoing" ? 0 : 1;
+    if (aLive !== bLive) return aLive - bLive;
     const aStart = Date.parse(a.t_start);
     const bStart = Date.parse(b.t_start);
     if (Number.isFinite(aStart) && Number.isFinite(bStart) && aStart !== bStart) {
@@ -185,6 +223,12 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
     }
     return 0;
   });
+}
+
+/** The camera opens on the first alert's area; the world view stays one crumb away. */
+function openingBox(snapshot: WatchResponse): [number, number, number, number] | null {
+  const first = sortedAlerts(snapshot.alerts).find((alert) => alert.area_id !== null);
+  return snapshot.areas.find((area) => area.id === first?.area_id)?.bbox ?? null;
 }
 
 /** How long an alert has been (or was) live, for the detail table. */
@@ -501,30 +545,6 @@ function fmtDayLabel(iso: string): string {
   return `${d.getUTCDate()} ${months[d.getUTCMonth()]}`;
 }
 
-/** Ships heard inside one area's box. */
-function shipsInArea(snapshot: WatchResponse, area: WatchArea): number {
-  const [w, s, e, n] = area.bbox;
-  let count = 0;
-  for (const ship of snapshot.ships) {
-    if ((ship as { valid?: boolean }).valid === false) continue;
-    if (ship.lon >= w && ship.lon <= e && ship.lat >= s && ship.lat <= n) count += 1;
-  }
-  return count;
-}
-
-/** Areas too quiet to offer: fewer than 20 ships heard, no alert and not watched. */
-const MIN_SHIPS_FOR_CHIP = 20;
-
-function offeredAreas(snapshot: WatchResponse): { area: WatchArea; ships: number }[] {
-  const withAlerts = new Set(snapshot.alerts.map((alert) => alert.area_id));
-  return snapshot.areas
-    .map((area) => ({ area, ships: shipsInArea(snapshot, area) }))
-    .filter(
-      (entry) =>
-        entry.ships >= MIN_SHIPS_FOR_CHIP || entry.area.kind === "watched" || withAlerts.has(entry.area.id),
-    )
-    .sort((a, b) => b.ships - a.ships);
-}
 
 /** The ships that told the false point: where each is now, and how far off its report was. */
 function spoofContacts(snapshot: WatchResponse, alert: WatchAlert): WatchContact[] {
@@ -773,11 +793,9 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
   const state: FilterState = { query: "", kinds: new Set(KIND_ORDER), areaId: null, windowH: 12 };
   let kindButtons: { kind: WatchAlertKind; button: HTMLButtonElement; count: HTMLElement }[] = [];
-  let areaSelect: HTMLSelectElement | null = null;
   let areaChips: { id: string; chip: HTMLButtonElement }[] = [];
   let pendingFit: { bbox: [number, number, number, number] | null } | null = null;
   let searchInput: HTMLInputElement | null = null;
-  let windowButtons: { hours: WindowHours; button: HTMLButtonElement }[] = [];
   /** What the export button writes: exactly the rows on screen. */
   let exportRows: WatchAlert[] = [];
 
@@ -871,7 +889,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "data-alert-id": alert.id,
         "aria-current": alert.id === selectedId ? "true" : null,
       },
-      h("span", { class: "watch-square", "aria-hidden": "true" }),
+      kindGlyph(alert.kind),
       h("span", { class: "watch-row-name" }, alertName(alert)),
       alert.status === "ongoing"
         ? h("span", { class: "watch-row-live", title: "Ongoing", "aria-label": "ongoing" })
@@ -905,9 +923,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       entry.count.textContent = String(counts.get(entry.kind) ?? 0);
       setPressed(entry.button, state.kinds.has(entry.kind));
     }
-    if (areaSelect !== null) areaSelect.value = state.areaId ?? "";
-    for (const entry of areaChips) setPressed(entry.chip, entry.id === state.areaId);
-    for (const entry of windowButtons) setPressed(entry.button, entry.hours === state.windowH);
+    for (const entry of areaChips) setPressed(entry.chip, entry.id === (state.areaId ?? ""));
     hiddenRoutine.textContent = `${snapshot.counts.hidden_routine} routine events hidden`;
   }
 
@@ -923,9 +939,18 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       return;
     }
 
-    for (const alert of alerts) {
-      const item = h("li", { class: freshIds.has(alert.id) ? "is-new" : null }, alertRow(snapshot, alert, now));
-      rowsEl.append(item);
+    // Two groups, both already newest first: what is still going on, then the rest.
+    const groups: [string, WatchAlert[]][] = [
+      ["Happening now", alerts.filter((alert) => alert.status === "ongoing")],
+      ["Earlier", alerts.filter((alert) => alert.status !== "ongoing")],
+    ];
+    for (const [title, items] of groups) {
+      if (items.length === 0) continue;
+      rowsEl.append(h("li", { class: "watch-group-head", role: "presentation" }, `${title} · ${items.length}`));
+      for (const alert of items) {
+        const item = h("li", { class: freshIds.has(alert.id) ? "is-new" : null }, alertRow(snapshot, alert, now));
+        rowsEl.append(item);
+      }
     }
   }
 
@@ -958,28 +983,6 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   }
 
   /** One way to pick an area: filter the list and move the camera there (null = opening view). */
-  /** #186: add alerts (12 h) and a ship-count sparkline to each chip; plain chips if the API is down. */
-  async function enrichChips(): Promise<void> {
-    try {
-      const stats = await fetchAreaStats(abort.signal);
-      const byId = new Map(stats.map((stat) => [stat.id, stat]));
-      for (const { id, chip } of areaChips) {
-        const stat = byId.get(id);
-        if (stat === undefined) continue;
-        chip.querySelectorAll(".watch-chip-alerts, .watch-chip-spark").forEach((node) => node.remove());
-        const alerts = totalAlerts(stat);
-        if (alerts > 0) {
-          chip.append(h("span", { class: "watch-mono watch-chip-alerts" }, `${alerts}\u26a0`));
-        }
-        chip.append(sparkline(stat.sparkline));
-        const breakdown = alertBreakdown(stat);
-        chip.title = `${stat.name}: ${stat.ships_now} ships now, ${alerts} alerts in 12 h${breakdown ? ` (${breakdown})` : ""}`;
-      }
-    } catch {
-      // Chips stay as they are.
-    }
-  }
-
   function chooseArea(areaId: string | null): void {
     state.areaId = areaId;
     if (data !== null) {
@@ -1012,8 +1015,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           type: "button",
           "aria-pressed": state.kinds.has(kind) ? "true" : "false",
         },
-        h("span", { class: "watch-square", "aria-hidden": "true" }),
-        h("span", { class: "watch-kind-label" }, KIND_NAME[kind]),
+        kindGlyph(kind),
+        h("span", { class: "watch-kind-label" }, KIND_CHIP[kind]),
         count,
       );
       button.addEventListener("click", () => {
@@ -1028,68 +1031,40 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       kindButtons.push({ kind, button, count });
     }
 
-    const offered = offeredAreas(snapshot);
-    const select = h("select", { class: "watch-select", "aria-label": "Area" });
-    select.append(h("option", { value: "" }, "All areas"));
-    const watched = offered.filter((entry) => entry.area.kind === "watched").map((entry) => entry.area);
-    const listening = offered.filter((entry) => entry.area.kind === "listening").map((entry) => entry.area);
-    if (watched.length > 0) {
-      const group = h("optgroup", { label: "Watched" });
-      for (const area of watched) group.append(h("option", { value: area.id }, area.name));
-      select.append(group);
-    }
-    if (listening.length > 0) {
-      const group = h("optgroup", { label: "Listening" });
-      for (const area of listening) group.append(h("option", { value: area.id }, area.name));
-      select.append(group);
-    }
-    select.value = state.areaId ?? "";
-    select.addEventListener("change", () => chooseArea(select.value === "" ? null : select.value));
-    areaSelect = select;
-
-    // Chips: the listening areas with ships in them, busiest first, each with its count.
+    // One segmented control: All, then each area with alerts in the list's window, busiest first.
+    // The counts are fixed per snapshot (they ignore the kind and text filters).
+    const now = snapshotNow(snapshot);
+    const countIn = (areaId: string | null): number =>
+      snapshot.alerts.filter(
+        (alert) => (areaId === null || alert.area_id === areaId) && inWindow(alert, now, state.windowH),
+      ).length;
+    const areas = snapshot.areas
+      .filter((area) => countIn(area.id) > 0)
+      .sort((a, b) => countIn(b.id) - countIn(a.id));
     areaChips = [];
-    const chips = h("div", { class: "watch-chips", role: "group", "aria-label": "Listening area" });
-    for (const entry of offered.filter((item) => item.area.kind === "listening")) {
-      const chip = h(
-        "button",
-        { class: "watch-chip", type: "button", "aria-pressed": "false" },
-        h("span", null, entry.area.name),
-        h("span", { class: "watch-mono" }, entry.ships.toLocaleString("en-US")),
-      );
-      chip.addEventListener("click", () => chooseArea(state.areaId === entry.area.id ? null : entry.area.id));
-      chips.append(chip);
-      areaChips.push({ id: entry.area.id, chip });
-    }
-    void enrichChips();
-
-    windowButtons = [];
-    const windowGroup = h("div", { class: "watch-window", role: "group", "aria-label": "Window" });
-    for (const hours of [6, 12] as WindowHours[]) {
+    const seg = h("div", { class: "watch-seg", role: "group", "aria-label": "Area" });
+    const segment = (id: string, label: string, count: number, onPick: () => void): void => {
       const button = h(
         "button",
-        {
-          class: "watch-window-btn",
-          type: "button",
-          "aria-pressed": state.windowH === hours ? "true" : "false",
-        },
-        `${hours} h`,
+        { class: "watch-seg-btn", type: "button", "aria-pressed": "false" },
+        h("span", null, label),
+        h("span", { class: "watch-mono" }, String(count)),
       );
-      button.addEventListener("click", () => {
-        state.windowH = hours;
-        if (data !== null) {
-          syncFilters(data);
-          renderRows(data);
-        }
-      });
-      windowGroup.append(button);
-      windowButtons.push({ hours, button });
+      button.addEventListener("click", onPick);
+      seg.append(button);
+      areaChips.push({ id, chip: button });
+    };
+    segment("", "All", countIn(null), () => chooseArea(null));
+    for (const area of areas) {
+      segment(area.id, area.name, countIn(area.id), () =>
+        chooseArea(state.areaId === area.id ? null : area.id),
+      );
     }
 
     const search = h("input", {
       class: "watch-search",
       type: "search",
-      placeholder: "Filter this list",
+      placeholder: "Find a ship by name or MMSI",
       "aria-label": "Filter events by name or MMSI",
       autocomplete: "off",
       spellcheck: "false",
@@ -1111,19 +1086,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     searchInput = search;
 
     filtersEl.classList.remove("is-loading");
-    // The 6 h / 12 h switch only appears when it would change the list.
-    const matters = snapshot.alerts.some((alert) => {
-      if (alert.kind === "radar_unmatched") return false;
-      const age = snapshotNow(snapshot) - Date.parse(alert.t_start);
-      return age > 6 * 3_600_000 && age <= 12 * 3_600_000;
-    });
-    if (!matters) state.windowH = 12;
-    filtersEl.replaceChildren(
-      search,
-      chips,
-      kinds,
-      h("div", { class: "watch-filter-row" }, select, matters ? windowGroup : null),
-    );
+    filtersEl.replaceChildren(search, seg, kinds);
   }
 
   function renderEvents(snapshot: WatchResponse): void {
@@ -1764,6 +1727,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       },
       onSelectMarker: (kind, index) => radarMarkerHandler?.(kind, index),
       onSelectVessel: (mmsi) => openDossier(mmsi), // #182: any ship dot opens its dossier
+      opening: openingBox(snapshot),
     });
     setDossierTrackRenderer((track) => map?.showDossierTrack(track));
     searchFocusOff = onVesselFocus((vessel) => {
