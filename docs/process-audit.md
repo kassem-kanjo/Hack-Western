@@ -155,3 +155,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Code share since audit 21:** builders/lanes ~95%; Chief: orchestration, merges (#181), stack restarts.
 - **Rule breaks:** none new; declined to label days-old radar as "live" (kept honest, made it feel alive with a time-lapse instead).
 - **Change for next 30 min:** after every merge that touches the web app, rebuild web/dist and reload the running app; before saying "done", click every alert type and every area as a judge would.
+
+## Sat 21 Nov, 16:24 ET (audit 23, covers 15:50-16:24)
+- **Went well:** the Opus external audit set the priorities and found the worst bug (name-only sanctions labels on innocent ferries) — fixed within the hour (#189). Watch V3 (#192), Evidence (#195), validation tooling + toasts + tour (#193) merged; Hormuz validated against a control area with 35 sourced events (#194): +14.5 pts beyond control, ceasefire drop; 34 events honestly not claimed. Parallel Sonnet builders + DeepSeek lanes on issue branches, as Kassem asked.
+- **Went wrong:** three silent failures found late: the live stream sent heartbeats only (no DARKFLEET_AIS_DIR default), a blank case view (schema drift swallowed by an empty .catch), and a GFW parser crash on null days. My local make check output was not read before pushing #193 (CI caught the failing test).
+- **Code share since audit 22:** builders/lanes ~90%; Chief: IMO-only fix, live-stream default, parser fix, validation runs, merges.
+- **Rule breaks:** pushed without reading the local check result once (CI caught it).
+- **Change for next 30 min:** never chain a push after make check without gating on its exit code (&&); grep the codebase for empty .catch handlers and make them log.
