@@ -26,3 +26,5 @@ data/cases/
 data/snapshot/
 data/edge/
 data/sanctions/
+# agent working notes (kept private)
+.claude/agent-memory/
