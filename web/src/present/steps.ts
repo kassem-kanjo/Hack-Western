@@ -36,6 +36,7 @@ export type PresentToken =
   | "cluster_hours"
   | "cluster_kn"
   | "met"
+  | "dark_alert"
   | "recovery";
 
 export interface PresentCaption {
@@ -120,6 +121,8 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
         route: "watch",
         alert: "strongest",
         dock: "map-top-left",
+        // Only shown when the data has a ship that switched off; never over a stopped ship.
+        requires: "dark_alert",
         headline: "Our own receivers caught a ship switching off",
         line: "Here is where it could have gone, and the {met} ships it could have met.",
         fallback: {
