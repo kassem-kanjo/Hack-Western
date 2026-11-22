@@ -197,3 +197,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** docs/copy-rules.md (plain-word table); merge scripts wait until the CI run exists; second QA pass + CP3 Opus review running in parallel.
 - **Code share since audit 27:** builders/lanes ~85%; Chief: rate fix, zoom fix, Evidence menu, integration.
 - **Change for next 30 min:** when a decision removes something from the story, remove it from the screen in the same turn; write UI copy for someone who has never seen the project.
+
+## Sat 21 Nov, 19:52 ET (audit 29, covers 19:21-19:52)
+- **Went well:** V3 ready for Kassem's review. QA pass 2 confirmed round-1 fixes and found 8 more (Patrol buttons below the fold the worst); fixed in #236 and #238. CP3 Opus review: security clean (no injection/XSS, no secrets, gated controls); its P0 (live rate could read 0 if the Tiger sink died) and P1s fixed in #239, which also caught a sink bug that marked a file done before writing it. Hormuz list tightened to risk-tagged ships (4 -> 1, SEA 1 kept).
+- **Went wrong:** my own final run-through found beat 3 captioning a stopped ship as "switching off" (fixed in #240). My merge script's `pkill -f tiger_sink` also killed the sink's restart loop (pattern matched its command line); caught by checking pgrep afterwards. Builders twice left work uncommitted (their role rule says Chief commits) while my brief said commit; I reconciled both.
+- **Fixes:** live beat only shows real switch-offs; sink restarted under the loop; briefs will say "Chief commits" explicitly.
+- **Code share since audit 28:** builders ~85%; Chief: merges, Present honesty fix, final click-through.
+- **Change for next 30 min:** never pkill by a pattern that a supervisor loop also contains; kill by PID. Before showing Kassem, run the whole demo end to end myself, every time.
