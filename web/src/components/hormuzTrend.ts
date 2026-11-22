@@ -186,7 +186,7 @@ export function trendChart(trend: HormuzTrend): HTMLElement {
     root.append(svg("rect", { x: left, y: PAD.top, width: rightEdge - left, height: plotH, class: "trend-shade" }));
     // In the top padding, right-aligned to the shade: above the plot the lines never reach it.
     const note = svg("text", { x: rightEdge - 2, y: PAD.top - 6, class: "trend-note", "text-anchor": "end" });
-    note.textContent = `${windowLabel(win) ?? "After the strikes"}: ${now}% average`;
+    note.textContent = `${windowLabel(win) ?? "After the war began"}: ${now}% average`;
     root.append(note);
   }
   // The dashed line is the shade's left edge, and its only mark.
