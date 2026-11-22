@@ -30,6 +30,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 STATUS_PATH = "/edge_status.json"
@@ -55,6 +56,35 @@ _FORBIDDEN = 403
 _BAD_REQUEST = 400
 _TOO_MANY = 429
 _UNAVAILABLE = 503
+
+
+_verify_lock = threading.Lock()
+_verify_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+
+
+def _verified(path: str) -> dict[str, Any]:
+    """The sightings chain verdict, reused while the log's size and mtime are unchanged.
+
+    The Watch polls the sightings every 10 s and ``verify`` re-hashes every record, so without
+    this the Pi re-walks the whole log on each poll. Any append changes the size and mtime and
+    forces a fresh walk. The stat is taken before the walk, so a write that lands mid-walk
+    leaves a stale key and the next poll walks again.
+    """
+    from darkfleet.edge import sightings
+
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return sightings.verify(path)
+    key = (stat.st_size, stat.st_mtime_ns)
+    with _verify_lock:
+        cached = _verify_cache.get(path)
+    if cached is not None and cached[0] == key:
+        return dict(cached[1])
+    verdict = sightings.verify(path)
+    with _verify_lock:
+        _verify_cache[path] = (key, verdict)
+    return dict(verdict)
 
 
 class _StatusServer(ThreadingHTTPServer):
@@ -206,7 +236,7 @@ class _StatusHandler(BaseHTTPRequestHandler):
         path = str(self.server.sightings_path)  # type: ignore[attr-defined]
         records, _torn = sightings.read_records(path)
         body = json.dumps(
-            {"chain": sightings.verify(path), "sightings": list(reversed(records[-20:]))},
+            {"chain": _verified(path), "sightings": list(reversed(records[-20:]))},
             sort_keys=True,
         ).encode("utf-8")
         self._send(200, body, send_body, "application/json")

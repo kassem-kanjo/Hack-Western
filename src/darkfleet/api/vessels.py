@@ -273,8 +273,9 @@ def _file_index(path: Path) -> _FileIndex:
 def _recording(mmsi: int) -> _Recording:
     """The recorded fixes and static data for one MMSI, or an empty record."""
     files = _recording_files(recordings_root())
+    # Requests run on threads: another request may evict the same entry first, so no KeyError.
     for stale in set(_FILE_INDEX) - set(files):
-        del _FILE_INDEX[stale]
+        _FILE_INDEX.pop(stale, None)
     pings: list[Ping] = []
     info: VesselInfo | None = None
     for path in files:

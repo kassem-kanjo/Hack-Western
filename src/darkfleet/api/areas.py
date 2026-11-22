@@ -58,6 +58,9 @@ TIGER_CACHE_SECONDS = 20.0
 TIGER_CONNECT_TIMEOUT = 2
 """Seconds a request may wait for Tiger before the file-backed path takes over."""
 
+TIGER_RECONNECT_SECONDS = 60.0
+"""After a failed connect, requests use the files for this long before trying Tiger again."""
+
 SPARKLINE_MINUTES = 60
 """The Tiger sparkline covers the last sixty complete minutes."""
 
@@ -68,8 +71,11 @@ KIND_ORDER = ("dark", "sanctioned_stop", "spoof", "meeting", "jump", "radar_unma
 """Alert kinds in the order the UI reasons about them; unknown kinds follow alphabetically."""
 
 # Per-area Tiger readings, keyed by the candidate region names (most specific first).
-_tiger_cache: dict[tuple[str, ...], tuple[float, float, tuple[int, ...]]] = {}
+_tiger_cache: dict[tuple[str, ...], tuple[float, tuple[float, tuple[int, ...]] | None]] = {}
+"""Per-area readings with their expiry; ``None`` caches "no rows in Tiger" (files answer)."""
 _tiger_repo_instance: Any = None
+_tiger_down_until = 0.0
+"""Monotonic deadline before which a failed Tiger connect is not retried."""
 
 
 def data_dir() -> Path:
@@ -80,8 +86,10 @@ def data_dir() -> Path:
 
 def reset_cache() -> None:
     """Drop parsed hour statistics and Tiger readings; tests swap data sources between cases."""
+    global _tiger_down_until
     _hour_stats.cache_clear()
     _tiger_cache.clear()
+    _tiger_down_until = 0.0
     _close_tiger_repo()
 
 
@@ -304,16 +312,25 @@ def _close_tiger_repo() -> None:
 def _tiger_repo() -> Any | None:
     """The shared Tiger connection, or None without ``DATABASE_URL``.
 
-    Built lazily and reused: opening one and running the schema on every strip poll would
-    cost more than the aggregate saves. Tests monkeypatch this to inject a fake repo.
+    Built lazily and reused: opening one on every strip poll would cost more than the
+    aggregate saves. A failed connect is remembered for ``TIGER_RECONNECT_SECONDS``, so an
+    unreachable database costs one 2 s wait a minute instead of one per area per poll.
+    The API never creates schema: the sink owns it, so this connection passes
+    ``apply_schema=False``. Tests monkeypatch this to inject a fake repo.
     """
-    global _tiger_repo_instance
+    global _tiger_repo_instance, _tiger_down_until
     if _tiger_repo_instance is not None:
         return _tiger_repo_instance
     url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
         return None
-    _tiger_repo_instance = TimescaleRepo(url, connect_timeout=TIGER_CONNECT_TIMEOUT)
+    if time.monotonic() < _tiger_down_until:
+        raise ConnectionError("Tiger was unreachable recently; using the files until it retries")
+    try:
+        _tiger_repo_instance = TimescaleRepo(url, connect_timeout=TIGER_CONNECT_TIMEOUT, apply_schema=False)
+    except Exception:
+        _tiger_down_until = time.monotonic() + TIGER_RECONNECT_SECONDS
+        raise
     return _tiger_repo_instance
 
 
@@ -325,7 +342,9 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
 
     The first region name with any rows wins, mirroring :func:`_region_dir`: a watched box
     borrows its listening parent, and counting both would double the parent's traffic.
-    Raises on any database problem; :func:`_area_row` turns that into the file fallback.
+    A name with no rows in Tiger at all returns None, so the recorder's files answer for
+    that area (the sink may not have caught up on a region yet). Raises on any database
+    problem; :func:`_area_row` turns that into the file fallback.
     """
     if not names or not os.environ.get("DATABASE_URL", "").strip():
         return None
@@ -334,7 +353,8 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
     now = time.monotonic()
     cached = _tiger_cache.get(key)
     if cached is not None and cached[0] > now:
-        return cached[1], list(cached[2])
+        reading = cached[1]
+        return None if reading is None else (reading[0], list(reading[1]))
 
     repo = _tiger_repo()
     if repo is None:
@@ -344,11 +364,13 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
     last_full = current - timedelta(minutes=1)
     start = last_full - timedelta(minutes=SPARKLINE_MINUTES - 1)
     counts = [0] * SPARKLINE_MINUTES
+    found_region = False
     try:
         for name in names:
             rows = repo.minutely(name, start, current)
             if not rows:
                 continue
+            found_region = True
             for minute, msgs in rows:
                 offset = int((_as_utc(minute) - start).total_seconds() // 60)
                 if 0 <= offset < SPARKLINE_MINUTES:
@@ -358,6 +380,10 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
         _close_tiger_repo()
         raise
 
+    if not found_region:
+        _tiger_cache[key] = (now + TIGER_CACHE_SECONDS, None)
+        return None
+
     # The recorder flushes quiet regions every 5 minutes, so the newest minutes are often
     # still empty. Average the 10 minutes ending at the newest minute that has data.
     last = max((i for i, c in enumerate(counts) if c), default=None)
@@ -366,7 +392,7 @@ def _tiger_metrics(names: list[str]) -> tuple[float, list[int]] | None:
     else:
         window = counts[max(0, last - RATE_WINDOW_MINUTES + 1) : last + 1]
         rate = round(sum(window) / len(window), 1)
-    _tiger_cache[key] = (now + TIGER_CACHE_SECONDS, rate, tuple(counts))
+    _tiger_cache[key] = (now + TIGER_CACHE_SECONDS, (rate, tuple(counts)))
     return rate, counts
 
 

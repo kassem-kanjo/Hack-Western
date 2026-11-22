@@ -34,8 +34,8 @@ import { onVesselFocus } from "../components/SearchBox";
 import {
   SIGHTINGS_POLL_MS,
   fetchSightings,
-  sightingRow,
   unitNames,
+  type SightingFeedItem,
 } from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
@@ -134,6 +134,82 @@ function fmtUtcZ(iso: string): string {
 }
 
 /** The noun under each type toggle. */
+/** Sightings from one unit this close together (minutes) are one visit: the unit logs every frame. */
+export const SIGHTING_RUN_MINUTES = 5;
+
+/** One patrol visit: consecutive sightings from the same unit, collapsed into one Watch row. */
+export interface SightingRun {
+  unit: string;
+  items: SightingFeedItem[];
+  first: string | null;
+  last: string | null;
+}
+
+/**
+ * Collapse consecutive sightings (in feed order) from the same unit into runs. A sighting joins
+ * the open run when it is the same unit and no more than SIGHTING_RUN_MINUTES after the previous
+ * sighting in that run; anything else starts a new run. Pure: no DOM, no clock.
+ */
+export function collapseSightings(items: SightingFeedItem[], names: Map<number, string>): SightingRun[] {
+  const runs: SightingRun[] = [];
+  let open: SightingRun | null = null;
+  let openMs = Number.NaN;
+  for (const item of items) {
+    const unit = names.get(item.seq ?? -1) ?? "patrol";
+    const ms = item.t === null ? Number.NaN : Date.parse(item.t);
+    const joins =
+      open !== null &&
+      open.unit === unit &&
+      Number.isFinite(ms) &&
+      Number.isFinite(openMs) &&
+      Math.abs(ms - openMs) <= SIGHTING_RUN_MINUTES * 60_000;
+    if (open !== null && joins) {
+      open.items.push(item);
+      open.last = item.t;
+    } else {
+      open = { unit, items: [item], first: item.t, last: item.t };
+      runs.push(open);
+    }
+    openMs = ms;
+  }
+  return runs;
+}
+
+/** "21:04 UTC" for one sighting, "21:04–21:05 UTC" for a visit that spans minutes. */
+function clockRangeUtc(first: string | null, last: string | null): string {
+  const clock = (iso: string | null): string => {
+    const t = iso === null ? null : new Date(iso);
+    if (t === null || Number.isNaN(t.getTime())) return "";
+    return `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
+  };
+  const start = clock(first);
+  const end = clock(last);
+  if (start === "") return "";
+  return end === "" || end === start ? `${start} UTC` : `${start}–${end} UTC`;
+}
+
+/** One collapsed patrol row: "Patrol unit Kiel Bight · vessel in view, not broadcasting its position · seen 12×, 21:04–21:05 UTC". */
+function sightingRunRow(run: SightingRun, onPick: (item: SightingFeedItem) => void): HTMLElement {
+  const glyph = h("span", { class: "watch-glyph", "aria-hidden": "true" });
+  glyph.innerHTML =
+    '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2.5L13.5 13H2.5Z" fill="currentColor"/></svg>';
+  glyph.style.color = "var(--text-1)";
+  const count = run.items.length;
+  const range = clockRangeUtc(run.first, run.last);
+  const when = count > 1 ? `seen ${count}×, ${range}` : range;
+  const row = h(
+    "button",
+    { class: "watch-row is-patrol", type: "button" },
+    glyph,
+    h("span", { class: "watch-row-name" }, `Patrol unit ${run.unit}`),
+    h("span", { class: "watch-row-tag" }, "vessel in view, not broadcasting its position"),
+    h("time", { class: "watch-mono watch-row-time", datetime: run.first ?? "" }, when),
+  );
+  const latest = run.items[run.items.length - 1];
+  row.addEventListener("click", () => onPick(latest));
+  return row;
+}
+
 const KIND_NAME: Record<WatchAlertKind, string> = {
   dark: "Switched off",
   sanctioned_stop: "Stopped at sea",
@@ -1923,13 +1999,12 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     if (payload === null || items.length === 0) return;
     const names = unitNames(payload);
     sightingsEl.append(h("li", { class: "watch-group-head", role: "presentation" }, `Patrol sightings · ${items.length}`));
-    for (const item of items) {
-      const unit = names.get(item.seq ?? -1) ?? "patrol";
+    for (const run of collapseSightings(items, names)) {
       sightingsEl.append(
         h(
           "li",
           null,
-          sightingRow(item, unit, (picked) => {
+          sightingRunRow(run, (picked) => {
             if (picked.lat !== null && picked.lon !== null) map?.flyToVessel(picked.lat, picked.lon);
           }),
         ),

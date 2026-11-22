@@ -146,3 +146,23 @@ def test_reappearance_anchor_groups_ships_that_came_back_together() -> None:
     ]
     assert cluster_gaps(gaps, anchor="off") == []
     assert len(cluster_gaps(gaps, anchor="on")) == 1
+
+
+def test_risk_tags_exclude_port_inspection_only_records() -> None:
+    from darkfleet.core.hormuz_stories import is_risk_tagged
+
+    assert is_risk_tagged(["mare.shadow", "poi"])
+    assert is_risk_tagged(["sanction"])
+    # The Tokyo MOU PSC rows carry no risk tag at all; a detention alone is a port outcome.
+    assert not is_risk_tagged([])
+    assert not is_risk_tagged(["mare.detained"])
+
+
+def test_imo_mismatch_rejects_only_when_both_sides_have_one() -> None:
+    from darkfleet.core.hormuz_stories import imo_agrees
+
+    assert imo_agrees("9329758", "9329758")
+    assert not imo_agrees("9329758", "9187370")
+    assert imo_agrees(None, "9329758")
+    assert imo_agrees("9329758", None)
+    assert imo_agrees(None, None)

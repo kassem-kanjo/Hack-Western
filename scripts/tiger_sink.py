@@ -25,8 +25,12 @@ Usage::
 ``--loop 0`` runs a single pass and exits. ``DATABASE_URL`` is read from ``.env``; with no
 URL the sink exits non-zero rather than silently writing somewhere else.
 
+In loop mode a failed pass (database restart, network blip, bad batch) is logged as one line,
+the connection is closed and reopened, and the loop waits 5 s, doubling to a 60 s cap, before
+the next try. The loop never exits on an error: the live demo reads the sink's output.
+
 ``main(..., repo=fake)`` is the test injection point: no database is opened when a repo is
-supplied.
+supplied. ``repo_factory`` lets a test hand out a fresh repo after a failure.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +55,8 @@ DEFAULT_AIS_DIR = "data/cache/ais"
 DEFAULT_OFFSETS = "data/cache/tiger_sink_offsets.json"
 BATCH_SIZE = 5_000
 DEFAULT_LOOP_SECONDS = 0.0
+RETRY_FIRST_SECONDS = 5.0
+RETRY_CAP_SECONDS = 60.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,25 +155,62 @@ def run_once(
             # first pings: replay from the start and let the (ts, mmsi) key deduplicate.
             already = 0
         new = pings[already:]
-        mtimes[key] = mtime_ns
 
         if already != offsets.get(key, 0):
             offsets[key] = already
             save_offsets(offsets_path, offsets)
         if not new:
+            # Nothing to send, but remember the mtime so the file is not re-parsed each pass.
+            mtimes[key] = mtime_ns
             continue
 
+        # The mtime is recorded only after the writes succeed: if a batch raises, the next
+        # pass must read this file again instead of skipping its unsent pings.
         for batch in _batches(new):
             repo.add_region_pings(region, batch)
         offsets[key] = already + len(new)
         save_offsets(offsets_path, offsets)
+        mtimes[key] = mtime_ns
         sent += len(new)
         files += 1
     return sent, files
 
 
-def main(argv: Sequence[str] | None = None, *, repo: Any = None) -> int:
-    """Run the sink. ``repo`` is the test injection point; the CLI builds a Tiger repo itself."""
+def _retry_delay(failures: int) -> float:
+    """Seconds to wait after the ``failures``-th failure in a row: 5, 10, 20, 40, then 60."""
+    return min(RETRY_CAP_SECONDS, RETRY_FIRST_SECONDS * (2 ** max(0, failures - 1)))
+
+
+def _close_quietly(repo: Any) -> None:
+    """Close a connection that may already be dead; a failing close must not stop a retry."""
+    close = getattr(repo, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _report_failure(exc: BaseException) -> str:
+    """One log line for a failed pass: the exception type and its first line, never a URL."""
+    detail = str(exc).splitlines()[0][:200] if str(exc) else ""
+    return (
+        f"pass failed ({type(exc).__name__}: {detail})" if detail else f"pass failed ({type(exc).__name__})"
+    )
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repo: Any = None,
+    repo_factory: Callable[[], Any] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Run the sink. ``repo`` and ``repo_factory`` are the test injection points.
+
+    The CLI builds Tiger repos itself and closes them on exit. With an injected ``repo`` and no
+    factory, a failed pass reuses that same object (closed first if it has ``close``).
+    """
     args = build_parser().parse_args(argv)
     ais_dir = Path(args.ais)
     offsets_path = Path(args.offsets)
@@ -176,7 +219,7 @@ def main(argv: Sequence[str] | None = None, *, repo: Any = None) -> int:
         return 2
 
     owns_repo = repo is None
-    if owns_repo:
+    if repo_factory is None and owns_repo:
         load_dotenv(ROOT / ".env")
         url = os.environ.get("DATABASE_URL", "").strip()
         if not url:
@@ -184,22 +227,45 @@ def main(argv: Sequence[str] | None = None, *, repo: Any = None) -> int:
             return 1
         from darkfleet.store.timescale_repo import TimescaleRepo
 
-        repo = TimescaleRepo(url)
+        repo_factory = lambda: TimescaleRepo(url)  # noqa: E731
+    elif repo_factory is None:
+        repo_factory = lambda: repo  # noqa: E731
+    assert repo_factory is not None
 
     offsets = load_offsets(offsets_path)
     mtimes: dict[str, int] = {}
+    failures = 0
     try:
         while True:
-            sent, files = run_once(repo, ais_dir, offsets_path, offsets, mtimes)
+            try:
+                if repo is None:
+                    repo = repo_factory()
+                sent, files = run_once(repo, ais_dir, offsets_path, offsets, mtimes)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:  # noqa: BLE001 - the loop must survive any pass failure
+                failures += 1
+                if args.loop <= 0:
+                    print(_report_failure(exc), file=sys.stderr, flush=True)
+                    return 1
+                delay = _retry_delay(failures)
+                print(f"{_report_failure(exc)}; reconnecting in {delay:g}s", file=sys.stderr, flush=True)
+                if repo is not None:
+                    _close_quietly(repo)
+                repo = None
+                sleep(delay)
+                continue
+
+            failures = 0
             print(f"sent {sent} pings, {files} files", flush=True)
             if args.loop <= 0:
                 break
-            time.sleep(args.loop)
+            sleep(args.loop)
     except KeyboardInterrupt:
         return 0
     finally:
-        if owns_repo:
-            repo.close()
+        if owns_repo and repo is not None:
+            _close_quietly(repo)
     return 0
 
 
