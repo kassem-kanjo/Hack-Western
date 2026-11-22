@@ -15,6 +15,7 @@
 import "../styles/intro.css";
 
 import { startPresent } from "../present/present";
+import { PRESENT_ROUTES } from "../present/steps";
 import { h } from "./dom";
 
 const SEEN_KEY = "df.intro.seen";
@@ -192,6 +193,8 @@ function open(): void {
   });
   exploreButton.addEventListener("click", () => {
     close();
+    // The story starts on the strait; the tour and this button land on the same screen.
+    location.hash = PRESENT_ROUTES.hormuz;
   });
 
   backdrop = node;

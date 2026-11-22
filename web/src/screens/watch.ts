@@ -1453,7 +1453,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "Last position",
         h("span", { class: "watch-mono" }, `${alert.last.lat.toFixed(4)}, ${alert.last.lon.toFixed(4)}`),
       ),
-      ...(radiusLabel !== null && reachRadiusKm(alert, atMs) >= 1
+      // A dark alert's reach is already the first tile above: no second row for it.
+      ...(alert.kind !== "dark" && radiusLabel !== null && reachRadiusKm(alert, atMs) >= 1
         ? field(radiusLabel, radiusEl as HTMLElement)
         : []),
     );

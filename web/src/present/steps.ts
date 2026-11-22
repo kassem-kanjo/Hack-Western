@@ -58,8 +58,8 @@ export interface PresentScene extends PresentCaption {
   /**
    * Where the caption sits, chosen so it covers no proof on this screen:
    * "bottom" centre (default, Hormuz), "top-right" over the strait's empty sea (Hormuz
-   * cards), "map-top-left" over the watch map's empty north-west (keeps the status bar,
-   * the reach circle and the figures panel clear), "camera-top-left" over the top-left
+   * cards), "map-top-left" over the watch map's empty north-west (keeps the Live chip,
+   * the status bar, the reach circle and the figures panel clear), "camera-top-left" over the top-left
    * corner of the patrol camera (the alarm, the figures and the Kill/Overload buttons stay clear).
    */
   dock?: "bottom" | "bottom-left" | "top-right" | "map-top-left" | "camera-top-left";
@@ -82,8 +82,8 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "hormuz",
-        headline: "The chart shows the change after 28 Feb",
-        line: "Hormuz in red, the Gulf of Oman in grey. The shaded months after the strikes are what the big number averages.",
+        headline: "The chart shows the change since the war began on 28 Feb",
+        line: "Hormuz in red, the Gulf of Oman in grey. The shaded months after the war began are what the big number averages.",
       },
     ],
   },
@@ -96,10 +96,10 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
         dock: "bottom-left",
         requires: "sea1_hours",
         headline: "{sea1_kind} switched off for {sea1_hours} hours",
-        line: "{sea1_days} days after the strikes. It came back {sea1_km} km away.",
+        line: "{sea1_days} days after the war began. It came back {sea1_km} km away.",
         fallback: {
           headline: "A ship switched off its transponder",
-          line: "It switched off its transponder after the strikes.",
+          line: "It switched off its transponder after the war began.",
         },
       },
       {
@@ -151,7 +151,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "hormuz",
         dock: "bottom",
-        headline: "The chart shows the change after 28 Feb",
+        headline: "The chart shows the change since the war began on 28 Feb",
         line: "Physics says what's possible, lists say who matters, and the edge unit catches ships that switch off.",
       },
     ],

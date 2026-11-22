@@ -113,7 +113,7 @@ export function addStoryAnchors(
   }
   const cluster = leadCluster(stories);
   if (cluster !== null) {
-    const text = `${cluster.vessels} ships 'came back' here, ${dayLabel(cluster.day)}`;
+    const text = `${cluster.vessels} ships reappeared here, ${dayLabel(cluster.day)}`;
     anchorLabel(map, text, "cluster", cluster.centre, onPick);
   }
 }
@@ -330,8 +330,8 @@ export function showCluster(map: MapLibreMap, cluster: StoryCluster): void {
     ]),
     7,
   );
-  // Labels come after show(), which clears the previous card's labels: where the ships came back.
-  const text = `${cluster.vessels} ships 'came back' here, ${dayLabel(cluster.day)}`;
+  // Labels come after show(), which clears the previous card's labels: where the ships reappeared.
+  const text = `${cluster.vessels} ships reappeared here, ${dayLabel(cluster.day)}`;
   // Grow the label toward the middle of the framed ships, so an edge centre keeps the text on the map.
   const lons = cluster.points.flatMap((p) => [p.off.lon, p.on.lon]);
   const midLon = (Math.min(...lons) + Math.max(...lons)) / 2;
@@ -342,7 +342,7 @@ export function showCluster(map: MapLibreMap, cluster: StoryCluster): void {
 /** The cluster card's text: every number from the cluster, the physics that rules out real voyages. */
 function clusterSentence(c: StoryCluster): string {
   const head = `${dayLabel(c.day)}: ${c.vessels} ships switched off their transponders within ${c.span_hours.toFixed(1)} hours.`;
-  const where = ` Their last positions were up to ${fmtInt(Math.round(c.max_km))} km out in the Arabian Sea. About ${Math.round(c.median_hours)} h later they came back at the same spot off the UAE.`;
+  const where = ` Their last positions were up to ${fmtInt(Math.round(c.max_km))} km out in the Arabian Sea. About ${Math.round(c.median_hours)} h later they reappeared at the same spot off the UAE.`;
   const speed =
     c.median_kn === null ? "" : ` The trip needs ${Math.round(c.median_kn)} knots, which these ships can't sail.`;
   return `${head}${where}${speed} Their positions look faked, likely by GPS interference, so we don't rank them.`;
@@ -414,7 +414,7 @@ export function storyCards(stories: HormuzStories, onPick: (key: HormuzCardKey) 
     cards.push(
       storyCard(
         "sea1",
-        `${name}, ${shadow}switched off its transponder in the Gulf of Oman for ${lead.hours.toFixed(1)} h, ${days} days after the strikes.${moved}`,
+        `${name}, ${shadow}switched off its transponder in the Gulf of Oman for ${lead.hours.toFixed(1)} h, ${days} days after the war began.${moved}`,
         onPick,
       ),
     );

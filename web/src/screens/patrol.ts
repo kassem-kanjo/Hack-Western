@@ -162,7 +162,9 @@ function safetyLine(s: EdgeStatus): string {
   const priority = schedValue(s.priorities?.safety_core) === "not reported" ? "priority not reported" : "top priority";
   const worst = finiteOrNull(s.safety_tick?.max_late_ms);
   const late = worst === null ? "worst lateness not reported" : `worst ${fmtMs(worst)} ms late in the last 60 s`;
-  return `Safety core: ${priority} · ${late}`;
+  // The rail shows the idle loop unless a stress run is on; say which one this is.
+  const load = s.stress?.active === true ? " (during overload)" : " (no overload)";
+  return `Safety core: ${priority} · ${late}${load}`;
 }
 
 /** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute (tooltip only). */
@@ -875,8 +877,8 @@ export function renderPatrol(app: HTMLElement): void {
         ),
       ),
     );
-    abNote.textContent = `Measured on the Pi with all four cores overloaded for ${fmtInt(result.stress_s)} s. Deadline: ${result.deadline_ms} ms.`;
-    abNote.title = `Load: ${result.load}.`;
+    abNote.textContent = `Each column counts the alarms raised in its own ${fmtInt(result.stress_s)} s overload run.`;
+    abNote.title = `Measured on the Pi with all four cores overloaded for ${fmtInt(result.stress_s)} s. Deadline: ${result.deadline_ms} ms. Load: ${result.load}.`;
   }
 
   /** "Simulated patrol position: Kiel Bight (54.45, 10.25)": the unit's own name and fix. */

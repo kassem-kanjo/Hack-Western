@@ -1471,6 +1471,25 @@
   padding: var(--sp-3) var(--sp-4);
 }
 
+/* Short laptop screens (720 px tall): the figures drop their explainer line and the
+   field rows tighten, so the could-have-met table starts above the fold. The value's
+   title tooltip still carries the definition. */
+@media (max-height: 800px) {
+  .watch-fig-caption {
+    display: none;
+  }
+
+  .watch-fig {
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .watch-fields dt,
+  .watch-fields dd {
+    padding-top: var(--sp-1);
+    padding-bottom: var(--sp-1);
+  }
+}
+
 .watch-fig + .watch-fig {
   border-left: 1px solid var(--line-1);
 }
