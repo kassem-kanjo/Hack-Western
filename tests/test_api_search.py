@@ -61,6 +61,14 @@ SHIPS: list[dict[str, Any]] = [
         "class": "tanker",
         "watchlist": None,
     },
+    {
+        "mmsi": 314000999,
+        "name": "CHEM SEA 1",
+        "lat": 26.4,
+        "lon": 56.2,
+        "class": "tanker",
+        "watchlist": None,
+    },
 ]
 
 # Enough hulls to prove the cap; none of their names collide with the queries above.
@@ -86,6 +94,28 @@ WATCH: dict[str, Any] = {
 }
 
 
+STORIES: dict[str, Any] = {
+    "generated_at": "2026-11-21T19:00:00Z",
+    "source": "Powered by Global Fishing Watch (public-global-gaps-events:latest)",
+    "listed": [
+        {
+            "mmsi": "314001149",
+            "name": "SEA 1",
+            "flag": "IR",
+            "lists": ["sanction"],
+            "start": "2026-03-12T02:00:00Z",
+            "end": "2026-03-12T15:06:00Z",
+            "hours": 13.1,
+            "off": {"lat": 26.55, "lon": 56.4},
+            "on": {"lat": 26.1, "lon": 56.5},
+        }
+    ],
+    "clusters": [],
+    "counts": {"gaps_in_box": 1, "listed": 1, "clusters": 0, "cluster_vessels": 0},
+    "caveats": ["AIS gaps show a transponder went silent; they do not show why"],
+}
+
+
 @pytest.fixture(autouse=True)
 def _clear_caches() -> Iterator[None]:
     """Every test gets its own DARKFLEET_DATA, so stale parses must not leak."""
@@ -104,6 +134,13 @@ def watch_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (directory / "watch.json").write_text(json.dumps(WATCH), encoding="utf-8")
     monkeypatch.setenv("DARKFLEET_DATA", str(directory))
     return directory
+
+
+@pytest.fixture
+def story_dir(watch_dir: Path) -> Path:
+    """The same snapshot directory with the Hormuz story file beside watch.json."""
+    (watch_dir / "hormuz_stories.json").write_text(json.dumps(STORIES), encoding="utf-8")
+    return watch_dir
 
 
 def _search(client: TestClient, query: str | None = None) -> list[dict[str, Any]]:
@@ -205,3 +242,35 @@ def test_missing_snapshot_is_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     with TestClient(app) as client:
         assert _search(client, "gestia") == []
+
+
+def test_exact_name_match_ranks_before_substring(story_dir: Path) -> None:
+    with TestClient(app) as client:
+        rows = _search(client, "sea 1")
+
+    assert [row["name"] for row in rows] == ["SEA 1", "CHEM SEA 1"]
+
+
+def test_hormuz_story_ship_is_found(story_dir: Path) -> None:
+    with TestClient(app) as client:
+        rows = _search(client, "sea 1")
+
+    assert rows[0] == {
+        "mmsi": 314001149,
+        "name": "SEA 1",
+        "imo": None,
+        "type": None,
+        "watchlist": "sanctioned",
+        "lat": 26.1,
+        "lon": 56.5,
+        "area": "HORMUZ_STRAIT",
+        "source": "hormuz_story",
+    }
+
+
+def test_missing_stories_file_has_no_story_rows(watch_dir: Path) -> None:
+    with TestClient(app) as client:
+        rows = _search(client, "sea 1")
+
+    assert [row["name"] for row in rows] == ["CHEM SEA 1"]
+    assert all("source" not in row for row in rows)
