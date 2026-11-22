@@ -257,3 +257,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** v2 script written by Chief (stakes + honest limit, every claim checked; satellite line says where the pass was); motivated-zoom pattern; skill updated (read before briefing, stakes, motivated zoom, captions-as-script) and pushed.
 - **Code share since audit 36:** builders ~85%; Chief: script, QA, skill edits.
 - **Change for next 30 min:** open the relevant skill before every brief, not just "Loadout" in the text.
+
+## Sun 22 Nov, 01:20 ET (audit 38, covers 00:20-01:20)
+- **Went well:** video v2/v3 shipped (story with stakes, no Hormuz, black-map stretch fixed with timings unchanged); the "follow one ship" story went live on :8000; Devpost got 6 captioned stills and the stakes line; DEV post saved as an unpublished draft on Kassem's account.
+- **Went wrong:** Kassem's teammate judged v3 "like an AI explanation video" (too little tech, robotic pacing); the DEV post swung from report to diary after one note ("you push too far into the advice"); I took section headings from past DEV posts without reading the winners for voice.
+- **Fixes:** v4 script is a tech-forward real demo with speech-timed captions (guide voice from `say`), live Kill-the-AI beat; DEV post rebuilt from the actual MLH x DEV winners; new memory: adjust part way, keep substance.
+- **Code share since audit 37:** builders ~70%; Chief: scripts, post rewrites, Devpost/dev.to form work, QA.
+- **Change for next 30 min:** when told to emulate references, read the references in full first, then write.
