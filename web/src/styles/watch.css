@@ -1659,3 +1659,13 @@
 .watch-marks-swatch.is-orange-dot::after { content: ""; display: block; width: 9px; height: 9px; border-radius: 50%; background: var(--st-dark); margin: auto; }
 .watch-marks-swatch.is-grey-dot::after { content: ""; display: block; width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); margin: auto; }
 .watch-marks-swatch.is-white-dot::after { content: ""; display: block; width: 9px; height: 9px; border-radius: 50%; background: #e8e8e8; margin: auto; }
+
+/* Compact map key (#270 follow-up): four short marks in a 2x2 grid, layer switches folded. */
+.watch-marks-key { display: grid; grid-template-columns: auto auto; gap: 2px var(--sp-3); }
+.watch-marks-key .watch-marks-row { white-space: nowrap; }
+.watch-layer-toggles > summary { cursor: pointer; color: var(--text-3); font-size: var(--fs-11); margin-top: var(--sp-1); }
+.watch-layer-toggles[open] > summary { margin-bottom: var(--sp-1); }
+/* The receivers note is information, not an error. */
+.watch-gapnote { color: var(--text-3) !important; background: none !important; border: 0 !important; padding-left: 0 !important; font-size: var(--fs-12, 12px); }
+.watch-sanctions.is-near { color: var(--text-2); }
+.watch-sanctions-met { color: var(--st-sanctioned); font-weight: var(--fw-semibold, 600); }

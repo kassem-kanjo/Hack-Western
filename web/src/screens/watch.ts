@@ -315,9 +315,20 @@ function reachCounts(alert: WatchAlert): { inside: number | null; couldMeet: num
  * The sanctions answer for the event's own hull, from the same dossier the vessel panel
  * shows (`/api/vessel/{mmsi}`), so the two cannot disagree.
  */
-function sanctionsView(dossier: VesselDossier): { cls: string; nodes: Node[] } {
+function sanctionsView(dossier: VesselDossier, name: string, listedMet: string[]): { cls: string; nodes: Node[] } {
   const entry = dossier.watchlist;
-  if (entry === null) return { cls: "is-no", nodes: [document.createTextNode("On a sanctions list: No")] };
+  if (entry === null) {
+    // Not listed itself: say whose answer this is, so it cannot read as a contradiction of a
+    // headline about a listed ship nearby; then name the listed ships it could have met.
+    const nodes: Node[] = [document.createTextNode(`${name}: not on a sanctions list`)];
+    if (listedMet.length > 0) {
+      nodes.push(
+        h("br", null),
+        h("strong", { class: "watch-sanctions-met" }, `Could have met: ${listedMet.join(", ")} \u00b7 on a sanctions list`),
+      );
+    }
+    return { cls: listedMet.length > 0 ? "is-near" : "is-no", nodes };
+  }
   const shadow = entry.category === "shadow_fleet";
   const head = shadow ? "Shadow-fleet list" : "On a sanctions list: Yes";
   const parts: string[] = [];
@@ -338,11 +349,11 @@ function sanctionsView(dossier: VesselDossier): { cls: string; nodes: Node[] } {
 }
 
 /** Fills the sanctions line once the dossier answers; a panel that was replaced is left alone. */
-function loadSanctions(mmsi: number, el: HTMLElement): void {
+function loadSanctions(mmsi: number, name: string, listedMet: string[], el: HTMLElement): void {
   fetchVesselDossier(mmsi)
     .then((dossier) => {
       if (!el.isConnected) return;
-      const view = sanctionsView(dossier);
+      const view = sanctionsView(dossier, name, listedMet);
       el.className = `watch-sanctions ${view.cls}`;
       el.replaceChildren(...view.nodes);
     })
@@ -1531,7 +1542,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
     // Top of every event panel: what happened, then the sanctions answer (issue #270).
     const sanctionsEl = h("p", { class: "watch-sanctions is-pending" }, "Checking the sanctions lists\u2026");
-    loadSanctions(alert.mmsi, sanctionsEl);
+    const listedMet = (alert.contacts ?? [])
+      .filter((c) => c.could_meet && onSanctionsList(c))
+      .slice(0, 2)
+      .map(contactName);
+    loadSanctions(alert.mmsi, alert.name?.trim() || `MMSI ${alert.mmsi}`, listedMet, sanctionsEl);
     const parts: HTMLElement[] = [h("p", { class: "watch-headline" }, headlineOf(alert)), sanctionsEl];
 
     // The three numbers a dark alert is about, set large above the detail.
@@ -1589,9 +1604,9 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         h(
           "div",
           { class: "watch-gapnote" },
-          "Receivers offline ",
-          h("span", { title: "UTC (the Z means UTC time)" }, `${gap.from}\u2013${gap.to}Z`),
-          " \u2014 not counted",
+          "Our receivers missed ",
+          h("span", null, `${gap.from}\u2013${gap.to} UTC`),
+          "; that gap isn\u2019t counted.",
         ),
       );
     }
