@@ -1,29 +1,53 @@
-# Demo script v3 (2:30, expo table) — which ships went dark, and who they could have met
+# Demo script (one judge: 3:00 demo, 1:00 questions)
 
-One analyst question: "Did any ship I care about go dark or meet someone, and where?" Five beats, one idea
-each. Numbers in {braces} are read live by presentation mode from the snapshot; never say a number that is
-not on screen.
+Press Right between beats. Placeholders: [SHIP], [LISTED SHIP], [LIST] are filled in tonight by the script.
 
-| # | Time | Screen (route) | Say (plain, first person) | Proof on screen |
-|---|---|---|---|---|
-| 1 | 0:00 | `#/hormuz` | "Every big ship broadcasts where it is. Since the war began on 28 Feb, 2 in 3 ships that satellite radar sees here don't." | hero 66% (was 32%); "Gulf of Oman next door: 26% → 46%"; "Difference +14.5 pts (95% CI 2–26)"; two lines, 28 Feb marker |
-| 2 | 0:20 | `#/hormuz` (story cards) | "SEA 1, on a shadow-fleet list, switched off for 13.1 hours in the Gulf of Oman, nine days after the strikes. It came back 96 km west, closer to the strait." Then: "On 12 March, 10 ships stopped broadcasting within two hours, far out in the Arabian Sea, and came back at one spot off the UAE. That trip needs 29 knots. They can't do that, so their positions were faked, not hidden." | SEA 1 card (13.1 h, 96 km west); cluster card: 10 ships, 1.7 h, up to 1,334 km, 29 kn, dashed false tracks on the map |
-| 3 | 0:45 | `#/watch` (opens on the top story), then `#/watch/alert/{alert_id}` | "This one is live, from our own receivers in the Baltic: a ship went dark for {dark_duration}; a sanctioned tanker was within reach. Click: here's where it could have gone, and who it could have met." | figures "dark for / could be this far / ships it could have met"; reach shape on the map; could-have-met table |
-| 4 | 1:20 | `#/patrol` | "When a transponder is off, you need eyes. This is a QNX Raspberry Pi with a camera: an AI lookout flags a vessel in view that isn't on AIS, inside a 200 ms deadline. I'll overload the Pi … alerts still on time. On the same overload without our priority guard, only 10 of 27 alerts were on time; with it, 63 of 64. I'll kill it … the unit says LOOKOUT BLIND at once, and a standby takes over in about 0.15 s." | camera, AI and safety-core steps lit; stress: {alerts_on_time} alerts on time, p99 {alert_p99_ms} ms; A/B card: 10/27 vs 63/64; kill: LOOKOUT BLIND, standby in 0.15 s (130–157 ms measured on the Pi) |
-| 5 | 2:10 | `#/watch` | "It's for compliance teams and coast guards: physics says what's possible, lists say who matters, and the edge unit catches what's dark." | the top story, one line |
+## Opener (0:00)
 
-## QNX sponsor table only (20 s, beat 4 only)
+"Dark Fleet finds ships that switched off their transponder, shows where they could have gone and who they could have met. It is for sanctions analysts and coast guards."
 
-| Time | Screen (route) | Say | Proof on screen |
-|---|---|---|---|
-| 0:00 | `#/patrol` | "A camera and an AI lookout on a QNX Pi: it flags a vessel in view that isn't on AIS inside 200 ms. Overloaded without our priority guard, 10 of 27 alerts were on time; with it, 63 of 64. I'll kill the AI … LOOKOUT BLIND, and a standby takes over in about 0.15 s (130–157 ms on the Pi). Pull the plug and the log still verifies." | LOOKOUT BLIND; standby 0.15 s; evidence log {chain_verifies} |
+## Beats
 
-## Rules
-- Rehearse on the snapshot you will show. The top story and the counts change as the recording grows.
-- Wifi off for one full run (snapshot plus the offline basemap).
-- One idea per beat. If a beat runs long, cut the proof, not the sentence.
-- Say "every big ship broadcasts" and "radar sees"; never say "every ship must broadcast", and never call the 12 March ships
-  "hiding": their positions were corrupted (29 kn needed), so we do not rank them.
-- Never say "right now" for the watchlist, "six hotspots", or "AI-powered".
-- If a number is not on screen, it does not exist.
-- The Patrol beat needs the Pi on the table. At the QNX table use the 20-second variant. If the Pi is offline, show the A/B card and skip Kill/Overload.
+**1. Switch-off (0:10-0:35).**
+"A transponder is the radio that broadcasts a ship's position. This is [SHIP], in the Baltic, from our own live recorder. It just stopped broadcasting."
+If it breaks: "The live feed is not showing it. We recorded it earlier; here is the saved case, and the recorder is still running."
+
+**2. Where it could have gone (0:35-1:00).**
+"The circle is everywhere it could have gone since, at its top speed. The clock shows how long it has been silent."
+If it breaks: "The map did not draw. We tried a reload; the numbers are in the side panel."
+
+**3. Who it could have met (1:00-1:30).**
+"These ships were inside that circle. We say could have met, not met. This one, [LISTED SHIP], is on [LIST], matched by its permanent ID number, not its name."
+If it breaks: "The match did not load. We tried the cached list; here is the ID number and the list entry on paper."
+
+**4. Satellite pass (1:30-1:50).**
+"[after #268: real pass or labelled scenario.] Radar sees ships that are not broadcasting."
+If it breaks: "The pass view did not load. We tried the snapshot; here is the scene time from our records."
+
+**5. The Pi (1:50-2:40).**
+Turn to the Pi. Hold a ship photo to the camera.
+"This is a Raspberry Pi running QNX. It sees a ship and no ship is broadcasting nearby, so it raises an alarm within 200 milliseconds."
+Kill the AI.
+"Now the AI is dead. The screen says LOOKOUT BLIND, not silence. The standby takes over in 130 to 157 milliseconds."
+"Under full overload, 63 of 64 alarms landed on time. Before we fixed the priorities, 10 of 27."
+If it breaks: "The camera did not respond. We tried a restart; here is our recorded test: 63 of 64 on time."
+
+**6. Scale (2:40-3:00).**
+"In the Strait of Hormuz, 2 in 3 ships seen by radar were not broadcasting from March to June 2026. In 2025 it was 1 in 3. The Gulf of Oman next door rose less, by 16 points (95% CI 3 to 27)."
+If it breaks: "The chart did not load. The figures are 32% in 2025, 68% in March to June 2026."
+
+## Questions (3:00-4:00)
+
+1. **Is this just bad reception?** Sometimes. A silence only counts if our receivers were hearing that area, and Hormuz is compared with the Gulf of Oman beside it. Hormuz rose 16 points more.
+2. **What about faked positions?** Physics catches them. On 12 March, 10 ships needed about 29 knots to reappear where they did. None can sail that fast, so we cleared them.
+3. **Why QNX?** The alarm has a 200 ms deadline and the lookout must never go silently blind. A real-time system lets us set priorities and measure the deadline: 63 of 64 on time with them.
+4. **What does Tiger Data do?** It stores every position our recorder hears in a hypertable (over 590,000 rows). A per-minute continuous aggregate gives the live rates on screen.
+5. **Who would pay?** Sanctions compliance teams and coast guards. Our data is non-commercial; real clients would need commercial transponder and radar feeds.
+
+## QNX sponsor variant (60 s)
+
+"The lookout runs on QNX 8 on a Raspberry Pi 5. It uses QNX's open-source AI module: OpenCV DNN with YOLOX-nano. The use case is a lookout that must raise an alarm within 200 ms and never go silently blind. A safety loop at the top fixed priority owns the decision; the AI is untrusted. Kill the AI and the screen says LOOKOUT BLIND; a standby takes over in 130 to 157 ms. Under a 4-core overload, 63 of 64 alarms met the deadline, against 10 of 27 before we fixed the priorities. Putting the AI above the camera froze the camera. Sightings go to a hash-chained log on the qnx6 partition. Adaptive partitioning is not in this image, so we used fixed priorities."
+
+## Tiger Data variant (45 s)
+
+"Tiger Data is our live store. Every position our recorder hears streams into a `positions` hypertable: over 590,000 rows by Sunday 00:20 ET. A per-minute continuous aggregate gives the live position reports a minute on screen. The same database holds 475 days of Hormuz radar, 25,836 radar cells and 566 encounter events. Our store once looked alive for 8 hours while nothing new arrived, so we now check values, not status codes."
