@@ -17,7 +17,7 @@ from the box width and its growth and are ESTIMATES (they assume a 100 m vessel 
 camera). The alarm has a hard deadline: frame timestamp to decision <= `deadline_ms` (200), every
 alarm's measured latency is kept and the status reports "alarms on time N/N".
 
-Fail-safe, not fail-silent: if no frame has reached the core for 500 ms (AI dead or stalled, camera
+Fail-safe, not fail-silent: if no frame has reached the core for 800 ms (AI dead or stalled, camera
 stale, link lost, still loading) the core raises "LOOKOUT BLIND - manual watch" from its own 20 Hz
 tick and keeps it until frames return. The camera bearing is not used.
 
@@ -60,8 +60,8 @@ VESSEL_LABELS = frozenset({"boat", "ship"})
 DECISION_NAME = "latest_decision.json"
 NOT_ON_AIS_TEXT = "VESSEL NOT ON AIS \u2014 alert bridge"
 BLIND_TEXT = "LOOKOUT BLIND \u2014 manual watch"
-BLIND_AFTER_S = 0.5  # no frame for this long: the lookout is blind
-BLIND_DEADLINE_MS = 100.0  # the blind alarm must be up within this long after the 500 ms
+BLIND_AFTER_S = 0.8  # no frame for this long: blind (the C270 itself leaves gaps up to ~0.47 s; #255)
+BLIND_DEADLINE_MS = 100.0  # the blind alarm must be up within this long after the 800 ms
 ASSUMED_VESSEL_M = 100.0  # range estimate only: how long we pretend the vessel is
 CAMERA_HFOV_DEG = 60.0  # Logitech C270, roughly
 CLOSING_RATIO = 1.12  # box width grew by 12 % over the last 0.5-2 s: closing
@@ -245,7 +245,7 @@ class SafetyCore:
     def tick(self, now: float) -> None:
         """Called every loop turn. Silence longer than 3x the deadline means DEGRADED.
 
-        It also owns the fail-safe: 500 ms without a frame raises the BLIND alarm, here, on the
+        It also owns the fail-safe: 800 ms without a frame raises the BLIND alarm, here, on the
         core's own tick, so it does not depend on the detector doing anything at all.
         """
         if (

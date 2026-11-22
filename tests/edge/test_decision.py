@@ -302,13 +302,13 @@ def test_shrinking_box_is_opening_and_a_matching_ais_ship_clears_the_alarm() -> 
     assert matched.last_decision["alarm"]["level"] == "none"
 
 
-def test_no_frame_for_500_ms_raises_lookout_blind_on_the_next_tick() -> None:
+def test_no_frame_for_800_ms_raises_lookout_blind_on_the_next_tick() -> None:
     core = SafetyCore(_config(), vessels=[])
     core.start(0.0)
     core.on_message(_frame(), now=0.1)
-    core.tick(0.55)
+    core.tick(0.85)
     assert not core.blind
-    core.tick(0.65)
+    core.tick(0.95)
     assert core.blind and core.alarm_level == "blind"
     assert core.blind_episodes == 1 and core.blind_on_time == 1  # 50 ms past the threshold
     assert core.pending_records[0]["kind"] == "lookout_blind"
@@ -319,5 +319,5 @@ def test_no_frame_for_500_ms_raises_lookout_blind_on_the_next_tick() -> None:
 def test_a_late_blind_tick_is_counted_as_a_miss() -> None:
     core = SafetyCore(_config(), vessels=[])
     core.start(0.0)
-    core.tick(1.0)  # the loop woke 500 ms after the threshold: far past the 100 ms budget
+    core.tick(1.0)  # the loop woke 200 ms after the threshold: far past the 100 ms budget
     assert core.blind_episodes == 1 and core.blind_on_time == 0
