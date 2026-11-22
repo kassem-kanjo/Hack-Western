@@ -1,0 +1,381 @@
+/* Story screen (#274). A dark ops console read as a sequence: one text card in
+   the left rail, the case on the map to its right, six beats under both. Tokens
+   only; colour means state, chrome stays grey, corners stop at --r-2. The map
+   fit reserves the card's column (padding left 540), so the card never covers
+   the ship, the circle or the detections. */
+
+.story-root {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  overflow: hidden;
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-variant-numeric: var(--numeric);
+}
+
+/* MapLibre sets .maplibregl-map { position: relative }; the two-class selector
+   outranks it, the same way watch.css handles its stage. */
+.story-root .story-map {
+  position: absolute;
+  inset: 0;
+}
+
+.story-map canvas {
+  outline: none;
+}
+
+/* ---------- map label ---------------------------------------------------- */
+
+.story-map-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.story-map-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.25;
+  letter-spacing: var(--track-label);
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* ---------- the left rail: tag + text card -------------------------------- */
+
+.story-left {
+  position: absolute;
+  left: 40px;
+  top: 50%;
+  z-index: 3;
+  width: min(460px, 36vw);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.story-tag {
+  margin: 0 0 12px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+
+.story-tag[hidden] {
+  display: none;
+}
+
+.story-card {
+  max-height: calc(100vh - 200px);
+  padding: 26px 28px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-float);
+  pointer-events: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-3) transparent;
+}
+
+.story-headline {
+  margin: 0;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: clamp(44px, 3.6vw, 56px);
+  font-weight: var(--fw-semibold);
+  line-height: 1.05;
+  letter-spacing: var(--track-tight);
+  text-wrap: balance;
+}
+
+.story-sub {
+  margin: 18px 0 0;
+  color: var(--text-2);
+  font-size: clamp(22px, 1.7vw, 26px);
+  line-height: 1.32;
+}
+
+.story-extra {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+/* ---------- the scenario strip (beat 4 only) ------------------------------ */
+
+.story-strip {
+  margin: 0 0 18px;
+  padding: 9px 12px;
+  border-left: 2px solid var(--st-radar);
+  background: var(--st-radar-weak);
+  color: var(--st-radar);
+  font-size: 16px;
+  font-weight: var(--fw-medium);
+  line-height: 1.3;
+}
+
+.story-strip[hidden] {
+  display: none;
+}
+
+/* ---------- beat 2: the clock -------------------------------------------- */
+
+.story-clock {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-variant-numeric: var(--numeric);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ---------- beat 3: the listed contact cards ----------------------------- */
+
+.story-contact {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--st-sanctioned);
+  background: var(--st-sanctioned-weak);
+  animation: story-contact-in 240ms ease-in-out both;
+}
+
+.story-contact-name {
+  color: var(--text-1);
+  font-size: 20px;
+  font-weight: var(--fw-semibold);
+  line-height: 1.25;
+}
+
+.story-contact-line {
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.story-contact-list {
+  margin-top: 2px;
+  color: var(--st-sanctioned);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+}
+
+.story-contact-imo {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@keyframes story-contact-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* ---------- beat 4: counts, attribution, radar chips ---------------------- */
+
+.story-counts {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.story-source {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.story-chips {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.story-chip {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  height: auto;
+  object-fit: cover;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+}
+
+/* ---------- beat 5: the Pi state ----------------------------------------- */
+
+.story-state {
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 72px;
+  font-weight: var(--fw-medium);
+  line-height: 0.95;
+  letter-spacing: var(--track-tight);
+  overflow-wrap: anywhere;
+}
+
+.story-state.is-ok {
+  color: var(--st-ok);
+}
+
+.story-state.is-blind {
+  color: var(--st-dark);
+}
+
+.story-state.is-offline {
+  color: var(--st-sanctioned);
+}
+
+.story-state.is-pending {
+  color: var(--text-3);
+}
+
+.story-deadline {
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+/* ---------- buttons ------------------------------------------------------- */
+
+.story-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-1);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.story-btn:hover {
+  opacity: 0.92;
+}
+
+.story-btn:active {
+  translate: 0 1px;
+}
+
+.story-btn:focus-visible {
+  outline: 2px solid var(--text-1);
+  outline-offset: 2px;
+}
+
+/* ---------- bottom: dots, counter, key hints ------------------------------ */
+
+.story-controls {
+  position: absolute;
+  left: 40px;
+  bottom: 24px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.story-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.story-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-dot);
+  background: transparent;
+}
+
+.story-dot.is-current {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.story-count {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.story-hints {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.story-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.story-kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 2px 5px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* ---------- reduced motion ------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .story-contact {
+    animation: none;
+  }
+
+  .story-btn {
+    transition: none;
+  }
+}
+
+/* Live toasts would sit over the recorded case: hide them while the story is up. */
+body.is-presenting .toasts {
+  display: none;
+}

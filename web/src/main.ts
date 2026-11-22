@@ -29,6 +29,7 @@ import { rankCases } from "./screens/overview";
 import { renderEvidence } from "./screens/evidence";
 import { parseLiveRoute, renderLive, type LiveRoute, type LiveScreen } from "./screens/live";
 import { renderPatrol } from "./screens/patrol";
+import { renderStory } from "./story/story";
 import { parseWatchRoute, renderWatch, type WatchScreen } from "./screens/watch";
 import { initPresent } from "./present/present";
 
@@ -168,6 +169,8 @@ function route(): void {
   }
 
   if (location.hash === "#/hormuz") { current = renderHormuz(app); return; }
+
+  if (location.hash === "#/story") { current = renderStory(app); return; }
 
   if (cases === null) {
     if (loadError !== null) showError(loadError);

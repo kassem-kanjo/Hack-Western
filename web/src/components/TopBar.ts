@@ -84,10 +84,10 @@ export function topBar(opts: {
     {
       class: "present-btn is-primary",
       type: "button",
-      title: "Start the guided 2-minute tour (press P)",
-      "aria-label": "Start the 2-minute tour",
+      title: "Follow one ship (press P)",
+      "aria-label": "Follow one ship",
     },
-    "Start the 2-minute tour",
+    "Follow one ship",
     h("kbd", { class: "kbd" }, "P"),
   );
 

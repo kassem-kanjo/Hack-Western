@@ -28,7 +28,7 @@ const LINE_2 =
   "Dark Fleet checks every gap and every jump against what a ship can physically do, and says why each alert is an alert.";
 const LINE_3 = "Nothing here accuses a ship on radar alone.";
 
-const TOUR = "Take the 2-minute tour";
+const TOUR = "Follow one ship (2 min)";
 const EXPLORE = "Explore on my own";
 
 let backdrop: HTMLElement | null = null;

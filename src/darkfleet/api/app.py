@@ -26,6 +26,7 @@ from darkfleet.api.live import router as live_router
 from darkfleet.api.sar import router as sar_router
 from darkfleet.api.satcheck import router as satcheck_router
 from darkfleet.api.search import router as search_router
+from darkfleet.api.story import router as story_router
 from darkfleet.api.vessels import router as vessels_router
 from darkfleet.api.vessels import warm_cache as warm_vessel_cache
 from darkfleet.api.watch import router as watch_router
@@ -86,6 +87,7 @@ app.include_router(search_router)
 app.include_router(areas_router)
 app.include_router(sar_router)
 app.include_router(satcheck_router)
+app.include_router(story_router)
 
 
 def data_dir() -> Path:
