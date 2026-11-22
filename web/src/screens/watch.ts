@@ -21,9 +21,11 @@ import type {
   WatchStream,
 } from "../api";
 import {
+  fetchVesselDossier,
   fetchWatch,
   watchFixtureUrl,
   watchStream,
+  type VesselDossier,
 } from "../api";
 import type { WatchArea, WatchRecording } from "../api";
 import { mountReplay, type ReplayView } from "../components/AlertReplay";
@@ -294,20 +296,81 @@ function alertName(alert: WatchAlert): string {
   return trimmed && trimmed.length > 0 ? trimmed : `Unnamed \u00b7 MMSI ${alert.mmsi}`;
 }
 
+/** The one line at the top of every event panel: what happened (issue #270). */
+function headlineOf(alert: WatchAlert): string {
+  if (alert.kind === "sanctioned_stop") return "Sanctioned ship stopped at sea";
+  return plainLabel(alert.label);
+}
+
+/**
+ * The two dark-alert counts the build writes (issue #270): hulls inside the reach, and
+ * how many of them could have met the dark ship. Null on a snapshot built before them.
+ */
+function reachCounts(alert: WatchAlert): { inside: number | null; couldMeet: number | null } {
+  const row = alert as WatchAlert & { inside_reach?: number | null; could_meet_count?: number | null };
+  return { inside: row.inside_reach ?? null, couldMeet: row.could_meet_count ?? null };
+}
+
+/**
+ * The sanctions answer for the event's own hull, from the same dossier the vessel panel
+ * shows (`/api/vessel/{mmsi}`), so the two cannot disagree.
+ */
+function sanctionsView(dossier: VesselDossier): { cls: string; nodes: Node[] } {
+  const entry = dossier.watchlist;
+  if (entry === null) return { cls: "is-no", nodes: [document.createTextNode("On a sanctions list: No")] };
+  const shadow = entry.category === "shadow_fleet";
+  const head = shadow ? "Shadow-fleet list" : "On a sanctions list: Yes";
+  const parts: string[] = [];
+  if (entry.list_name !== null) parts.push(entry.list_name);
+  if (dossier.imo !== null) parts.push(`matched by IMO ${dossier.imo}`);
+  const text = [head, ...parts].join(" \u00b7 ");
+  const first = entry.datasets[0];
+  const link =
+    entry.url ?? (first !== undefined ? `https://www.opensanctions.org/datasets/${encodeURIComponent(first)}/` : null);
+  const nodes: Node[] = [document.createTextNode(text)];
+  if (link !== null) {
+    nodes.push(
+      document.createTextNode(" \u00b7 "),
+      h("a", { href: link, target: "_blank", rel: "noopener noreferrer" }, "Source \u2197"),
+    );
+  }
+  return { cls: shadow ? "is-shadow" : "is-yes", nodes };
+}
+
+/** Fills the sanctions line once the dossier answers; a panel that was replaced is left alone. */
+function loadSanctions(mmsi: number, el: HTMLElement): void {
+  fetchVesselDossier(mmsi)
+    .then((dossier) => {
+      if (!el.isConnected) return;
+      const view = sanctionsView(dossier);
+      el.className = `watch-sanctions ${view.cls}`;
+      el.replaceChildren(...view.nodes);
+    })
+    .catch(() => {
+      if (!el.isConnected) return;
+      el.className = "watch-sanctions is-pending";
+      el.textContent = "Sanctions lists could not be checked right now.";
+    });
+}
+
 function contactName(contact: WatchContact): string {
   const trimmed = contact.name?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : `Unnamed \u00b7 MMSI ${contact.mmsi}`;
 }
 
-/** Backend labels are already short; this makes the six-word rule structural. */
-function shortLabel(label: string): string {
+/** The backend label in plain words, whole (the event headline needs all of it, #270). */
+function plainLabel(label: string): string {
   // Backend labels still say "Watchlisted" and "went dark"; the screen uses plain words (QA #229 copy).
   const plain = label
     .replace(/Watchlisted ship went dark/i, "Sanctioned or shadow-fleet ship switched off")
     .replace(/went dark/i, "switched off")
     .replace(/Watchlisted/i, "Sanctioned or shadow-fleet");
-  const words = plain.trim().split(/\s+/).filter(Boolean);
-  return words.slice(0, 6).join(" ");
+  return plain.trim().split(/\s+/).filter(Boolean).join(" ");
+}
+
+/** Backend labels are already short; this makes the six-word rule structural. */
+function shortLabel(label: string): string {
+  return plainLabel(label).split(" ").slice(0, 6).join(" ");
 }
 
 function areaName(data: WatchResponse, areaId: string | null): string {
@@ -1338,7 +1401,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           h("th", { scope: "col", title: "The ship's radio ID (MMSI)" }, "MMSI"),
           h("th", { scope: "col", title: "Distance from the ship that switched off" }, "km"),
           h("th", { scope: "col" }, "Status"),
-          h("th", { scope: "col" }, "On a sanctions list"),
+          h("th", { scope: "col" }, "Sanctioned"),
         ),
       ),
       body,
@@ -1354,8 +1417,9 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           role: "button",
           "aria-label": `${contactName(contact)}, ${fmtDec(contact.min_dist_km, 1)} km`,
         },
-        h("td", { class: "watch-nearby-name" }, contactName(contact)),
-        h("td", { class: "watch-mono", title: "The ship's radio ID (MMSI)" }, String(contact.mmsi)),
+        // The MMSI has its own column, so the name cell says "Unnamed" and the MMSI never wraps (#270).
+        h("td", { class: "watch-nearby-name" }, contact.name?.trim() || "Unnamed"),
+        h("td", { class: "watch-mono watch-mmsi", title: "The ship's radio ID (MMSI)" }, String(contact.mmsi)),
         h(
           "td",
           { class: "watch-mono watch-num", title: "Distance from the ship that switched off" },
@@ -1465,10 +1529,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         : []),
     );
 
+    // Top of every event panel: what happened, then the sanctions answer (issue #270).
+    const sanctionsEl = h("p", { class: "watch-sanctions is-pending" }, "Checking the sanctions lists\u2026");
+    loadSanctions(alert.mmsi, sanctionsEl);
+    const parts: HTMLElement[] = [h("p", { class: "watch-headline" }, headlineOf(alert)), sanctionsEl];
+
     // The three numbers a dark alert is about, set large above the detail.
-    const parts: HTMLElement[] = [];
     if (alert.kind === "dark") {
       const met = alert.contacts.filter((contact) => contact.could_meet === true).length;
+      const metN = reachCounts(alert).couldMeet ?? met;
       parts.push(
         h(
           "div",
@@ -1480,7 +1549,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
             "Furthest it could have sailed at top speed",
             "Distance from the ship that switched off",
           ),
-          figure(fmtInt(met), "Ships it could have met", "Ships it could have come alongside"),
+          figure(fmtInt(metN), "Ships it could have met", "Ships it could have come alongside"),
         ),
       );
     }
@@ -1550,9 +1619,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       // The same predicate as the table cell: the count is the rows that answer Yes,
       // not every row in the table (issue #259).
       const onList = met.filter(onSanctionsList).length;
+      const counts = reachCounts(alert);
+      const couldMeetN = counts.couldMeet ?? met.length;
       parts.push(
         section(
-          `On a sanctions list \u00b7 ${fmtInt(onList)}`,
+          `Ships it could have met \u00b7 ${fmtInt(couldMeetN)} (${fmtInt(onList)} on a sanctions list)`,
           null,
           met.length === 0
             ? h("div", { class: "watch-none" }, "No ship could have met it")
@@ -1580,12 +1651,19 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       }
       others.sort((a, b) => a.min_dist_km - b.min_dist_km);
       const also = [...rest, ...others.slice(0, 40)];
-      const alsoCount = rest.length + others.length;
+      // Inside = every hull in reach (the build's count); ruled out = inside minus could-meet.
+      const insideN = counts.inside ?? met.length + rest.length + others.length;
+      const ruledOut = Math.max(0, insideN - couldMeetN);
       parts.push(
+        h(
+          "p",
+          { class: "watch-reach-note" },
+          `${fmtInt(insideN)} ships were inside the circle; their own tracks rule out ${fmtInt(ruledOut)}. Only ${fmtInt(couldMeetN)} could have been at the same place at the same time.`,
+        ),
         h(
           "details",
           { class: "watch-also" },
-          h("summary", null, `Also where it could have gone: ${alsoCount}`),
+          h("summary", null, "Show the ships ruled out"),
           also.length === 0 ? h("div", { class: "watch-none" }, "None") : contactTable(snapshot, also),
         ),
       );

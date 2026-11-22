@@ -545,6 +545,28 @@ def test_ship_exiting_the_baltic_box_westbound_is_not_a_dark_alert(tmp_path: Pat
     assert explanation.tallies["dark"].removed["left coverage"] == 1
 
 
+def test_dark_alert_carries_true_inside_and_could_meet_counts(tmp_path: Path) -> None:
+    # Issue #270: the screen words "N ships were inside, M could have met" from these counts,
+    # so they must be the full numbers, not the 20-row cut the contacts list is.
+    _write_ais(tmp_path, contact_position=(26.35, 56.30))
+    _write_sanctions(tmp_path)
+    land = _write_land(tmp_path, (56.25, 26.30, 56.35, 26.40))
+
+    payload = _build(tmp_path, land=land)
+    alert = next(alert for alert in payload["alerts"] if alert["kind"] == "dark")
+    contacts = alert["contacts"]
+
+    # The sanctioned hull is inside the reach but at the quay: listed, and not a meeting.
+    assert alert["inside_reach"] >= len(contacts) >= 1
+    assert alert["could_meet_count"] == sum(1 for contact in contacts if contact["could_meet"]) == 0
+
+    # Other alert kinds carry no count (the key is absent or null): the fields are dark-only.
+    others = [alert for alert in payload["alerts"] if alert["kind"] != "dark"]
+    assert all(
+        other.get("inside_reach") is None and other.get("could_meet_count") is None for other in others
+    )
+
+
 def test_declared_slow_ship_gets_a_reach_cap_from_its_own_track() -> None:
     # A fishing hull is not a dark candidate (the type gate excludes it), so drive the payload
     # function directly: its filed class says 13.8 kn, its AIS track says a sustained 30 kn.
