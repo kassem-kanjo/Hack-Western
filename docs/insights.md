@@ -70,3 +70,27 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     other dated events a 14-day window is too noisy to say anything, so we claim none of them. Why it matters:
     a "dark share" alone confounds jamming, traffic collapse and small boats; a control area is what turns
     a striking chart into evidence. Source: docs/hormuz-validation.md, data/research/hormuz_events.json.
+
+17. **Ten ships "went dark" at once, and physics said none of them did.** In Global Fishing Watch's gap
+    events for the Gulf box, 10 vessels stopped broadcasting within 1.7 h on 12 Mar 2026, last seen up to
+    1,334 km out in the Arabian Sea, and reappeared about 22 h later at one spot off the UAE. Getting there
+    needs a median 29 kn; all 10 exceed their class cap (16.1 kn). Their reported positions were corrupted
+    (likely GPS interference), so we do not rank them as hiding. Why it matters: a naive "went dark" detector
+    turns one interference event into ten suspects; a speed check turns it into one finding. Source:
+    data/snapshot/hormuz_stories.json via scripts/build_hormuz_stories.py (#219, #225).
+18. **The real-time guarantee came from ranking the camera above the AI, not just the safety core above
+    everything.** On the QNX Pi 5, with 4 busy-loop workers for 10 s, alarms met the 200 ms deadline 10/27
+    times without our priority guard and 63/64 with it (worst safety-loop lateness 24 ms vs 1.8 ms). Giving
+    the AI a real-time priority above the camera helper froze the camera after 3 frames. And the safety
+    loop's worst stalls (up to 270 ms) came from its own fsync/stat calls, not from CPU load. Why it matters:
+    "use an RTOS" is not enough; which work sits where in the priority order, and what blocks inside the
+    loop, decides whether deadlines hold. Source: docs/patrol-demo.md, ~/darkfleet/ab_result.json (#223).
+19. **A store loaded once looks alive forever.** Tiger Data held 265,250 pings from one morning load; for
+    about 8 hours nothing new arrived and every screen still answered 200. After wiring a live sink, the area
+    rates read 0 everywhere, again with every route 200, because the newest minutes were not materialized
+    and quiet regions flush every 5 minutes. Only a value check (not a status check) caught it. Why it
+    matters: monitoring that checks "is it up" misses "is it true". Source: #208, #216, #218, #221.
+20. **Three of four "listed" ships were port-inspection records, not sanctions.** Matching GFW gap events to
+    the OpenSanctions maritime list by MMSI found 4 ships; 3 appear only in the Tokyo MOU port-state-control
+    dataset with no risk tag. Only SEA 1 (shadow-fleet tag) is a real story. Why it matters: "on a list" is
+    not "sanctioned"; a compliance product has to say which list and why. Source: #237, #239.
