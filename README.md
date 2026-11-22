@@ -6,7 +6,7 @@ Finds ships that hide, using physics: where a ship could have been, whether it c
 
 ## What it found
 
-- **The Strait of Hormuz.** On a typical well-covered day, **41%** of the vessels radar sees around the strait have no matching location broadcast. That is the median over **59 well-covered days**, 15 August to 15 November. Source: `docs/briefings/cp1-sat-morning.md`, `docs/insights.md`.
+- **The Strait of Hormuz.** On a typical well-covered day, **41%** of the vessels radar sees around the strait have no matching location broadcast. That is the median over **59 well-covered days**, 15 August to 15 November. Source: `docs/insights.md`.
 - **GNSS spoofing near St Petersburg.** In our own Baltic recording (Saturday morning snapshot, about 9 hours), **4 unrelated ships** each jumped 40-51 km off their route to the same point on land north of St Petersburg, and back: speeds no ship can reach. A naive rule flagged 784 places, almost all ports; the out-and-back physics rule leaves one. Source: `docs/insights.md`, `data/snapshot/live_BALTIC_WATCH.json`.
 - **Sanctions by IMO.** At least **21 sanctioned or shadow-fleet vessels** seen in the Baltic in about 9 hours, matched by the IMO number they broadcast (e.g. GESTIA, listed as Jaldhara). Off Singapore: the shadow-fleet tanker ROCK and the sanctioned tanker SHUSHA. IMO is a hard identity; names are not. Counts grow as the recording runs.
 - **Ship-to-ship transfers.** Two real offshore transfers in our recording: CSL THAMES with FOX SUNRISE off Gothenburg (about 1 m apart, 40 minutes) and SPAR ARIES with CSM HYDRA in Singapore's anchorage (35 minutes). Both look like routine bunkering, and we label them that way. Source: `docs/insights.md`.
@@ -65,4 +65,4 @@ This is a non-commercial prototype. Real clients would need commercial AIS and r
 
 ## Built at Hack Western 13
 
-**How we built it.** AI coding agents (DeepSeek via OpenCode) wrote most of the code, working in separate lanes with one commit each. Every change was reviewed, run on real recorded data and checked in a real browser before merge, and independent reviews at checkpoints caught a false opener, a whitewashed hotspot and stale numbers. The process log is in `docs/process-audit.md`; what the build surprised us with is in `docs/insights.md`.
+**How we built it.** AI coding agents (DeepSeek via OpenCode) wrote most of the code, working in separate lanes with one commit each. Every change was reviewed, run on real recorded data and checked in a real browser before merge, and independent reviews at checkpoints caught a false opener, a whitewashed hotspot and stale numbers. What the build surprised us with is in `docs/insights.md`.
