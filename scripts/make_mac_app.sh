@@ -70,6 +70,11 @@ set -uo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH"
 cd "$ROOT" || exit 1
 mkdir -p logs
+# Never open a stale build: if any web source is newer than the built page, rebuild first.
+if [ ! -f web/dist/index.html ] || [ -n "\$(find web/src web/index.html -newer web/dist/index.html -print -quit 2>/dev/null)" ]; then
+  echo "\$(date '+%F %T') web build older than source; rebuilding" >> logs/desktop.log
+  (cd web && npm run build) >> logs/desktop.log 2>&1
+fi
 exec "$UV" run --extra desktop --extra edge python -m darkfleet.desktop >> logs/desktop.log 2>&1
 LAUNCHER
 chmod +x "$DEST/Contents/MacOS/darkfleet"
