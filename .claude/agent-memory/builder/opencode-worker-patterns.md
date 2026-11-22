@@ -45,3 +45,9 @@ Delegating to `opencode-go/deepseek-v4.1-flash` via `delegate.sh` worked for bot
 - Worker check script: `cd web && node_modules/.bin/tsc --noEmit` via a symlink to the real `web/node_modules`, removed in an EXIT trap. Keep the symlink out of diff.patch.
 - The worker's "does it look right" was wrong twice, found only by screenshot: (1) a guide line as the first child of `.app` landed in the top-bar row (the grid has two rows; needed a `:has()` row rule); (2) the Watch details panel was `hidden` when nothing was selected, so its empty-state sentence never showed. Check screenshots, not the DOM text.
 - Workers did not warn about copy length. Two copy lines given verbatim were over an 18-word rule; I used the verbatim copy and flagged it.
+
+## Issue #259 round 3 (Patrol copy + tour step 5, 2026-11-21)
+- Two deepseek-v4.1-flash lanes on disjoint files (screens/patrol.ts+css vs present/*): 41 s and 43 s, both check exit 0, in-scope diffs. Applied both with `git apply`; tsc and vite build exit 0 after applying.
+- The Builder worktree guard refuses commands with a `$VAR` or a runtime-computed path in `git` arguments. Spell the scratchpad path out literally in `git apply`.
+- Workers wrote judgement calls I had to check: one kept a module-level cache across re-renders (harmless here); one chose `--c-error` as the accent. Read the diff, not the report.
+- Playwright without a server: unmocked `/api/*` paths return 404 and show up as console errors. List them with a print in the handler before calling them app errors.

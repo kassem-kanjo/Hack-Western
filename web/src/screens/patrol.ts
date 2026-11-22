@@ -71,6 +71,9 @@ const RECORDED_SIGHTING = {
   position: "Kiel Bight (54.45, 10.25)",
 } as const;
 
+/** The last evidence-log payload, so the recorded toggle can repaint the evidence line at once. */
+let lastSightings: SightingsPayload | null = null;
+
 /** The A/B card's rows, in the order armCells() fills them. Plain label; the detail is the tooltip. */
 const AB_ROWS: readonly { label: string; title: string }[] = [
   { label: "Alarms on time", title: "Alarms raised before the deadline, out of the alarm frames the camera sent." },
@@ -231,7 +234,7 @@ function banner(
   decision: EdgeDecision | null,
 ): { level: BannerLevel; text: string; sub: string } {
   if (status?.alarm?.blind === true || decision?.alarm?.level === "blind") {
-    return { level: "blind", text: "Lookout blind \u2014 manual watch", sub: "no frames: the lookout cannot see" };
+    return { level: "blind", text: "Lookout blind", sub: "no frames: the lookout cannot see" };
   }
   if (decision === null) return { level: "idle", text: "Waiting for a decision", sub: "" };
   const alarm = decision.alarm;
@@ -242,16 +245,12 @@ function banner(
     else if (alarm.trend === "steady") parts.push("steady");
     if (typeof alarm.ttc_s === "number") parts.push(`~${Math.round(alarm.ttc_s)} s at this rate`);
     if (typeof alarm.range_m === "number") parts.push(`range ~${fmtInt(alarm.range_m)} m (estimate)`);
-    const text = plainText(alarm.text ?? "Vessel not broadcasting its position \u2014 alert bridge").replace(
-      / \u00b7 closing$/,
-      "",
-    );
-    return { level: "alert", text, sub: parts.join(" \u00b7 ") };
+    return { level: "alert", text: "Vessel not broadcasting its position", sub: parts.join(" \u00b7 ") };
   }
   const matched = typeof decision.verdict?.text === "string" && decision.verdict.text.startsWith("Matches AIS");
   return {
     level: matched ? "ok" : "idle",
-    text: "Watching",
+    text: matched ? "Watching \u00b7 vessel broadcasting its position" : "Watching \u00b7 no vessel in view",
     sub: matched ? plainText(decision.verdict.text) : "",
   };
 }
@@ -436,6 +435,11 @@ export function renderPatrol(app: HTMLElement): void {
     ),
   );
 
+  /** True while the recorded example covers the frame: the chain and evidence show recorded values. */
+  function recordedShown(): boolean {
+    return !recordedPanel.hidden;
+  }
+
   const stage = h(
     "section",
     { class: "stage patrol-stage" },
@@ -520,7 +524,7 @@ export function renderPatrol(app: HTMLElement): void {
     h(
       "table",
       { class: "patrol-ab" },
-      h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "No guard"), h("th", null, "Guard"))),
+      h("thead", null, h("tr", null, h("th", null, ""), h("th", null, "Without our fix"), h("th", null, "With our fix"))),
       abBody,
     ),
     abNote,
@@ -664,6 +668,11 @@ export function renderPatrol(app: HTMLElement): void {
 
   /** "Evidence log: N sightings · chain verified", from the hash-chained log (#220). */
   function paintEvidence(payload: SightingsPayload | null): void {
+    lastSightings = payload;
+    if (recordedShown()) {
+      evidenceEl.textContent = "Example only, not written to the log";
+      return;
+    }
     if (payload === null) {
       evidenceEl.textContent = "Evidence log: no sightings yet";
       return;
@@ -734,6 +743,14 @@ export function renderPatrol(app: HTMLElement): void {
 
   /** The three steps, each one line: what saw, what guessed, what checked AIS. */
   function paintChain(s: EdgeStatus, d: EdgeDecision | null): void {
+    // The recorded example owns the chain while it is open: live numbers would contradict it.
+    if (recordedShown()) {
+      setStep(cameraStep, "idle", `frame ${RECORDED_SIGHTING.frame} (recorded)`);
+      setStep(aiStep, "ok", `${RECORDED_SIGHTING.label} ${RECORDED_SIGHTING.scorePct}% (recorded)`);
+      setStep(safetyStep, "bad", "No ship broadcasting within 2 km \u2192 alert (recorded)");
+      return;
+    }
+
     const detector = detectorState(s, Date.now());
 
     // 1 Camera: the frame rate the safety core processed frames at.
@@ -773,7 +790,11 @@ export function renderPatrol(app: HTMLElement): void {
   }
 
   function paintVerdict(d: EdgeDecision | null): void {
-    const b = banner(status, d);
+    // While the recorded example is open the banner speaks for it too, so the screen never
+    // says "alert" on the left and "no vessel in view" on the right.
+    const b = recordedShown()
+      ? { level: "alert", text: "Vessel not broadcasting its position", sub: "recorded example · not live" }
+      : banner(status, d);
     const key = `${b.level}|${b.text}`;
     verdictSub.textContent = b.sub;
     verdictSub.hidden = b.sub === "";
@@ -997,6 +1018,10 @@ export function renderPatrol(app: HTMLElement): void {
     recordedPanel.hidden = !open;
     recordedBtn.setAttribute("aria-expanded", String(open));
     recordedBtn.textContent = open ? "Hide the recorded sighting" : "Show a recorded sighting";
+    // Repaint at once: a chain of live numbers under a recorded panel would contradict it.
+    if (status !== null) paintChain(status, decision);
+    paintVerdict(decision);
+    paintEvidence(lastSightings);
   });
 
   async function requestStress(): Promise<void> {

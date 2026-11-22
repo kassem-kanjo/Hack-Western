@@ -63,6 +63,11 @@ export interface PresentScene extends PresentCaption {
    * corner of the patrol camera (the alarm, the figures and the Kill/Overload buttons stay clear).
    */
   dock?: "bottom" | "bottom-left" | "top-right" | "map-top-left" | "camera-top-left";
+  /**
+   * The element the tour outlines while this caption is up. CSS only; the tour
+   * never clicks it.
+   */
+  highlight?: "patrol-kill";
   fallback?: Partial<PresentCaption>;
 }
 
@@ -133,9 +138,10 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "patrol",
         dock: "camera-top-left",
+        highlight: "patrol-kill",
         // Only what the screen shows: the presenter presses Kill; nothing here claims it is off.
         headline: "A camera lookout on a QNX Raspberry Pi.",
-        line: "Press Kill the AI: the safety core keeps watching and raises 'lookout blind' instead of going quiet.",
+        line: "Press the highlighted 'Kill the AI detector': the safety core keeps watching and says 'lookout blind' instead of going quiet.",
       },
     ],
   },
@@ -143,10 +149,9 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     id: "close",
     scenes: [
       {
-        route: "watch",
-        alert: "strongest",
-        dock: "map-top-left",
-        headline: "Built for compliance teams and coast guards",
+        route: "hormuz",
+        dock: "bottom",
+        headline: "The chart shows the change after 28 Feb",
         line: "Physics says what's possible, lists say who matters, and the edge unit catches ships that switch off.",
       },
     ],
