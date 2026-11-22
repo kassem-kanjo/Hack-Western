@@ -137,14 +137,46 @@
   text-align: center;
 }
 
+/* Docks other than the bottom centre: the caption leaves the scrim and gets its own panel. */
+.present-caption[data-dock="top-right"] {
+  top: 96px;
+  right: 404px;
+  bottom: auto;
+  left: auto;
+  width: min(560px, calc(100vw - 452px));
+  transform: none;
+}
+
+.present-caption[data-dock="left"] {
+  top: auto;
+  right: auto;
+  bottom: 56px;
+  left: 24px;
+  width: min(640px, calc(100vw - 600px));
+  transform: none;
+}
+
+.present-caption[data-dock="top-right"],
+.present-caption[data-dock="left"] {
+  padding: var(--sp-4);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-2);
+  background: rgba(10, 16, 23, 0.94);
+}
+
+.present-root:has(.present-caption[data-dock="top-right"]) .present-scrim,
+.present-root:has(.present-caption[data-dock="left"]) .present-scrim {
+  display: none;
+}
+
 @keyframes present-caption-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 6px);
+    translate: 0 6px;
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    translate: 0 0;
   }
 }
 

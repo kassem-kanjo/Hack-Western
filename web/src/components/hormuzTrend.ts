@@ -81,7 +81,7 @@ export function trendHeadline(regime: TrendRegime): {
   const ci = regime.did_ci;
   const ciText = ci ? ` (95% CI ${Math.round(ci[0] * 100)}–${Math.round(ci[1] * 100)})` : "";
   return {
-    sentence: `Since the war began, ${Math.round((now / 100) * 3)} in 3 ships here hide from tracking`,
+    sentence: `Since the war began, ${Math.round((now / 100) * 3)} in 3 ships here aren't broadcasting their position`,
     big: `${now}%`,
     before: `was ${was}% before 28 Feb`,
     control: `Gulf of Oman next door: ${ctrlWas}% → ${ctrlNow}%.`,

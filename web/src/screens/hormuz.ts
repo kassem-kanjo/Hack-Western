@@ -17,6 +17,9 @@ import { h } from "../components/dom";
 import { fetchHormuz } from "../components/hormuz";
 import {
   addStoryLayers,
+  clearStories,
+  leadCluster,
+  leadListed,
   showCluster,
   showListed,
   storyCards,
@@ -24,6 +27,12 @@ import {
 } from "../components/hormuzStories";
 import { trendChart, trendHeadline, type HormuzTrend } from "../components/hormuzTrend";
 import { topBar } from "../components/TopBar";
+import {
+  onHormuzCardRequest,
+  pendingHormuzCard,
+  requestHormuzCard,
+  type HormuzCardKey,
+} from "../present/cardRequest";
 import "./hormuz.css";
 
 export interface HormuzScreen {
@@ -43,7 +52,7 @@ const STRAIT: [[number, number], [number, number]] = [
 ];
 
 /** Said plainly under the chips: the receivers were off during this pass. */
-const AIS_NOTE = "Our AIS receivers did not cover this pass, so we can't say which of these are dark.";
+const AIS_NOTE = "Our AIS receivers did not cover this pass, so we can't say which of these switched off.";
 
 interface SarDetection {
   lat: number;
@@ -108,13 +117,25 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   let destroyed = false;
   let sar: SarScan | null = null;
   let selected = 0;
+  let stories: HormuzStories | null = null;
+  /** The story card drawn on the map; null is the strait view. */
+  let activeCard: HormuzCardKey | null = null;
+  const cardButtons: HTMLButtonElement[] = [];
 
   const mapDiv = h("div", { class: "map hormuz-map" });
+  // Returns to the strait view; shown only while a card is open.
+  const backButton = h(
+    "button",
+    { class: "hz-back", type: "button", hidden: true },
+    "Back to strait",
+  );
+  backButton.addEventListener("click", () => requestHormuzCard(null));
   const stage = h(
     "section",
     { class: "stage stage-hormuz", "aria-label": "The Strait of Hormuz" },
     mapDiv,
     h("p", { class: "hormuz-place" }, "Strait of Hormuz", h("span", null, " · Gulf of Oman")),
+    backButton,
     attribution(),
   );
 
@@ -122,7 +143,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   const mapKey = h(
     "p",
     { class: "hz-map-key", hidden: true },
-    "○ reported position   ● came back here   grey dashes: the false track",
+    "○ reported position · ● came back here · grey dashes: faked track",
   );
   stage.append(mapKey);
 
@@ -175,6 +196,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     map.on("mouseenter", DOTS, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", DOTS, () => (map.getCanvas().style.cursor = ""));
     mapReady = true;
+    drawCard();
   });
 
   /** Show one detection: bigger chip, its older optical context, and the dot highlighted. */
@@ -233,42 +255,79 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     );
   }
 
-  /** Two cards under the headline; a click draws that story on the map. */
-  function storyBlock(stories: HormuzStories): HTMLElement {
-    const cards = storyCards(
-      stories,
-      (story) => {
-        mapKey.hidden = true;
-        if (mapReady) showListed(map, story);
-      },
-      (cluster) => {
-        if (!mapReady) return;
-        showCluster(map, cluster);
-        mapKey.hidden = false;
-      },
-    );
+  /**
+   * Draw the active card, or the strait view. Safe before the map or the stories
+   * exist: it runs again when each of them arrives.
+   */
+  function drawCard(): void {
+    const on = (button: HTMLButtonElement): void => {
+      const key = button.dataset["card"] ?? "";
+      const pressed = key === activeCard;
+      button.classList.toggle("is-active", pressed);
+      button.setAttribute("aria-pressed", pressed ? "true" : "false");
+    };
+    cardButtons.forEach(on);
+    backButton.hidden = activeCard === null;
+    mapKey.hidden = activeCard !== "cluster";
+    if (!mapReady) return;
+    if (activeCard === null || stories === null) {
+      if (mapReady) clearStories(map);
+      if (activeCard === null) map.fitBounds(STRAIT, { padding: 32, duration: 600 });
+      return;
+    }
+    if (activeCard === "sea1") {
+      const story = leadListed(stories);
+      if (story !== null) showListed(map, story);
+    } else {
+      const cluster = leadCluster(stories);
+      if (cluster !== null) showCluster(map, cluster);
+    }
+  }
+
+  /** A card request from anywhere (a click here, or the presentation). Same card again closes it. */
+  function applyCard(card: HormuzCardKey | null): void {
+    activeCard = card;
+    drawCard();
+  }
+
+  /** Two cards under the headline; a click on the open card closes it. */
+  function storyBlock(data: HormuzStories): HTMLElement {
+    const cards = storyCards(data, (key) => requestHormuzCard(activeCard === key ? null : key));
+    for (const card of cards) {
+      if (card instanceof HTMLButtonElement) cardButtons.push(card);
+    }
     return h(
       "section",
       { class: "hz-section hz-stories" },
       ...cards,
-      h("p", { class: "hz-small" }, stories.source ?? "Powered by Global Fishing Watch"),
+      h("p", { class: "hz-small" }, data.source ?? "Powered by Global Fishing Watch"),
     );
   }
+
+  // Requests come from clicks and from the presentation; the last one wins.
+  const unsubscribe = onHormuzCardRequest(applyCard);
+  const onEscape = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && activeCard !== null) requestHormuzCard(null);
+  };
+  window.addEventListener("keydown", onEscape);
 
   Promise.all([
     fetchHormuz<HormuzTrend>(TREND_URL, abort.signal),
     fetchHormuz<SarScan>(SAR_URL, abort.signal).catch(() => null),
     fetchHormuz<HormuzStories>(STORIES_URL, abort.signal).catch(() => null),
   ])
-    .then(([trend, scan, stories]) => {
+    .then(([trend, scan, data]) => {
       if (destroyed || abort.signal.aborted) return;
       sar = scan;
+      stories = data;
+      // The radar pass sits under the headline and the cards, so its chips show at 1280x720.
       const parts: HTMLElement[] = [headlineBlock(trend)];
-      if (stories) parts.push(storyBlock(stories));
-      parts.push(chartBlock(trend));
+      if (data) parts.push(storyBlock(data));
       if (scan) parts.push(satellitePass(scan));
+      parts.push(chartBlock(trend));
       body.replaceChildren(...parts);
       renderSarDetail();
+      drawCard();
       if (mapReady) map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections());
       else map.once("load", () => map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections()));
     })
@@ -283,10 +342,16 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       );
     });
 
+  // A card is per visit: leaving the screen closes it for the next one.
+  applyCard(pendingHormuzCard());
+
   return {
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      unsubscribe();
+      window.removeEventListener("keydown", onEscape);
+      requestHormuzCard(null);
       abort.abort();
       map.remove();
     },

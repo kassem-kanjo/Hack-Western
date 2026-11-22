@@ -1,74 +1,57 @@
 /**
  * Presentation mode (design/v2/04-present.png).
  *
- * A fixed overlay over the live app: one bottom-centre caption, a thin progress
- * bar across the top and the keyboard hints under the caption. Steps are data
- * (see steps.ts); stepping only assigns location.hash, so the router keeps
- * owning the screens and the view behind the caption is the real one.
+ * A fixed overlay over the live app: one caption, a thin progress bar across the
+ * top and the keyboard hints under the caption. The beats are data (steps.ts);
+ * stepping sets the hash (the router owns the screens) and, for the Hormuz cards,
+ * the shared card request (cardRequest.ts).
  *
- * Every number on every beat is fetched once when the tour starts and cached
- * for the whole run, so the radar share, the live counts and the spoof offsets
- * cannot disagree between screens. The Hormuz-trend beat only exists when
- * /api/hormuz/trend reports regime.verdict "moves with event"; otherwise it is not in the list.
+ * Every number is fetched once when the tour starts and cached for the run, from
+ * the same endpoint its screen reads, with the screen's rounding. A missing
+ * endpoint leaves the beat's number-free fallback sentence.
  *
- * The overlay itself is pointer-events: none: only the app's own controls and
- * the topbar stay clickable. Keys: -> / Space next, <- back, Esc exits and
- * restores the route that was on screen when presentation started, P toggles.
+ * The overlay is pointer-events: none. Keys: -> / Space next, <- back, Esc exits
+ * and restores the route that was on screen when presentation started, P toggles.
  */
 
 import "./present.css";
 
 import type { WatchAlert } from "../api";
-import { fetchEdgeStatus, fetchStats, fetchWatch } from "../api";
+import { fetchEdgeStatus, fetchWatch } from "../api";
 import { h } from "../components/dom";
+import { daysAfterStrikes, leadCluster, leadListed, type HormuzStories } from "../components/hormuzStories";
+import { requestHormuzCard } from "./cardRequest";
 import {
+  PRESENT_BEATS,
   PRESENT_ROUTES,
-  PRESENT_STEPS,
   watchAlertRoute,
   type PresentCaption,
-  type PresentStep,
+  type PresentScene,
   type PresentToken,
 } from "./steps";
 
-const HORMUZ_UNSEEN_URL = "/api/hormuz/unseen";
-/**
- * The Hormuz trend vs the Gulf of Oman control. A 404 (or an API without the
- * route) means "not proved", and the trend beat is skipped.
- */
-const HORMUZ_TREND_URL = "/api/hormuz/trend";
-const HORMUZ_VERDICT = "moves with event";
+const TREND_URL = "/api/hormuz/trend";
+const STORIES_URL = "/api/hormuz/stories";
 /** Matches the CSS breakpoint: the tour is desktop-only. */
 const PHONE_QUERY = "(max-width: 1000px)";
 
-const TOKEN = /\{([a-z_]+)\}/g;
+const TOKEN = /\{([a-z_0-9]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
 
-/**
- * Live values for the caption tokens. A missing key means "no number from the
- * API", and the step falls back to its number-free sentence. Null means the
- * fetch has not answered yet.
- */
+/** Every scene, flattened, with the beat it belongs to (for the progress bar). */
+const SCENES: readonly { scene: PresentScene; beat: number }[] = PRESENT_BEATS.flatMap((beat, b) =>
+  beat.scenes.map((scene) => ({ scene, beat: b })),
+);
+
+/** A missing key means "no number from the API"; the beat falls back to its sentence. */
 type TokenValues = Partial<Record<PresentToken, string>>;
 
-interface TourValues {
-  tokens: TokenValues;
-  /** True only when the trend endpoint's regime verdict is "moves with event". */
-  trend: boolean;
-}
-
 let tokenValues: TokenValues | null = null;
-let trendValidated = false;
-
-/** Route values (today: the spoof alert id); missing means the beat's fallback route. */
-const routeValues: Record<string, string> = {};
-
-/** The beats visible for this run: all of them, minus any unproved conditional beat. */
-let steps: readonly PresentStep[] = visibleSteps(false);
+/** The alert the "strongest" beat focuses; null until the watch fetch answers. */
+let strongestId: string | null = null;
 
 let active = false;
 let index = 0;
-/** Id of the beat on screen, so a list change keeps the presenter on that beat. */
-let currentId: string | null = null;
 /** Bumped on start/exit so a fetch from an earlier run cannot repaint this one. */
 let run = 0;
 /** The hash that was on screen before presentation started; restored on exit. */
@@ -79,13 +62,7 @@ let caption: HTMLElement | null = null;
 let stepLabel: HTMLElement | null = null;
 let headline: HTMLElement | null = null;
 let line: HTMLElement | null = null;
-let progress: HTMLElement | null = null;
 let progressFill: HTMLElement | null = null;
-
-/** The tour list after the run's one trend fetch answers. */
-function visibleSteps(showTrend: boolean): readonly PresentStep[] {
-  return PRESENT_STEPS.filter((beat) => beat.requires !== "hormuz_trend" || showTrend);
-}
 
 /** Hash navigation is the router's contract; never touch the screen directly. */
 function navigate(route: string): void {
@@ -108,90 +85,9 @@ function restore(hash: string): void {
   location.hash = hash;
 }
 
-function setProgress(step: number): void {
-  const count = steps.length;
-  if (progress !== null) {
-    progress.setAttribute("aria-valuemax", String(count));
-    progress.setAttribute("aria-valuenow", String(step + 1));
-    progress.setAttribute("aria-valuetext", `Step ${step + 1} of ${count}`);
-  }
-  if (progressFill !== null) {
-    progressFill.style.width = `${((step + 1) / count) * 100}%`;
-  }
-}
-
 /** A finite number or null; one guard for every optional field on the wire. */
 function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function integerToken(value: number | null): string | undefined {
-  return value === null ? undefined : INTEGER.format(Math.round(value));
-}
-
-function ratioToken(value: number | null): string | undefined {
-  return value === null ? undefined : value.toFixed(2);
-}
-
-/** "148 ms"; undefined leaves the beat's number-free fallback sentence. */
-function recoveryToken(value: number | null): string | undefined {
-  return value === null || value < 0 ? undefined : `${Math.round(value)} ms`;
-}
-
-/** The spoof event the "physics" beat is about: highest severity, as the API sorts. */
-function topSpoof(alerts: readonly WatchAlert[]): WatchAlert | null {
-  let best: WatchAlert | null = null;
-  for (const alert of alerts) {
-    if (alert.kind !== "spoof") continue;
-    if (best === null || alert.severity > best.severity) best = alert;
-  }
-  return best;
-}
-
-interface SpoofFacts {
-  ships: number | null;
-  minKm: number | null;
-  maxKm: number | null;
-}
-
-/**
- * The ghost point's own numbers. Current snapshots write `evidence.vessels[]`
- * with one `offset_km` each; older ones also carry a flat `offsets_km`. Both
- * are read without trusting unknown JSON.
- */
-function spoofFacts(alert: WatchAlert): SpoofFacts {
-  const evidence = alert.evidence ?? {};
-  const rows = Array.isArray(evidence["vessels"]) ? evidence["vessels"] : [];
-  const offsets: number[] = [];
-  let rowCount = 0;
-
-  for (const row of rows) {
-    if (!isRecord(row)) continue;
-    rowCount += 1;
-    const km = finite(row["offset_km"]);
-    if (km !== null && km > 0) offsets.push(km);
-  }
-
-  if (offsets.length === 0) {
-    const flat = evidence["offsets_km"];
-    if (Array.isArray(flat)) {
-      for (const value of flat) {
-        const km = finite(value);
-        if (km !== null && km > 0) offsets.push(km);
-      }
-    }
-  }
-
-  const declared = finite(evidence["n_vessels"]);
-  const ships =
-    declared ?? (rowCount > 0 ? rowCount : offsets.length > 0 ? offsets.length : null);
-
-  if (offsets.length === 0) return { ships, minKm: null, maxKm: null };
-  return { ships, minKm: Math.min(...offsets), maxKm: Math.max(...offsets) };
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -200,120 +96,109 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** Hormuz's snapshot is local to its block; presentation needs only these fields. */
-interface HormuzSummaryLite {
-  dark_share_mean?: number | null;
-  headline_share?: number | null;
-}
-
-interface HormuzUnseenLite {
-  summary?: HormuzSummaryLite;
-}
-
-/** The trend's regime block: the only fields the tour prints or gates on. */
+/** The trend's regime block: the only fields the Hormuz beat prints. */
 interface HormuzTrendLite {
   regime?: {
     treated?: { baseline?: { dark_share?: number | null }; current?: { dark_share?: number | null } };
     did?: number | null;
-    verdict?: string | null;
   };
 }
 
-function normalVerdict(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-/** Fractions (0.316) become one-decimal percents for the caption ("31.6"). */
-function percentToken(value: unknown): string | undefined {
+/** Same rounding as the Hormuz headline: whole percents for the shares. */
+function wholePercent(value: unknown): string | undefined {
   const fraction = finite(value);
-  return fraction === null ? undefined : (fraction * 100).toFixed(1);
+  return fraction === null ? undefined : String(Math.round(fraction * 100));
 }
 
-/**
- * The trend beat is shown only when the endpoint's own regime verdict says the
- * share moves with the event. Numbers come from the same response, never from
- * a constant here; a missing route (404) means no beat.
- */
-async function loadHormuzTrend(): Promise<{ proved: boolean; tokens: TokenValues }> {
-  try {
-    const regime = (await getJson<HormuzTrendLite>(HORMUZ_TREND_URL)).regime;
-    const proved = normalVerdict(regime?.verdict ?? "") === HORMUZ_VERDICT;
-    const tokens: TokenValues = {};
-    const before = percentToken(regime?.treated?.baseline?.dark_share);
-    const after = percentToken(regime?.treated?.current?.dark_share);
-    const did = percentToken(regime?.did);
-    if (before !== undefined) tokens.hormuz_before = before;
-    if (after !== undefined) tokens.hormuz_after = after;
-    if (did !== undefined) tokens.did_pts = did;
-    return { proved, tokens };
-  } catch {
-    // No route, or unreadable JSON: the trend beat is not proved.
-    return { proved: false, tokens: {} };
+function tokensFromTrend(trend: HormuzTrendLite): TokenValues {
+  const regime = trend.regime;
+  const tokens: TokenValues = {};
+  const before = wholePercent(regime?.treated?.baseline?.dark_share);
+  const after = wholePercent(regime?.treated?.current?.dark_share);
+  const did = finite(regime?.did);
+  if (before !== undefined) tokens.hormuz_before = before;
+  if (after !== undefined) tokens.hormuz_after = after;
+  // The Hormuz screen prints the difference with one decimal, in points.
+  if (did !== null) tokens.did_pts = (did * 100).toFixed(1);
+  return tokens;
+}
+
+function tokensFromStories(stories: HormuzStories): TokenValues {
+  const tokens: TokenValues = {};
+  const story = leadListed(stories);
+  if (story !== null) {
+    tokens.sea1_hours = story.hours.toFixed(1);
+    tokens.sea1_days = String(daysAfterStrikes(story.start));
+    if (story.moved_km !== null) tokens.sea1_km = String(Math.round(story.moved_km));
   }
+  const cluster = leadCluster(stories);
+  if (cluster !== null) {
+    tokens.cluster_ships = String(cluster.vessels);
+    tokens.cluster_hours = cluster.span_hours.toFixed(1);
+    if (cluster.median_kn !== null) tokens.cluster_kn = String(Math.round(cluster.median_kn));
+  }
+  return tokens;
 }
 
 /**
- * Fetch every number the captions may print, once per tour run. The calls are
- * independent (`allSettled`) so one dead endpoint only removes its own numbers;
- * each beat then reads its fallback sentence. `trend` resolves to a verdict
- * rather than rejecting, so "missing" and "not proved" take the same path.
+ * The alert the live beat focuses. Strongest first: an ongoing dark ship with the
+ * most ships it could have met (the beat is about a ship switching off), then any
+ * ongoing alert (the watch list leads with it), then the cold open's own order:
+ * the newest earlier dark alert a sanctioned ship could have met, the newest
+ * sanctioned stop, the newest faked position.
  */
-async function loadTourValues(): Promise<TourValues> {
-  const [watch, unseen, stats, edge, trend] = await Promise.allSettled([
+function strongestAlert(alerts: readonly WatchAlert[]): WatchAlert | null {
+  const met = (alert: WatchAlert): number => alert.contacts.filter((contact) => contact.could_meet === true).length;
+  const newest = [...alerts].sort((a, b) => Date.parse(b.t_start) - Date.parse(a.t_start));
+  const ongoing = newest.filter((alert) => alert.status === "ongoing");
+  const liveDark = ongoing.filter((alert) => alert.kind === "dark").sort((a, b) => met(b) - met(a));
+  if (liveDark[0] !== undefined) return liveDark[0];
+  if (ongoing[0] !== undefined) return ongoing[0];
+  return (
+    newest.find(
+      (alert) =>
+        alert.kind === "dark" &&
+        alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned"),
+    ) ??
+    newest.find((alert) => alert.kind === "sanctioned_stop") ??
+    newest.find((alert) => alert.kind === "spoof") ??
+    null
+  );
+}
+
+/**
+ * Fetch every number the captions may print, once per run. The calls are
+ * independent (`allSettled`), so one dead endpoint only removes its own numbers.
+ */
+async function loadTourValues(): Promise<{ tokens: TokenValues; strongest: string | null }> {
+  const [watch, trend, stories, edge] = await Promise.allSettled([
     fetchWatch(),
-    getJson<HormuzUnseenLite>(HORMUZ_UNSEEN_URL),
-    fetchStats(),
+    getJson<HormuzTrendLite>(TREND_URL),
+    getJson<HormuzStories>(STORIES_URL),
     fetchEdgeStatus(),
-    loadHormuzTrend(),
   ]);
 
-  const values: TokenValues = {};
+  const tokens: TokenValues = {};
+  let strongest: string | null = null;
 
   if (watch.status === "fulfilled") {
-    const data = watch.value;
-    const counts = (data.counts ?? {}) as { ships?: unknown; alerts?: unknown };
-    const ships = Array.isArray(data.ships) ? data.ships : [];
-    const alerts = Array.isArray(data.alerts) ? data.alerts : [];
-    const areas = Array.isArray(data.areas) ? data.areas : [];
-
-    values.ships_now = integerToken(finite(counts.ships) ?? ships.length);
-    values.alerts = integerToken(finite(counts.alerts) ?? alerts.length);
-
-    // "across N areas" means the receivers we run, not every watched box.
-    const listening = areas.filter((area) => area.kind === "listening").length;
-    const areaCount = listening > 0 ? listening : areas.length;
-    if (areaCount > 0) values.areas = integerToken(areaCount);
-
-    const spoof = topSpoof(alerts);
-    if (spoof !== null) {
-      routeValues["spoof_id"] = spoof.id;
-      const facts = spoofFacts(spoof);
-      values.spoof_ships = integerToken(facts.ships);
-      values.offset_min = integerToken(facts.minKm);
-      values.offset_max = integerToken(facts.maxKm);
+    const alerts = Array.isArray(watch.value.alerts) ? watch.value.alerts : [];
+    const focus = strongestAlert(alerts);
+    if (focus !== null) {
+      strongest = focus.id;
+      tokens.met = String(focus.contacts.filter((contact) => contact.could_meet === true).length);
     }
   }
 
-  if (unseen.status === "fulfilled") {
-    const summary = unseen.value.summary;
-    const share = finite(summary?.headline_share) ?? finite(summary?.dark_share_mean);
-    if (share !== null) values.hormuz_share_pct = String(Math.round(share * 100));
-  }
-
-  if (stats.status === "fulfilled") {
-    values.null_ratio = ratioToken(finite(stats.value.validation?.null_ratio));
-  }
+  if (trend.status === "fulfilled") Object.assign(tokens, tokensFromTrend(trend.value));
+  if (stories.status === "fulfilled") Object.assign(tokens, tokensFromStories(stories.value));
 
   if (edge.status === "fulfilled") {
-    values.recovery = recoveryToken(finite(edge.value.last_recovery_ms));
+    const ms = finite(edge.value.last_recovery_ms);
+    if (ms !== null && ms >= 0) tokens.recovery = `${Math.round(ms)} ms`;
   }
 
-  if (trend.status === "fulfilled") Object.assign(values, trend.value.tokens);
-
-  return {
-    tokens: values,
-    trend: trend.status === "fulfilled" && trend.value.proved,
-  };
+  return { tokens, strongest };
 }
 
 function ensureTourValues(myRun: number): void {
@@ -321,11 +206,9 @@ function ensureTourValues(myRun: number): void {
     .then((loaded) => {
       if (myRun !== run) return;
       tokenValues = loaded.tokens;
-      trendValidated = loaded.trend;
-      steps = visibleSteps(trendValidated);
-      // The conditional beat may have just joined (or stayed absent): keep the
-      // same beat on screen and only refresh its label, text and progress.
-      repaint();
+      strongestId = loaded.strongest;
+      // Re-show the same scene: its route may now name the strongest alert.
+      show(index);
     })
     .catch(() => {
       // Keep the fallbacks; a failed fetch must never put "undefined" on screen.
@@ -349,7 +232,7 @@ function fill(template: string, values: TokenValues | null): string | null {
   return missing ? null : text;
 }
 
-/** Last-resort safety: never show a raw placeholder if a step forgot its fallback. */
+/** Last-resort safety: never show a raw placeholder if a scene forgot its fallback. */
 function stripTokens(template: string): string {
   return template
     .replace(TOKEN, "")
@@ -358,36 +241,37 @@ function stripTokens(template: string): string {
     .trim();
 }
 
-function captionFor(beat: PresentStep): PresentCaption {
+function captionFor(scene: PresentScene): PresentCaption {
   return {
-    headline: fill(beat.headline, tokenValues) ?? beat.fallback?.headline ?? stripTokens(beat.headline),
-    line: fill(beat.line, tokenValues) ?? beat.fallback?.line ?? stripTokens(beat.line),
+    headline: fill(scene.headline, tokenValues) ?? scene.fallback?.headline ?? stripTokens(scene.headline),
+    line: fill(scene.line, tokenValues) ?? scene.fallback?.line ?? stripTokens(scene.line),
   };
 }
 
-/** The route for a beat, or the world view while the spoof id is unknown. */
-function routeFor(beat: PresentStep): string {
-  if (beat.alert === "spoof") {
-    const id = routeValues["spoof_id"];
-    return id === undefined || id === "" ? PRESENT_ROUTES.watch : watchAlertRoute(id);
+/** The route for a scene, or the world view while the strongest alert is unknown. */
+function routeFor(scene: PresentScene): string {
+  if (scene.alert === "strongest") {
+    return strongestId === null ? PRESENT_ROUTES.watch : watchAlertRoute(strongestId);
   }
-  return PRESENT_ROUTES[beat.route];
+  return PRESENT_ROUTES[scene.route];
 }
 
-/** Swap the caption to one step and replay its 200 ms fade-in. */
-function show(step: number): void {
-  const beat = steps[step];
-  if (beat === undefined || root === null) return;
+/** Swap the caption to one scene and replay its 200 ms fade-in. */
+function show(at: number): void {
+  const entry = SCENES[at];
+  if (entry === undefined || root === null) return;
 
-  const text = captionFor(beat);
-  index = step;
-  currentId = beat.id;
-  navigate(routeFor(beat));
+  const { scene, beat } = entry;
+  const text = captionFor(scene);
+  index = at;
+  navigate(routeFor(scene));
+  requestHormuzCard(scene.card ?? null);
 
-  if (stepLabel !== null) stepLabel.textContent = `${step + 1} / ${steps.length}`;
+  if (stepLabel !== null) stepLabel.textContent = `${beat + 1} / ${PRESENT_BEATS.length}`;
   if (headline !== null) headline.textContent = text.headline;
   if (line !== null) line.textContent = text.line;
-  setProgress(step);
+  if (caption !== null) caption.dataset["dock"] = scene.dock ?? "bottom";
+  if (progressFill !== null) progressFill.style.width = `${((beat + 1) / PRESENT_BEATS.length) * 100}%`;
 
   // Removing and re-adding in the same frame restarts the CSS animation; the
   // read of offsetWidth flushes the style change between the two.
@@ -398,29 +282,21 @@ function show(step: number): void {
   }
 }
 
-/** Re-render the current beat after the step list or its values changed. */
-function repaint(): void {
-  if (!active) return;
-  const at = currentId === null ? -1 : steps.findIndex((beat) => beat.id === currentId);
-  show(at >= 0 ? at : 0);
-}
-
 function hint(key: string, label: string): HTMLElement {
   return h("span", { class: "present-hint" }, h("kbd", { class: "present-kbd" }, key), ` ${label}`);
 }
 
 function buildOverlay(): HTMLElement {
   progressFill = h("i", { class: "present-progress-fill" });
-  progress = h(
+  const progress = h(
     "div",
     {
       class: "present-progress",
       role: "progressbar",
       "aria-label": "Presentation progress",
       "aria-valuemin": 1,
-      "aria-valuemax": steps.length,
+      "aria-valuemax": PRESENT_BEATS.length,
       "aria-valuenow": 1,
-      "aria-valuetext": `Step 1 of ${steps.length}`,
     },
     progressFill,
   );
@@ -460,7 +336,7 @@ function tourUnsupported(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia(PHONE_QUERY).matches;
 }
 
-/** Start at step 1. Calling it while active restarts from the first beat. */
+/** Start at the first scene. Calling it while active restarts from the top. */
 export function startPresent(): void {
   // The tour needs the width of a laptop: on a phone the overlay is not drawn.
   if (tourUnsupported()) return;
@@ -470,10 +346,7 @@ export function startPresent(): void {
     // Each run gets fresh numbers; they are cached until the run ends.
     run += 1;
     tokenValues = null;
-    trendValidated = false;
-    steps = visibleSteps(false);
-    for (const key of Object.keys(routeValues)) delete routeValues[key];
-    currentId = null;
+    strongestId = null;
     root = buildOverlay();
     document.body.append(root);
     document.body.classList.add("is-presenting");
@@ -488,6 +361,7 @@ export function exitPresent(): void {
   if (!active) return;
   active = false;
   run += 1; // invalidate a fetch that is still in flight
+  requestHormuzCard(null);
   document.body.classList.remove("is-presenting");
   root?.remove();
   root = null;
@@ -495,9 +369,7 @@ export function exitPresent(): void {
   stepLabel = null;
   headline = null;
   line = null;
-  progress = null;
   progressFill = null;
-  currentId = null;
   restore(startHash);
   startHash = "";
 }
@@ -529,7 +401,7 @@ function onKeyDown(event: KeyboardEvent): void {
   if (event.key === "ArrowRight" || event.key === " " || event.code === "Space") {
     event.preventDefault();
     if (event.repeat) return;
-    show(Math.min(index + 1, steps.length - 1));
+    show(Math.min(index + 1, SCENES.length - 1));
     return;
   }
 
