@@ -155,7 +155,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   const mapKey = h(
     "p",
     { class: "hz-map-key", hidden: true },
-    "○ reported position · ● came back here · grey dashes: faked track",
+    "○ reported position · ● reappeared here · grey dashes: faked track",
   );
   stage.append(mapKey);
 
