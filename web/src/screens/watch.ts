@@ -891,9 +891,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "OpenSanctions",
       ),
     ),
-    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Snapshot"), statusSnap),
-    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Transponder feed"), statusFeed),
-    h("span", { class: "watch-status-item is-keys" }, keyHint("J"), keyHint("K"), "move", keyHint("Esc"), "back", keyHint("/"), "find ship"),
+    // Issue #249: the bar carries sources and the UTC clock only.
     h("span", { class: "watch-status-item is-clock" }, h("span", { class: "watch-status-k" }, "UTC"), statusClock),
   );
 
@@ -1120,15 +1118,26 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   }
 
   /** The watched areas as rows: every area on the map can be opened from here too. */
+  /**
+   * One line of watched areas that have events in the window (issue #249). An area with nothing
+   * to show is left out, and the whole block is hidden when no area has an event.
+   */
   function renderAreas(snapshot: WatchResponse): void {
-    const watched = snapshot.areas.filter((area) => area.kind === "watched");
-    areasCount.textContent = String(watched.length);
-    areasList.replaceChildren();
     const now = snapshotNow(snapshot);
-    for (const area of watched) {
-      const count = snapshot.alerts.filter(
-        (alert) => alert.area_id === area.id && inWindow(alert, now, 12),
-      ).length;
+    const active = snapshot.areas
+      .filter((area) => area.kind === "watched")
+      .map((area) => ({
+        area,
+        count: snapshot.alerts.filter((alert) => alert.area_id === area.id && inWindow(alert, now, 12)).length,
+      }))
+      .filter((entry) => entry.count > 0);
+    areasCount.textContent = String(active.length);
+    areasEl.hidden = active.length === 0;
+    areasList.replaceChildren();
+    if (active.length === 0) return;
+    const line = h("li", { class: "watch-areas-line" });
+    active.forEach(({ area, count }, index) => {
+      if (index > 0) line.append(" · ");
       const row = h(
         "button",
         {
@@ -1138,13 +1147,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "data-area-id": area.id,
         },
         h("span", { class: "watch-area-row-name" }, area.name),
-        h("span", { class: count > 0 ? "watch-mono watch-area-row-n is-hot" : "watch-mono watch-area-row-n" }, String(count)),
+        " ",
+        h("span", { class: "watch-mono watch-area-row-n is-hot" }, String(count)),
       );
       row.addEventListener("click", () => {
         location.hash = watchAreaHref(area.id);
       });
-      areasList.append(h("li", null, row));
-    }
+      line.append(row);
+    });
+    areasList.append(line);
   }
 
   /** One way to pick an area: filter the list and move the camera there (null = opening view). */
