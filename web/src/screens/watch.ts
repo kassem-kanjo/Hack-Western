@@ -21,13 +21,11 @@ import type {
   WatchStream,
 } from "../api";
 import {
-  fetchHormuzHistory,
-  fetchHormuzUnseen,
   fetchWatch,
   watchFixtureUrl,
   watchStream,
 } from "../api";
-import type { HormuzHistoryFile, HormuzUnseenFile, WatchArea, WatchRecording } from "../api";
+import type { WatchArea, WatchRecording } from "../api";
 import { mountReplay, type ReplayView } from "../components/AlertReplay";
 import { h } from "../components/dom";
 import { onVesselFocus } from "../components/SearchBox";
@@ -44,11 +42,7 @@ import { fetchListeningRate } from "../model/areaStats";
 import { timeAgo } from "../model/liveFacts";
 import { LIVE_REGIONS, openLiveFeed, type LiveFeed } from "../model/liveFeed";
 import {
-  buildRadarPanel,
   GFW_URL,
-  latestWellCoveredDay,
-  radarBounds,
-  radarMapView,
   type RadarPanel,
 } from "./watchHormuz";
 import {
@@ -925,7 +919,6 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   let freshIds = new Set<string>();
 
   let radarPanel: RadarPanel | null = null;
-  let radarData: Promise<{ unseen: HormuzUnseenFile; history: HormuzHistoryFile }> | null = null;
   let radarToken = 0;
   let radarSelectedEncounter: number | null = null;
 
@@ -1631,18 +1624,6 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     attrib = next;
   }
 
-  function loadRadar(): Promise<{ unseen: HormuzUnseenFile; history: HormuzHistoryFile }> {
-    if (radarData === null) {
-      radarData = Promise.all([fetchHormuzUnseen(abort.signal), fetchHormuzHistory(abort.signal)]).then(
-        ([unseen, history]) => ({ unseen, history }),
-      );
-      radarData.catch(() => {
-        radarData = null;
-      });
-    }
-    return radarData;
-  }
-
   function disposeRadar(): void {
     radarToken += 1;
     radarPanel?.destroy();
@@ -1650,95 +1631,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     radarSelectedEncounter = null;
   }
 
-  function showRadar(alert: WatchAlert | null): void {
+  // The radar story lives on the Hormuz screen (finding, 2-year chart, today's satellite
+  // pass). Kassem: the old per-day bars and replay here were noise; send people there.
+  function showRadar(_alert: WatchAlert | null): void {
     disposeRadar();
-    const token = radarToken;
-    detailBody.replaceChildren(
-      h(
-        "div",
-        { class: "watch-skel-panel", "aria-hidden": "true" },
-        ...skeletonRows(6),
-      ),
-    );
-    setAttrib(true);
-    // Fly now; the density layer arrives with the data.
-    map?.showRegion({
-      bounds: [54.0, 22.0, 60.5, 27.5],
-      areaId: "HORMUZ_STRAIT",
-      alertId: alert?.id ?? null,
-    });
-    void loadRadar()
-      .then(({ unseen, history }) => {
-        if (destroyed || token !== radarToken || map === null) return;
-        const evidenceDay = typeof alert?.evidence["day"] === "string" ? (alert.evidence["day"] as string) : null;
-        map.showRegion({ bounds: radarBounds(unseen), areaId: "HORMUZ_STRAIT", alertId: alert?.id ?? null });
-        map.setRadar(radarMapView(unseen, history, null));
-        const handle = map;
-        const panel = buildRadarPanel({
-          unseen,
-          history,
-          restDay: evidenceDay ?? latestWellCoveredDay(unseen),
-          autoplay: true,
-          onIntensity: (k) => handle.setRadarIntensity(k),
-          onEncounter: (i) => focusEncounter(history, i),
-          onHotspot: (i) => {
-            const spot = history.hotspots[i];
-            if (spot === undefined) return;
-            handle.focusContact({
-              mmsi: 0,
-              name: `Loitering hotspot · ${spot.n} events`,
-              lat: spot.lat,
-              lon: spot.lon,
-              sanctioned: false,
-            });
-          },
-        });
-        radarPanel = panel;
-        detailBody.replaceChildren(panel.element);
-
-        // Map markers select rows too.
-        radarMarkerHandler = (kind, index) => {
-          if (kind === "encounter") {
-            panel.markEncounter(index);
-            focusEncounter(history, index);
-          } else {
-            const spot = history.hotspots[index];
-            if (spot === undefined) return;
-            handle.focusContact({
-              mmsi: 0,
-              name: `Loitering hotspot · ${spot.n} events`,
-              lat: spot.lat,
-              lon: spot.lon,
-              sanctioned: false,
-            });
-          }
-        };
-      })
-      .catch(() => {
-        if (destroyed || token !== radarToken) return;
-        detailBody.replaceChildren(h("div", { class: "watch-none watch-area-empty" }, "Radar picture unavailable"));
-      });
+    window.location.hash = "#/hormuz";
   }
 
   let radarMarkerHandler: ((kind: "encounter" | "hotspot", index: number) => void) | null = null;
 
-  function focusEncounter(history: HormuzHistoryFile, index: number): void {
-    const enc = history.encounters[index];
-    if (enc === undefined || map === null) return;
-    radarSelectedEncounter = index;
-    map.focusContact({
-      mmsi: 0,
-      name: `${partyLabel(enc.vessel.name, enc.vessel.mmsi)} × ${partyLabel(enc.other.name, enc.other.mmsi)}`,
-      lat: enc.lat,
-      lon: enc.lon,
-      sanctioned: false,
-    });
-  }
-
-  function partyLabel(name: string | null | undefined, mmsi: string | null | undefined): string {
-    const trimmed = name?.trim();
-    return trimmed ? trimmed : mmsi ? `MMSI ${mmsi}` : "Unnamed";
-  }
 
   // ---- selection ------------------------------------------------------------
 
