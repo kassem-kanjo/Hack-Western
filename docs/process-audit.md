@@ -278,3 +278,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** stopped it and handed a self-contained brief to a fresh builder; Desktop cleaned to the two final files.
 - **Code share since audit 39:** builders ~80%; Chief: QA, decisions, file hygiene.
 - **Change for next 30 min:** restart long-running agents after one big deliverable instead of chaining revisions into one context.
+
+## Sun 22 Nov, 03:50 ET (audit 41, covers 02:50-03:50)
+- **Went well:** v6 done in two voices from one verified cut: friends' voice (2:01) and ElevenLabs v4 "Jessica" (2:27). Zoom targets were measured on real frames from a written line-by-line shot list, and each zoom peak was checked against its spoken line. Kassem chose the voice from five samples.
+- **Went wrong:** v5 zoomed on the wrong things (targets from an old timeline). Two audio bugs reached Kassem: sentence endings clipped (trimmed at Whisper's early word-end time), then a fade set at time 0 silenced the whole Jessica track. The first ElevenLabs key lacked the text_to_speech permission.
+- **Fixes:** shot list + measured boxes + peak-frame sheet; tails extended ~0.3 s into the following pause with a short end fade; a volumedetect check before any audio is sent; the Jessica cut re-timed mechanically from B's verified plan instead of waiting for A.
+- **Code share since audit 40:** builders ~55%; Chief: voice pipeline, re-timing, audio QA.
+- **Change for next 30 min:** measure loudness (volumedetect) and look at a frame sheet for every media file before it reaches Kassem.
