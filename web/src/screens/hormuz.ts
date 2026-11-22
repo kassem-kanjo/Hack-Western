@@ -1,12 +1,12 @@
 /**
- * Hormuz view (#200 V3, demo beat): three things, top to bottom.
+ * Hormuz view (#200 V3, demo beat): the story, top to bottom.
  *
  *   1. The headline: how many ships here hide from tracking, since the war began,
  *      against the Gulf of Oman control. Figures from /api/hormuz/trend regime.
- *   2. One chart: weekly share not broadcasting, two years, Hormuz against control.
- *   3. Today's satellite pass: the radar detections on the map and as chips.
+ *   2. One chart: pooled share not broadcasting, two years, Hormuz against control.
+ *   3. Two story cards that draw a story on the map, and the data credit.
  *
- * Every number comes from the API; the map shows the detections as dots only.
+ * Every number comes from the API.
  */
 
 import * as maplibregl from "maplibre-gl";
@@ -14,7 +14,6 @@ import * as maplibregl from "maplibre-gl";
 import { offlineStyle } from "../basemap";
 import { attribution } from "../components/Attribution";
 import { h } from "../components/dom";
-import { fmtInt } from "../format";
 import { fetchHormuz } from "../components/hormuz";
 import {
   addStoryLayers,
@@ -41,43 +40,13 @@ export interface HormuzScreen {
 }
 
 const TREND_URL = "/api/hormuz/trend";
-const SAR_URL = "/api/sar/scan";
 const STORIES_URL = "/api/hormuz/stories";
-const DETECTIONS = "sar-detections";
-const DOTS = "sar-dots";
 
 /** The frame the screen always opens on: the strait, zoomed in. */
 const STRAIT: [[number, number], [number, number]] = [
   [55.6, 25.6],
   [57.2, 27.1],
 ];
-
-/** Said plainly under the chips: the receivers were off during this pass. */
-const AIS_NOTE = "Our receivers did not cover this pass, so we can't say which of these switched off.";
-
-interface SarDetection {
-  lat: number;
-  lon: number;
-  chip?: string;
-}
-
-interface SarScan {
-  time?: string;
-  counts?: { detected?: number };
-  detections?: SarDetection[];
-}
-
-/** Chip files are named without their extension; the API serves them by that name. */
-const chipUrl = (file: string): string => `/api/sar/chip/${file.replace(/\.png$/, "")}.png`;
-
-/** "21 Nov 02:06 UTC" from the scan's ISO time. */
-function passLabel(iso: string | undefined): string {
-  const t = iso ? new Date(iso) : null;
-  if (t === null || Number.isNaN(t.getTime())) return "";
-  const day = t.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-  const hm = t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC", hour12: false });
-  return `${day} ${hm} UTC`;
-}
 
 function headlineBlock(trend: HormuzTrend): HTMLElement {
   const figures = trend.regime ? trendHeadline(trend.regime) : null;
@@ -94,7 +63,8 @@ function headlineBlock(trend: HormuzTrend): HTMLElement {
       h("span", { class: "hz-big" }, figures.big),
       h("span", { class: "hz-before" }, figures.before),
     ),
-    h("p", { class: "hz-small" }, figures.control, " ", figures.difference),
+    h("p", { class: "hz-next" }, figures.control),
+    h("p", { class: "hz-small" }, figures.difference),
   );
 }
 
@@ -102,22 +72,14 @@ function chartBlock(trend: HormuzTrend): HTMLElement {
   return h(
     "section",
     { class: "hz-section" },
-    h("h2", { class: "hz-label" }, "Share not broadcasting, 4-week average (weekly faint)"),
+    h("h2", { class: "hz-label" }, "Share of radar-seen ships not broadcasting"),
     trendChart(trend),
-    h(
-      "p",
-      { class: "hz-legend" },
-      h("span", { class: "hz-key is-treated" }, "Strait of Hormuz"),
-      h("span", { class: "hz-key is-control" }, "Gulf of Oman (control)"),
-    ),
   );
 }
 
 export function renderHormuz(app: HTMLElement): HormuzScreen {
   const abort = new AbortController();
   let destroyed = false;
-  let sar: SarScan | null = null;
-  let selected = 0;
   let stories: HormuzStories | null = null;
   /** The story card drawn on the map; null is the strait view. */
   let activeCard: HormuzCardKey | null = null;
@@ -165,96 +127,13 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     interactive: true,
   });
 
-  const detections = (): GeoJSON.FeatureCollection<GeoJSON.Point, { i: number }> => ({
-    type: "FeatureCollection",
-    features: (sar?.detections ?? []).map((d, i) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [d.lon, d.lat] },
-      properties: { i },
-    })),
-  });
-
   let mapReady = false;
   map.on("load", () => {
     if (destroyed) return;
     addStoryLayers(map);
-    map.addSource(DETECTIONS, { type: "geojson", data: detections() });
-    map.addLayer({
-      id: DOTS,
-      type: "circle",
-      source: DETECTIONS,
-      paint: {
-        "circle-radius": ["case", ["==", ["get", "i"], selected], 6, 4],
-        "circle-color": "#56B3EA",
-        "circle-stroke-color": "#0C1218",
-        "circle-stroke-width": 1,
-      },
-    });
-    map.on("click", DOTS, (event) => {
-      const i = Number(event.features?.[0]?.properties?.["i"]);
-      if (Number.isFinite(i)) select(i);
-    });
-    map.on("mouseenter", DOTS, () => (map.getCanvas().style.cursor = "pointer"));
-    map.on("mouseleave", DOTS, () => (map.getCanvas().style.cursor = ""));
     mapReady = true;
     drawCard();
   });
-
-  /** Show one detection: bigger chip, its older optical context, and the dot highlighted. */
-  function select(index: number): void {
-    selected = index;
-    if (mapReady) {
-      map.setPaintProperty(DOTS, "circle-radius", ["case", ["==", ["get", "i"], index], 6, 4]);
-    }
-    renderSarDetail();
-    for (const chip of document.querySelectorAll<HTMLButtonElement>(".hz-chip")) {
-      chip.setAttribute("aria-pressed", chip.dataset.index === String(index) ? "true" : "false");
-    }
-  }
-
-  const sarBox = h("div", { class: "hz-sar-detail" });
-
-  function renderSarDetail(): void {
-    const d = sar?.detections?.[selected];
-    if (!d || !d.chip) {
-      sarBox.replaceChildren();
-      return;
-    }
-    sarBox.replaceChildren(
-      h(
-        "figure",
-        { class: "hz-radar" },
-        h("img", { src: chipUrl(d.chip), alt: `Radar detection ${selected + 1}` }),
-        h(
-          "figcaption",
-          { class: "hz-small" },
-          `Radar detection ${selected + 1} of ${sar?.detections?.length ?? 0} · ${passLabel(sar?.time)}`,
-        ),
-      ),
-    );
-  }
-
-  function satellitePass(scan: SarScan): HTMLElement {
-    const count = scan.counts?.detected ?? scan.detections?.length ?? 0;
-    const chips = (scan.detections ?? []).map((d, i) => {
-      const button = h(
-        "button",
-        { class: "hz-chip", type: "button", "data-index": String(i), "aria-pressed": i === selected ? "true" : "false" },
-        h("img", { src: d.chip ? chipUrl(d.chip) : "", alt: `Radar detection ${i + 1}`, loading: "lazy" }),
-      );
-      button.addEventListener("click", () => select(i));
-      return button;
-    });
-    return h(
-      "section",
-      { class: "hz-section" },
-      h("h2", { class: "hz-label" }, "Today's satellite pass"),
-      h("p", { class: "hz-figure-line" }, `${fmtInt(count)} ships seen by radar · ${passLabel(scan.time)}`),
-      h("div", { class: "hz-chips" }, ...chips),
-      sarBox,
-      h("p", { class: "hz-small" }, AIS_NOTE),
-    );
-  }
 
   /**
    * Draw the active card, or the strait view. Safe before the map or the stories
@@ -301,7 +180,16 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       "section",
       { class: "hz-section hz-stories" },
       ...cards,
-      h("p", { class: "hz-small" }, data.source ?? "Powered by Global Fishing Watch"),
+      h(
+        "p",
+        { class: "hz-small" },
+        "Powered by ",
+        h(
+          "a",
+          { href: "https://globalfishingwatch.org", target: "_blank", rel: "noopener noreferrer" },
+          "Global Fishing Watch",
+        ),
+      ),
     );
   }
 
@@ -314,23 +202,16 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
 
   Promise.all([
     fetchHormuz<HormuzTrend>(TREND_URL, abort.signal),
-    fetchHormuz<SarScan>(SAR_URL, abort.signal).catch(() => null),
     fetchHormuz<HormuzStories>(STORIES_URL, abort.signal).catch(() => null),
   ])
-    .then(([trend, scan, data]) => {
+    .then(([trend, data]) => {
       if (destroyed || abort.signal.aborted) return;
-      sar = scan;
       stories = data;
-      // The radar pass sits under the headline and the cards, so its chips show at 1280x720.
-      const parts: HTMLElement[] = [headlineBlock(trend)];
+      // Hero, then the chart, then the cards: the first two fit a 1280x720 rail whole.
+      const parts: HTMLElement[] = [headlineBlock(trend), chartBlock(trend)];
       if (data) parts.push(storyBlock(data));
-      if (scan) parts.push(satellitePass(scan));
-      parts.push(chartBlock(trend));
       body.replaceChildren(...parts);
-      renderSarDetail();
       drawCard();
-      if (mapReady) map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections());
-      else map.once("load", () => map.getSource<maplibregl.GeoJSONSource>(DETECTIONS)?.setData(detections()));
     })
     .catch(() => {
       if (destroyed || abort.signal.aborted) return;

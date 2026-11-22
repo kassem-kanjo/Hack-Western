@@ -1,5 +1,5 @@
 /**
- * Two years of weekly dark share (Hormuz against its Gulf of Oman control) and
+ * Two years of pooled dark share (Hormuz against its Gulf of Oman control) and
  * the headline that reads the same regime block. Every number comes from
  * /api/hormuz/trend; nothing here is a constant except the strike date marker.
  */
@@ -10,9 +10,10 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 // Drawn at the rail's real width (about 340 px) so the labels are 1:1, not scaled.
 const W = 340;
 const H = 150;
-const PAD = { left: 30, right: 6, top: 14, bottom: 20 };
+// The right pad keeps room for the two direct labels, so neither sits on a line.
+const PAD = { left: 30, right: 76, top: 18, bottom: 20 };
 
-/** The day the strikes began and the strait closed (the one labelled marker). */
+/** The day the strikes began and the strait closed: the one date the chart marks. */
 const STRIKE_DAY = "2026-02-28";
 
 export interface TrendWeek {
@@ -30,7 +31,14 @@ export interface TrendEvent {
   source_url: string;
 }
 
+export interface TrendWindow {
+  start: string;
+  end: string;
+}
+
 export interface TrendRegime {
+  baseline?: TrendWindow;
+  current?: TrendWindow;
   treated: {
     baseline: { dark_share: number | null };
     current: { dark_share: number | null };
@@ -63,6 +71,21 @@ function svg<K extends keyof SVGElementTagNameMap>(
 const pct = (share: number | null | undefined): number | null =>
   typeof share === "number" && Number.isFinite(share) ? Math.round(share * 100) : null;
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Mar–Jun 2026" for a window inside one year, else "Mar 2026–Feb 2027". */
+function windowLabel(w: TrendWindow | undefined): string | null {
+  if (!w) return null;
+  const a = new Date(`${w.start}T00:00:00Z`);
+  const b = new Date(`${w.end}T00:00:00Z`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return null;
+  const am = MONTHS[a.getUTCMonth()];
+  const bm = MONTHS[b.getUTCMonth()];
+  return a.getUTCFullYear() === b.getUTCFullYear()
+    ? `${am}–${bm} ${b.getUTCFullYear()}`
+    : `${am} ${a.getUTCFullYear()}–${bm} ${b.getUTCFullYear()}`;
+}
+
 /** The headline sentence and its figures, read from the regime block only. */
 export function trendHeadline(regime: TrendRegime): {
   sentence: string;
@@ -80,11 +103,16 @@ export function trendHeadline(regime: TrendRegime): {
   }
   const ci = regime.did_ci;
   const ciText = ci ? ` (95% CI ${Math.round(ci[0] * 100)}–${Math.round(ci[1] * 100)})` : "";
+  // The 66% is the average of a fixed window after the strikes, not "today": say which months.
+  const during = windowLabel(regime.current);
+  const baseYear = regime.baseline ? regime.baseline.start.slice(0, 4) : null;
   return {
-    sentence: `Since the war began, ${Math.round((now / 100) * 3)} in 3 ships here aren't broadcasting their position`,
+    sentence: during
+      ? `After the war began (${during}), ${Math.round((now / 100) * 3)} in 3 ships here weren't broadcasting their position`
+      : `After the war began, ${Math.round((now / 100) * 3)} in 3 ships here weren't broadcasting their position`,
     big: `${now}%`,
-    before: `was ${was}% before 28 Feb`,
-    control: `Gulf of Oman next door: ${ctrlWas}% → ${ctrlNow}%.`,
+    before: baseYear ? `was ${was}% in ${baseYear}` : `was ${was}% before`,
+    control: `Next door in the Gulf of Oman it only rose from ${ctrlWas}% to ${ctrlNow}%.`,
     difference: `Difference ${regime.did >= 0 ? "+" : ""}${(regime.did * 100).toFixed(1)} pts${ciText}`,
   };
 }
@@ -110,7 +138,7 @@ function rolling(rows: TrendWeek[], span = 4): TrendWeek[] {
   });
 }
 
-/** The weekly two-line chart. Hormuz is the state colour, the control is grey. */
+/** The two-line chart. Hormuz is the state colour, the control is grey. */
 export function trendChart(trend: HormuzTrend): HTMLElement {
   const weeks = [...trend.treated, ...trend.control].map((row) => ms(row.week)).filter(Number.isFinite);
   if (weeks.length === 0) {
@@ -120,6 +148,7 @@ export function trendChart(trend: HormuzTrend): HTMLElement {
   const x1 = Math.max(...weeks);
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
+  const right = W - PAD.right;
   const x = (t: number): number => PAD.left + ((t - x0) / Math.max(1, x1 - x0)) * plotW;
   const y = (share: number): number => PAD.top + (1 - share) * plotH;
 
@@ -127,53 +156,71 @@ export function trendChart(trend: HormuzTrend): HTMLElement {
     viewBox: `0 0 ${W} ${H}`,
     class: "trend-svg",
     role: "img",
-    "aria-label": "Weekly share of ships not broadcasting: Hormuz against the Gulf of Oman",
+    "aria-label": "Share of ships not broadcasting: Hormuz against the Gulf of Oman",
   });
 
   for (const share of [0, 0.5, 1]) {
-    root.append(svg("line", { x1: PAD.left, x2: W - PAD.right, y1: y(share), y2: y(share), class: "trend-grid" }));
+    root.append(svg("line", { x1: PAD.left, x2: right, y1: y(share), y2: y(share), class: "trend-grid" }));
     const label = svg("text", { x: PAD.left - 6, y: y(share) + 3, class: "trend-axis", "text-anchor": "end" });
     label.textContent = `${share * 100}%`;
     root.append(label);
   }
 
-  const line = (rows: TrendWeek[], cls: string): void => {
-    const points = rows
-      .map((row) => ({ t: ms(row.week), share: row.dark_share }))
-      .filter((p): p is { t: number; share: number } => Number.isFinite(p.t) && typeof p.share === "number")
-      .map((p) => `${x(p.t).toFixed(1)},${y(p.share).toFixed(1)}`);
-    if (points.length > 1) root.append(svg("polyline", { points: points.join(" "), class: cls, fill: "none" }));
-  };
-  // The bold line is a 4-week pooled share (dark over seen across the window), so a
-  // single quiet week cannot draw a spike; the weekly line stays as a faint underlay.
-  line(trend.control, "trend-control-week");
-  line(trend.treated, "trend-treated-week");
-  line(rolling(trend.control), "trend-control");
-  line(rolling(trend.treated), "trend-treated");
-
-  // Other events: faint ticks on the base line, title on hover.
-  for (const event of trend.events) {
-    const t = ms(event.date_start);
-    if (!Number.isFinite(t) || event.date_start === STRIKE_DAY) continue;
-    const tick = svg("line", { x1: x(t), x2: x(t), y1: H - PAD.bottom, y2: H - PAD.bottom - 6, class: "trend-tick" });
-    const title = svg("title", {});
-    title.textContent = `${event.date_start}: ${event.title}`;
-    tick.append(title);
-    root.append(tick);
-  }
-
-  // The one labelled marker.
+  // The period the headline averages, drawn before the lines so it stays behind them.
   const strike = ms(STRIKE_DAY);
-  if (Number.isFinite(strike) && strike >= x0 && strike <= x1) {
-    root.append(svg("line", { x1: x(strike), x2: x(strike), y1: PAD.top, y2: H - PAD.bottom, class: "trend-marker" }));
-    const label = svg("text", { x: x(strike) - 5, y: PAD.top + 10, class: "trend-marker-label", "text-anchor": "end" });
-    label.textContent = "28 Feb 2026: strikes, strait closed";
-    root.append(label);
+  const marked = Number.isFinite(strike) && strike >= x0 && strike <= x1;
+  const now = trend.regime ? pct(trend.regime.treated.current.dark_share) : null;
+  // Shade exactly the window the 66% averages (regime.current), not up to today.
+  const win = trend.regime?.current;
+  const ws = win ? ms(win.start) : NaN;
+  const we = win ? ms(win.end) : NaN;
+  if (now !== null && Number.isFinite(ws) && Number.isFinite(we) && we > x0 && ws < x1) {
+    const left = x(Math.max(ws, x0));
+    const rightEdge = x(Math.min(we, x1));
+    root.append(svg("rect", { x: left, y: PAD.top, width: rightEdge - left, height: plotH, class: "trend-shade" }));
+    // Along the bottom of the shade, where no line runs, so it never sits on a spike.
+    const note = svg("text", { x: rightEdge - 2, y: H - PAD.bottom - 5, class: "trend-note", "text-anchor": "end" });
+    note.textContent = `${windowLabel(win) ?? "After the strikes"}: ${now}% average`;
+    root.append(note);
   }
+  // The dashed line is the shade's left edge, and its only mark.
+  if (marked) {
+    root.append(svg("line", { x1: x(strike), x2: x(strike), y1: PAD.top, y2: H - PAD.bottom, class: "trend-marker" }));
+  }
+
+  /** Draw one pooled line; return the share at its right end, for the direct label. */
+  const line = (rows: TrendWeek[], cls: string): number | null => {
+    const points = rolling(rows)
+      .map((row) => ({ t: ms(row.week), share: row.dark_share }))
+      .filter((p): p is { t: number; share: number } => Number.isFinite(p.t) && typeof p.share === "number");
+    if (points.length < 2) return null;
+    const at = points.map((p) => `${x(p.t).toFixed(1)},${y(p.share).toFixed(1)}`);
+    root.append(svg("polyline", { points: at.join(" "), class: cls, fill: "none" }));
+    return points[points.length - 1]!.share;
+  };
+  // Pooled over four weeks (dark over seen across the window), so one quiet week
+  // cannot draw a spike.
+  const treated = line(trend.treated, "trend-treated");
+  const control = line(trend.control, "trend-control");
+
+  // Direct labels in the right-hand room: the name only, in the line's colour.
+  // The two ends often sit within a few points of each other, so the lower label
+  // is pushed down until the pair keeps a 12 px gap.
+  const ends: { y: number; name: string; cls: string }[] = [];
+  if (treated !== null) ends.push({ y: y(treated) + 3, name: "Hormuz", cls: "is-treated" });
+  if (control !== null) ends.push({ y: y(control) + 3, name: "Gulf of Oman", cls: "is-control" });
+  ends.sort((a, b) => a.y - b.y);
+  ends.forEach((end, i) => {
+    const previous = ends[i - 1];
+    if (previous !== undefined) end.y = Math.max(end.y, previous.y + 12);
+    const label = svg("text", { x: right + 4, y: end.y, class: `trend-label ${end.cls}`, "text-anchor": "start" });
+    label.textContent = end.name;
+    root.append(label);
+  });
 
   // Axis: the first and last week, as month labels.
   for (const [t, anchor] of [[x0, "start"], [x1, "end"]] as const) {
-    const label = svg("text", { x: t === x0 ? PAD.left : W - PAD.right, y: H - 6, class: "trend-axis", "text-anchor": anchor });
+    const label = svg("text", { x: x(t), y: H - 6, class: "trend-axis", "text-anchor": anchor });
     label.textContent = new Date(t).toISOString().slice(0, 7);
     root.append(label);
   }

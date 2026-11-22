@@ -63,7 +63,7 @@ export interface PresentScene extends PresentCaption {
    * the reach circle and the figures panel clear), "camera-top-left" over the top-left
    * corner of the patrol camera (the alarm, the figures and the Kill/Overload buttons stay clear).
    */
-  dock?: "bottom" | "top-right" | "map-top-left" | "camera-top-left";
+  dock?: "bottom" | "bottom-left" | "top-right" | "map-top-left" | "camera-top-left";
   fallback?: Partial<PresentCaption>;
 }
 
@@ -78,11 +78,8 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "hormuz",
-        headline: "Satellite radar sees ships that aren't broadcasting",
-        line: "Since the war began, {hormuz_after}% of radar-seen ships here aren't broadcasting their position, up from {hormuz_before}% before 28 Feb.",
-        fallback: {
-          line: "Since the war began, more radar-seen ships here aren't broadcasting their position than before 28 Feb.",
-        },
+        headline: "The chart shows the change after 28 Feb",
+        line: "Hormuz in red, the Gulf of Oman in grey. The shaded months after the strikes are what the big number averages.",
       },
     ],
   },
@@ -92,7 +89,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "hormuz",
         card: "sea1",
-        dock: "top-right",
+        dock: "bottom-left",
         requires: "sea1_hours",
         headline: "{sea1_kind} switched off for {sea1_hours} hours",
         line: "{sea1_days} days after the strikes. It came back {sea1_km} km away.",
@@ -104,7 +101,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "hormuz",
         card: "cluster",
-        dock: "top-right",
+        dock: "bottom-left",
         headline: "{cluster_ships} ships switched off, then reappeared at one spot",
         line: "The trip needs {cluster_kn} knots, which these ships can't sail. Their positions look faked, so we don't rank them.",
         fallback: {
@@ -137,10 +134,10 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "patrol",
         dock: "camera-top-left",
-        headline: "AI is a sensor, not a judge",
-        line: "Kill the detector: the safety core stays up and recovers in {recovery}.",
+        headline: "Kill the AI: the safety core keeps watching.",
+        line: "The detector is switched off on purpose; the safety core recovers in {recovery}.",
         fallback: {
-          line: "Kill the detector: the safety core stays up and keeps checking.",
+          line: "The detector is switched off on purpose; the safety core keeps checking.",
         },
       },
     ],
@@ -150,6 +147,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "watch",
+        alert: "strongest",
         dock: "map-top-left",
         headline: "Built for compliance teams and coast guards",
         line: "Physics says what's possible, lists say who matters, and the edge unit catches ships that switch off.",
