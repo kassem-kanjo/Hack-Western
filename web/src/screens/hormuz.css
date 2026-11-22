@@ -199,14 +199,7 @@
   gap: var(--sp-1);
 }
 
-/* The wrapper lets "more" sit under the card without nesting a button in a button. */
-.hz-card-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-1);
-}
-
+/* The card is one bordered box: the clickable text and the "more" control sit inside it. */
 .hz-card {
   display: block;
   width: 100%;
@@ -215,28 +208,32 @@
   border-radius: var(--r-2);
   background: var(--surface-2);
   color: var(--text-2);
-  font: inherit;
   font-size: var(--fs-13);
   line-height: var(--lh-ui);
+  text-align: left;
+}
+
+/* The text is the button: no border of its own, so the card box is the only frame. */
+.hz-card-open {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-/* Two lines keep both cards inside a 1280x720 rail; the full sentence stays in the DOM. */
 .hz-card-text {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.hz-card-wrap.is-open .hz-card-text {
   display: block;
-  overflow: visible;
-  -webkit-line-clamp: unset;
 }
 
 .hz-more {
+  display: block;
+  margin-top: var(--sp-1);
   padding: 0;
   border: 0;
   background: none;
@@ -258,7 +255,8 @@
   margin: 0;
 }
 
-.hz-more:focus-visible {
+.hz-more:focus-visible,
+.hz-card-open:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 2px;
 }
@@ -266,11 +264,6 @@
 .hz-card:hover {
   border-color: var(--line-2);
   color: var(--text-1);
-}
-
-.hz-card:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* The open card: a rule down its left edge and brighter text, so the state reads at a glance. */

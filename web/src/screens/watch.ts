@@ -221,6 +221,12 @@ const KIND_NAME: Record<WatchAlertKind, string> = {
   radar_unmatched: "Seen by satellite radar",
 };
 
+/** Chip tooltips for the two kinds whose short chip names need a plain gloss. */
+const KIND_TIP: Partial<Record<WatchAlertKind, string>> = {
+  sanctioned_stop: "Sanctioned ship stopped at sea",
+  spoof: "Reported a position it couldn't have reached",
+};
+
 /** Short filter-chip labels; the row tag keeps the full kind name. */
 const KIND_CHIP: Record<WatchAlertKind, string> = {
   dark: "Switched off",
@@ -370,13 +376,17 @@ function openingBox(snapshot: WatchResponse): [number, number, number, number] |
   return snapshot.areas.find((area) => area.id === first?.area_id)?.bbox ?? null;
 }
 
-/** One large figure with its plain label under it (the focus panel's top row). */
-function figure(value: string, label: string, title?: string): HTMLElement {
+/**
+ * One large figure with its plain label under it, and a one-line caption that says what the
+ * number measures (the focus panel's top row).
+ */
+function figure(value: string, label: string, caption: string, title?: string): HTMLElement {
   return h(
     "div",
     { class: "watch-fig" },
     h("span", { class: "watch-fig-value", title: title ?? null }, value),
     h("span", { class: "watch-fig-label" }, label),
+    h("span", { class: "watch-fig-caption" }, caption),
   );
 }
 
@@ -887,13 +897,23 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     { class: "watch-back", type: "button", "aria-label": "Back to events" },
     "← Events",
   );
+  // A soft fade with "More below" while the panel has content under the fold; it hides at the end.
+  const moreCue = h("div", { class: "watch-more-cue", "aria-hidden": "true" }, "More below");
   const details = h(
     "aside",
     // #254: the panel stays on screen; with nothing selected it says what to click.
     { class: "watch-details" },
     h("div", { class: "watch-details-head" }, back, detailsTitle),
     detailBody,
+    moreCue,
   );
+  /** Show the cue only while content continues below the visible part of the panel. */
+  function updateMoreCue(): void {
+    const below = details.scrollHeight - details.clientHeight - details.scrollTop;
+    moreCue.classList.toggle("is-shown", below > 8);
+  }
+  details.addEventListener("scroll", updateMoreCue, { passive: true });
+  window.addEventListener("resize", updateMoreCue);
 
   // Status bar: where the data comes from, how fresh it is, and the keys.
   const statusSnap = h("span", { class: "watch-mono" }, "—");
@@ -1234,7 +1254,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         {
           class: `watch-kind is-${kind}`,
           type: "button",
-          title: `Show/hide ${KIND_NAME[kind].toLowerCase()} events`,
+          title: KIND_TIP[kind] ?? `Show/hide ${KIND_NAME[kind].toLowerCase()} events`,
           "aria-pressed": state.kinds.has(kind) ? "true" : "false",
         },
         kindGlyph(kind),
@@ -1446,13 +1466,14 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         h(
           "div",
           { class: "watch-figs" },
-          figure(fmtDuration(durationMs(alert, now)), "Switched off for"),
+          figure(fmtDuration(durationMs(alert, now)), "Switched off for", "Time since its last broadcast"),
           figure(
             `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`,
             "Could have gone this far",
+            "Furthest it could have sailed at top speed",
             "Distance from the ship that switched off",
           ),
-          figure(fmtInt(met), "Ships it could have met"),
+          figure(fmtInt(met), "Ships it could have met", "Ships it could have come alongside"),
         ),
       );
     }
@@ -1728,6 +1749,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       startPanelTicker(alert);
     }
     appliedKey = key;
+    updateMoreCue();
   }
 
   function select(alertId: string | null, areaId: string | null = null): void {

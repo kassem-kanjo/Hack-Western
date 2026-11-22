@@ -857,6 +857,28 @@
 
 .watch-details-body { padding: var(--sp-4); }
 
+/* Scroll cue for the panel: sticks to the bottom of the visible part and overlaps the last
+   48 px of content (its own margin cancels its height), so it never adds to the scroll length. */
+.watch-more-cue {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  height: 48px;
+  margin-top: -48px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: var(--sp-2);
+  background: linear-gradient(to bottom, transparent, var(--surface-1) 70%);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+
+.watch-more-cue.is-shown { opacity: 1; }
+
 /* Label / value, 112 px keys, one hairline between rows and none after the last. */
 .watch-fields {
   display: grid;
@@ -1467,6 +1489,14 @@
   font-size: var(--fs-11);
   line-height: var(--lh-ui);
   color: var(--text-3);
+}
+
+/* The plain line under each figure: what the number measures. */
+.watch-fig-caption {
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  color: var(--text-3);
+  opacity: 0.8;
 }
 
 .watch-row > .watch-glyph {
