@@ -613,16 +613,18 @@ def _label(
     categories: dict[int, str],
     classes: dict[int, str],
 ) -> str:
-    """A label of at most six words, as approved: no paragraphs on the watch screen."""
+    """A short label for the watch screen: a few plain words, never a sentence."""
     if kind == "dark":
-        # Only a contact that could actually meet earns the "near ..." wording: a watchlisted
-        # hull merely inside the reach disk is not evidence of a meeting.
-        near = next(
-            (contact["watchlist"] for contact in contacts if contact["watchlist"] and contact["could_meet"]),
+        # Only a contact that could actually meet earns the "within reach" wording: a
+        # watchlisted hull merely inside the reach disk is not evidence of a meeting.
+        meet = next(
+            (contact for contact in contacts if contact["watchlist"] and contact["could_meet"]),
             None,
         )
-        if near is not None:
-            return f"Went dark near {near.replace('_', ' ')} ship"
+        if meet is not None:
+            category = str(meet["watchlist"]).replace("_", " ")
+            km = round(float(meet["min_dist_km"]))
+            return f"Switched off within reach of a {category} ship ({km} km)"
         if categories.get(event.mmsi) is not None:
             return "Watchlisted ship went dark"
         return "Went dark"

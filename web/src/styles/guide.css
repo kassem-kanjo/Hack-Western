@@ -1,0 +1,87 @@
+/* Guidance: one plain line at the top of each screen, and the first-visit hint under the
+   tour button. Colours and type come from tokens.css so the theme can change in one place. */
+
+.guide-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-left: 2px solid var(--line-3);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+}
+
+.guide-line[hidden] {
+  display: none;
+}
+
+.guide-text {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-read);
+}
+
+.guide-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-14);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.guide-close:hover,
+.guide-close:focus-visible {
+  border-color: var(--line-3);
+  color: var(--text-1);
+}
+
+/* Tour button wrapper: the button plus the first-visit hint under it. */
+.tour-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tour-hint {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: 20;
+  max-width: 260px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-ui);
+  white-space: normal;
+  pointer-events: none;
+}
+
+.tour-hint[hidden] {
+  display: none;
+}
+
+/* The tour button is the one primary action in the top bar. */
+.present-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: var(--fw-medium);
+}
+
+.present-btn.is-primary .kbd {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}

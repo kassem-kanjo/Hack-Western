@@ -14,6 +14,7 @@ import * as maplibregl from "maplibre-gl";
 import { offlineStyle } from "../basemap";
 import { attribution } from "../components/Attribution";
 import { h } from "../components/dom";
+import { guideLine } from "../components/GuideLine";
 import { fetchHormuz } from "../components/hormuz";
 import {
   addStoryLayers,
@@ -115,6 +116,10 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
 
   app.replaceChildren(
     topBar({ active: "hormuz", mode: "SNAPSHOT", generatedAt: null, caseHref: null, demoHref: null }),
+    guideLine(
+      "hormuz",
+      "Why it matters: since the war, most ships here stopped broadcasting. Click a story card to see one.",
+    ),
     h("main", { class: "main hormuz-main" }, stage, rail),
   );
 

@@ -37,6 +37,7 @@ import {
   stressEdgeDetector,
 } from "../api";
 import { h } from "../components/dom";
+import { guideLine } from "../components/GuideLine";
 import { fetchSightings, type SightingsPayload } from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { fmtInt, fmtUtc } from "../format";
@@ -328,6 +329,13 @@ export function renderPatrol(app: HTMLElement): void {
     "Waiting for the camera\u2026",
   );
 
+  /** The photo instruction over the frame; hidden once a vessel is detected or the camera is offline. */
+  const frameHint = h(
+    "div",
+    { class: "patrol-frame-hint is-hidden" },
+    "Hold a ship photo 30–60 cm in front of the camera",
+  );
+
   /** The offscreen loader; a decoded frame replaces the visible one atomically. */
   const frameBuffer = new Image();
 
@@ -339,6 +347,9 @@ export function renderPatrol(app: HTMLElement): void {
     frameImg.hidden = !show;
     framePlaceholder.hidden = show;
     framePlaceholder.textContent = cameraOffline ? "Camera offline" : "Waiting for the camera\u2026";
+    // The hint covers the frame only while the AI sees no vessel and the camera is live.
+    const detected = decision !== null && (decision.ai?.boxes?.length ?? 0) > 0;
+    frameHint.classList.toggle("is-hidden", !show || detected);
   }
 
   /** Same clock on both sides (the Pi's), so laptop/Pi clock skew cannot fake an outage. */
@@ -383,7 +394,7 @@ export function renderPatrol(app: HTMLElement): void {
   const stage = h(
     "section",
     { class: "stage patrol-stage" },
-    h("div", { class: "patrol-frame" }, frameImg, framePlaceholder),
+    h("div", { class: "patrol-frame" }, frameImg, framePlaceholder, frameHint),
     caption,
   );
 
@@ -523,7 +534,14 @@ export function renderPatrol(app: HTMLElement): void {
 
   const main = h("main", { class: "main patrol-main" }, stage, side);
 
-  app.replaceChildren(bar, main);
+  app.replaceChildren(
+    bar,
+    guideLine(
+      "patrol",
+      "A camera lookout on a QNX Raspberry Pi. Hold a ship photo to the camera, then try Kill or Overload.",
+    ),
+    main,
+  );
 
   function paintBadge(isOnline: boolean): void {
     if (badge === null) return;

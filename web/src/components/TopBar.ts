@@ -4,6 +4,31 @@ import { mountSearchBox } from "./SearchBox";
 
 export type ConsoleMode = "SNAPSHOT" | "LIVE" | "ERROR";
 
+const TOUR_SEEN_KEY = "darkfleet.tourSeen";
+const TOUR_HINT_MS = 8000;
+
+/** True once per browser: marks the visit as seen, and returns false if storage is blocked. */
+function isFirstVisit(): boolean {
+  try {
+    if (window.localStorage.getItem(TOUR_SEEN_KEY) !== null) return false;
+    window.localStorage.setItem(TOUR_SEEN_KEY, "1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The page's hint window, fixed once per page load. Screens rebuild the bar on their first
+ * render, so a per-call check would hide the hint on the render that is actually visible.
+ */
+let tourHintEndsAt: number | null = null;
+
+function tourHintRemainingMs(): number {
+  if (tourHintEndsAt === null) tourHintEndsAt = isFirstVisit() ? Date.now() + TOUR_HINT_MS : 0;
+  return tourHintEndsAt - Date.now();
+}
+
 /** Default live region for the Live tab (the one with the most data). */
 export const DEFAULT_LIVE_REGION = "BALTIC_WATCH";
 
@@ -47,17 +72,32 @@ export function topBar(opts: {
 
   // Presentation mode (design/v2/04-present.png). The click is handled by
   // document delegation in present.ts, because this bar is rebuilt on navigation.
+  // The primary entry point for someone who has never seen the app (#254). P still starts it.
   const present = h(
     "button",
     {
-      class: "present-btn",
+      class: "present-btn is-primary",
       type: "button",
-      title: "Start the guided 3-minute walkthrough",
-      "aria-label": "Present: start the guided walkthrough",
+      title: "Start the guided 2-minute tour (press P)",
+      "aria-label": "Start the 2-minute tour",
     },
-    "Present",
+    "Start the 2-minute tour",
     h("kbd", { class: "kbd" }, "P"),
   );
+
+  // Shown on the first visit only, for 8 s from the page load. Rebuilt bars inside that
+  // window show the rest of it; a later visit (flag set) shows none. Blocked storage: none.
+  const tourWrap = h("span", { class: "tour-wrap" }, present);
+  const hintLeft = tourHintRemainingMs();
+  if (hintLeft > 0) {
+    const hint = h(
+      "span",
+      { class: "tour-hint", role: "note" },
+      "New here? Start the tour, or click around.",
+    );
+    tourWrap.append(hint);
+    window.setTimeout(() => hint.remove(), hintLeft);
+  }
 
   return h(
     "header",
@@ -67,7 +107,7 @@ export function topBar(opts: {
     /* [search #183] one mount; the field's behaviour lives in SearchBox.ts. */
     mountSearchBox(),
     h("span", { class: "topbar-spacer" }),
-    present,
+    tourWrap,
     h(
       "span",
       { class: `mode-badge is-${modeClass}` },

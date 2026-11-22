@@ -12,8 +12,9 @@
  *
  * The component owns three GeoJSON sources (`replay-trail`, `replay-reach`,
  * `replay-contacts`) and every layer drawn from them, so the map module needs no
- * knowledge of the replay: its whole hook is `replayMap` on `WatchMapHandle`
- * (one interface line, one object-literal line). The screen's hook is the mount.
+ * knowledge of the replay: its purpose hook is `replayMap` on `WatchMapHandle`,
+ * plus `setReachVisible` so the focus view's finished circle waits while this one
+ * plays. The screen's hook is the mount.
  *
  * Geometry is not re-derived here: `reachRing`, `reachRadiusKm` and
  * `insideReach` are the same functions the focus view draws with, so the replay
@@ -41,8 +42,8 @@ import {
 } from "../map/watchMap";
 import { h } from "./dom";
 
-/** How long one pass of the whole window takes, regardless of its span. */
-export const REPLAY_PLAY_MS = 10_000;
+/** How long one pass of the whole window takes, regardless of its span (#254). */
+export const REPLAY_PLAY_MS = 20_000;
 
 /** The three sources this component owns. Nothing else writes to them. */
 export const REPLAY_SOURCES = ["replay-trail", "replay-reach", "replay-contacts"] as const;
@@ -538,6 +539,12 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
   });
   const elapsedEl = h("span", { class: "replay-elapsed" }, "0:00");
   const totalEl = h("span", { class: "replay-total" }, `${fmtReplayClock(spanMs, long)}${long ? " h" : ""}`);
+  // #254: the playhead's UTC time, in the one time format the screens use.
+  const utcEl = h(
+    "span",
+    { class: "replay-utc", title: "Playhead time" },
+    `${fmtUtc(new Date(t0).toISOString())}Z`,
+  );
 
   // QA #229 A2: the scrubber spans the track before the switch-off plus the dark
   // period itself. Say both in words and mark where the dark period starts, so the
@@ -604,6 +611,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
           h("span", { class: "replay-sep", "aria-hidden": "true" }, " / "),
           totalEl,
         ),
+        utcEl,
         radiusEl,
       ),
       h("div", { class: "replay-track" }, phaseLead, phaseDark, slider, ticksEl),
@@ -637,6 +645,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
     slider.value = String(Math.round(progress * 1000));
     slider.style.setProperty("--at", `${(progress * 100).toFixed(2)}%`);
     elapsedEl.textContent = fmtReplayClock(atMs - t0, long);
+    utcEl.textContent = `${fmtUtc(new Date(atMs).toISOString())}Z`;
     radiusEl.textContent = `${Math.round(radiusKm)} km`;
     slider.setAttribute(
       "aria-valuetext",
@@ -651,6 +660,8 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
       window.cancelAnimationFrame(rafId);
       rafId = null;
     }
+    // #254: paused or ended, the finished reach circle comes back.
+    handle.setReachVisible(true);
     paintTransport();
   }
 
@@ -664,6 +675,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
     setProgress(next);
     if (next >= 1) {
       playing = false;
+      handle.setReachVisible(true);
       paintTransport();
       return;
     }
@@ -682,6 +694,8 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
     }
     if (progress >= 1) setProgress(0);
     playing = true;
+    // #254: the replay's own reach is the only circle on the map while it runs.
+    handle.setReachVisible(false);
     lastFrame = performance.now();
     paintTransport();
     rafId = window.requestAnimationFrame(tick);
@@ -705,6 +719,8 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
 
   paintTransport();
   if (playable) setProgress(progress);
+  // A fresh replay never sits over the focus view's finished circle.
+  handle.setReachVisible(true);
 
   return {
     element: section,
@@ -712,6 +728,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
       if (destroyed) return;
       destroyed = true;
       stopClock();
+      handle.setReachVisible(true);
       adapter?.remove();
       section.remove();
     },

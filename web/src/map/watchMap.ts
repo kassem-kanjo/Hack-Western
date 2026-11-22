@@ -162,6 +162,8 @@ export interface WatchMapHandle {
   showDossierTrack(track: readonly VesselTrackPoint[] | null): void;
   /** [search #183] center on one hull with no alert open: the top-bar search hook. */
   flyToVessel(lat: number, lon: number): void;
+  /** #254: hide the focus view's final reach while the replay draws its own. */
+  setReachVisible(visible: boolean): void;
   /** Back to the world: clear every focus drawing and restore the camera. */
   showWorld(): void;
   /** #185: AlertReplay owns its own sources on this map. */
@@ -471,6 +473,14 @@ interface ContactDot {
   label: HTMLElement | null;
 }
 
+/** A label's screen box, for the collision test before it is drawn. */
+interface LabelRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   const colors = {
     text1: themeColor("--c-text-1", "#EAF0F6"),
@@ -675,6 +685,10 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   let radarView: RadarMapView | null = null;
   let areaMarks: { area: WatchArea; group: SVGGElement }[] = [];
   let selectedAlertId: string | null = null;
+  /** A watched area opened through showRegion; its outline is drawn only then. */
+  let selectedAreaId: string | null = null;
+  /** #254: the replay owns the reach while it plays; the static circle waits. */
+  let replayHidesReach = false;
   /** A region asked for before the style finished loading. */
   let pendingRegion: { bounds: [number, number, number, number]; areaId: string | null } | null = null;
   let radarIntensity = 1;
@@ -684,7 +698,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   }
 
   /** Layer groups behind the four checkboxes in the top-right panel. */
-  const AREA_LAYERS = ["watch-area-fill", "watch-area-watched-edge", "watch-area-listening"];
+  const WATCHED_EDGE_LAYERS = ["watch-area-watched-edge"];
   const SHIP_LAYERS = ["watch-ship", "watch-ship-watch", "watch-ship-chevron", "watch-ship-hit"];
   const REACH_LAYERS = ["watch-reach-fill", "watch-reach-edge"];
 
@@ -697,8 +711,11 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         }
       };
       set(SHIP_LAYERS, layerState.vessels);
-      set(AREA_LAYERS, layerState.areas);
-      set(REACH_LAYERS, layerState.reach);
+      set(["watch-area-fill", "watch-area-listening"], layerState.areas);
+      // #254: a watched outline is only meaningful once an area is opened; at world
+      // zoom the boxes drew long straight lines across the sea.
+      set(WATCHED_EDGE_LAYERS, layerState.areas && selectedAreaId !== null);
+      set(REACH_LAYERS, layerState.reach && !replayHidesReach);
     }
     // Alert dots are SVG, not MapLibre layers.
     alertLayer.style.display = layerState.events ? "" : "none";
@@ -723,26 +740,43 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     );
   }
 
-  /** Place an HTML label at a projected point; hide it off screen. */
-  function place(
+  /**
+   * Place a label beside its point only when it does not touch one already
+   * placed (#254). A crowded label is hidden; a later one may still fit.
+   */
+  function placeBeside(
     element: HTMLElement,
     lngLat: LngLat,
-    anchor: "centre" | "above" | "beside",
-    gap = 10,
+    gap: number,
+    placed: LabelRect[],
   ): void {
     const point = map.project(lngLat);
     if (!onScreen(point.x, point.y)) {
       element.style.visibility = "hidden";
       return;
     }
-    element.style.visibility = "visible";
-    if (anchor === "above") {
-      element.style.transform = `translate(${point.x}px, ${point.y - gap}px) translate(-50%, -100%)`;
-    } else if (anchor === "beside") {
-      element.style.transform = `translate(${point.x + gap}px, ${point.y}px) translate(0, -50%)`;
-    } else {
-      element.style.transform = `translate(${point.x}px, ${point.y}px) translate(-50%, -50%)`;
+    const width = element.offsetWidth || 64;
+    const height = element.offsetHeight || 16;
+    const rect: LabelRect = {
+      left: point.x + gap,
+      top: point.y - height / 2,
+      right: point.x + gap + width,
+      bottom: point.y + height / 2,
+    };
+    const crowded = placed.some(
+      (other) =>
+        rect.left < other.right &&
+        rect.right > other.left &&
+        rect.top < other.bottom &&
+        rect.bottom > other.top,
+    );
+    if (crowded) {
+      element.style.visibility = "hidden";
+      return;
     }
+    placed.push(rect);
+    element.style.visibility = "visible";
+    element.style.transform = `translate(${point.x + gap}px, ${point.y}px) translate(0, -50%)`;
   }
 
   function drawReachRing(alert: WatchAlert, atMs: number): void {
@@ -938,14 +972,16 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       );
       contactLayer.append(circle);
 
+      // #254: only a hull inside the reach gets a name; the map is not a
+      // floating list of every ship the snapshot knows about.
       let label: HTMLElement | null = null;
-      if (sanctioned) {
+      if (couldMeet) {
         label = h(
           "div",
-          { class: "watch-contact-label is-sanctioned" },
+          { class: `watch-contact-label${sanctioned ? " is-sanctioned" : " is-meet"}` },
           displayName(contact.name, contact.mmsi),
         );
-        label.style.borderColor = colors.alert;
+        label.style.borderColor = sanctioned ? colors.alert : colors.gap;
         labelLayer.append(label);
       }
       contacts.push({ contact, circle, label });
@@ -1036,7 +1072,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     // world zoom the Gulf and the Strait are only pixels apart. Names only
     // appear from zoom 4 in, so the world view stays a field, not a legend.
     const showAreaLabels = layerState.areas && map.getZoom() >= 4;
-    const placed: { left: number; top: number; right: number; bottom: number }[] = [];
+    const placed: LabelRect[] = [];
     for (const area of areaOrder) {
       const label = areaLabels.get(area.id);
       if (label === undefined) continue;
@@ -1057,7 +1093,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       const centreY = point.y - (area.kind === "watched" ? 10 : 0);
       const halfWidth = (areaLabelWidths.get(area.id) ?? 80) / 2 + 4;
       const halfHeight = 8;
-      let chosen: { left: number; top: number; right: number; bottom: number } | null = null;
+      let chosen: LabelRect | null = null;
       let chosenY = centreY;
       for (const shift of [0, -26, 26, -52, 52]) {
         const y = centreY + shift;
@@ -1138,18 +1174,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       spoof.line.setAttribute("y2", String(last.y));
     }
 
-    for (const dot of contacts) {
-      const point = map.project([dot.contact.lon, dot.contact.lat]);
-      const visible = onScreen(point.x, point.y);
-      dot.circle.style.display = visible ? "" : "none";
-      dot.circle.setAttribute("cx", String(point.x));
-      dot.circle.setAttribute("cy", String(point.y));
-      if (dot.label !== null) {
-        if (visible) place(dot.label, [dot.contact.lon, dot.contact.lat], "beside", 9);
-        else dot.label.style.visibility = "hidden";
-      }
-    }
-
+    // The one contact the table put a ring on keeps its name first (#254);
+    // the rest take a free spot or stay quiet rather than pile up.
     if (contactRing !== null && contactLngLat !== null) {
       const point = map.project(contactLngLat);
       const visible = onScreen(point.x, point.y);
@@ -1157,8 +1183,20 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       contactRing.setAttribute("cx", String(point.x));
       contactRing.setAttribute("cy", String(point.y));
       if (contactLabel !== null) {
-        if (visible) place(contactLabel, contactLngLat, "beside", 15);
+        if (visible) placeBeside(contactLabel, contactLngLat, 15, placed);
         else contactLabel.style.visibility = "hidden";
+      }
+    }
+
+    for (const dot of contacts) {
+      const point = map.project([dot.contact.lon, dot.contact.lat]);
+      const visible = onScreen(point.x, point.y);
+      dot.circle.style.display = visible ? "" : "none";
+      dot.circle.setAttribute("cx", String(point.x));
+      dot.circle.setAttribute("cy", String(point.y));
+      if (dot.label !== null) {
+        if (visible) placeBeside(dot.label, [dot.contact.lon, dot.contact.lat], 9, placed);
+        else dot.label.style.visibility = "hidden";
       }
     }
   }
@@ -1560,6 +1598,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     clearContactFocus();
     focusing = true;
     selectedAlertId = region.alertId;
+    selectedAreaId = region.areaId;
     drawTrail(null);
     if (ready) void source("watch-reach")?.setData({ type: "FeatureCollection", features: [] });
     for (const dot of dots) {
@@ -1572,6 +1611,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       return;
     }
     drawAreaSelection(region.areaId);
+    applyLayerVisibility();
     const [w, s, e, n] = region.bounds;
     fitBox(
       [
@@ -1642,7 +1682,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     focusing = true;
     focus = alert;
     selectedAlertId = alert.id;
+    selectedAreaId = null;
     drawAreaSelection(null);
+    applyLayerVisibility();
 
     // A contact ring belongs to the alert it was opened in; a new alert starts
     // clean, a refresh of the same alert keeps it.
@@ -1675,12 +1717,14 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     focusing = false;
     appliedAlertId = null;
     selectedAlertId = null;
+    selectedAreaId = null;
     pendingRegion = null;
     clearFocusShapes();
     clearContactFocus();
     setRadar(null);
     drawTrail(null);
     drawAreaSelection(null);
+    applyLayerVisibility();
     if (ready) {
       const src = source("watch-reach");
       if (src !== undefined) void src.setData({ type: "FeatureCollection", features: [] });
@@ -2084,6 +2128,11 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     },
 
     showWorld,
+
+    setReachVisible(visible: boolean): void {
+      replayHidesReach = !visible;
+      applyLayerVisibility();
+    },
 
     replayMap: map, // #185
     fitArea(bbox: [number, number, number, number] | null): void {

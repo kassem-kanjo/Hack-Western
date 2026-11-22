@@ -17,3 +17,9 @@ Verify a worktree's `web/dist` without starting a server (builder rule: never st
 - Watch kind chips all start ON; clicking one turns it OFF. Plan the selector flow around that.
 
 Related: [[opencode-worker-patterns]]
+
+## Issue #254 run
+- `route.fetch()` on `/api/edge/*` raises "Request context disposed" when the browser closes with requests pending. Wrap the handler in try/except and `route.abort()`; the errors are harmless. Use `route.fetch(timeout=15000)`.
+- A top-bar hint set up once per visit vanishes when a screen rebuilds the bar. Keep the once-per-load state in a module variable, not in the per-call check.
+- Hide the Patrol camera image with `style.visibility='hidden'` before a screenshot. The overlay still shows on the dark frame, and nobody on camera appears.
+- Selectors: `.watch-row.is-dark`, `.watch-row.is-sanctioned_stop`, `.replay-play`, `.replay-clock`, `.guide-line.is-<screen>`, `.tour-hint`, `.patrol-frame-hint`.
