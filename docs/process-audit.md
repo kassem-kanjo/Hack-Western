@@ -229,3 +229,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Went wrong:** a fix that "hid" Patrol's figures didn't (CSS display beat the hidden attribute) and only a fresh-eyes test caught it; the tour claimed "the detector is switched off" while nothing happened; one builder handed back before its coders finished.
 - **Code share since audit 32:** builders ~85%; Chief: the banner-follows-recorded fix, integration, test orchestration.
 - **Change for next 30 min:** hand V3 to Kassem only after a round passes on every screen; captions may describe only what the screen shows at that moment.
+
+## Sat 21 Nov, 22:58 ET (audit 34, covers 22:21-22:58)
+- **Went well:** #266 landed (#271): the Hormuz area no longer contains its comparison area. Re-measured with the same settings: 31.9% -> 67.5%, extra rise +15.8 pts (CI 3.4-27.0, was +14.5). Map draws both areas; voice-over and Devpost drafts carry the new numbers; live server restarted on them.
+- **Went wrong:** the builder reported the GFW token "dead" and stopped. It wasn't: its one-off script read a comment on the same .env line as part of the token. Kassem's JIN HUI panel showed no sanctions line, a regression from the #253 trim.
+- **Fixes:** Chief probed the endpoint directly (200), found the comment, re-ran in 30-day chunks; sanctions line is the top item of #270, queued behind #268 (same file).
+- **Code share since audit 33:** builders ~75%; Chief: token diagnosis, validation re-run, test fix, landing.
+- **Change for next 30 min:** before reporting a key "invalid", probe it with one direct request; load .env with python-dotenv, never a hand parser.
