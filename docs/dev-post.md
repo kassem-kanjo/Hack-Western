@@ -6,49 +6,45 @@ tags: mlhacks, devchallenge, hackathon, python
 
 *This is a submission for the MLH DEV Writing Challenge, from Hack Western 13.*
 
-Big ships carry a transponder, a radio that keeps telling everyone where they are. Some switch it off. Sometimes it's a broken radio. Sometimes it's a tanker meeting another ship in the middle of the sea to move oil that's under sanctions.
+Big ships carry a transponder, a radio that broadcasts where they are. Some ships switch it off, often tankers moving sanctioned oil to another ship at sea where nobody can see it.
 
-We wanted to build the thing someone in a sanctions team or a coast guard would open in the morning: which ships went quiet overnight, where could they have gone, and who could they have met. That became Dark Fleet. Here's how the weekend actually went.
+We built Dark Fleet for the people who track that: sanctions teams and coast guards. When a ship goes quiet, it shows everywhere the ship could have gone since, which other ships it could have met, and whether any of them are on a sanctions list. Here's how the weekend went and what we learned building it.
 
-## Friday night: just start recording
+## Friday: start recording first
 
-We didn't have a finished idea yet, but we knew we'd need data, and live ship data only exists if you're listening at the time. So the first real thing we did, around 11 PM, was start a recorder on six regions around the world and leave it running. It's still running as we write this.
+Live ship data only exists if you're listening when it happens, so the first thing we did on Friday night was start a recorder on six regions and leave it running. It has been running ever since.
 
-The Baltic turned out to be the busy one, thousands of position reports every few minutes. The Strait of Hormuz, the place we actually cared about most, barely gave us anything. Our receivers there hear a handful of ships. That changed the whole plan: live stories would come from the Baltic, and for Hormuz we'd need satellites.
+That decision shaped the project. The Baltic gave us thousands of position reports every few minutes. The Strait of Hormuz, the place we cared about most, gave us a handful of ships. So the live part of the app runs on the Baltic, and for Hormuz we turned to satellite radar.
 
-## Saturday: the data starts arguing back
+## Saturday: making the alerts trustworthy
 
-On Saturday we matched the ships in our Hormuz data against sanctions lists and got excited for a bit. Four hits. Then we looked closer and three of them were on a list of port inspections, not sanctions. Not the same thing at all. Now the app always says which list a ship is on.
+The core idea is simple physics. When a ship stops broadcasting, we know its last position and its top speed, so we can draw a circle of everywhere it could be by now. Then we check every other ship's own track to see which ones could actually have been in the same place at the same time. Usually most ships in the circle get ruled out, and only a few could have met it.
 
-Later we noticed our live numbers had been reading zero for hours, while every part of the app said everything was fine. Nothing was crashing. The data just wasn't arriving. After that we wrote a small script that looks at the actual numbers every few minutes and complains if they stop moving.
+Two things made this harder than expected. First, a silence only means something if our receivers were hearing that area at the time, so we only raise an alert when coverage was good. Second, sanctions matching: three of our first four "sanctioned" matches turned out to be on a port-inspection list, not a sanctions list. We now match on the ship's IMO number, which doesn't change when a ship is renamed, and the app always says which list a ship is on.
 
-In the afternoon we got a Raspberry Pi with QNX from the QNX table and turned it into a lookout: a webcam, an object detector, and a small safety loop that owns the alarm. The first time we put it under load, the camera froze after three frames. We'd given the AI a higher priority than the camera. Once we got the order right, the numbers flipped: under the same overload, 10 of 27 alarms made the 200 ms deadline before, and 63 of 64 after. Kill the AI now and the Pi says "lookout blind" instead of going quiet, and a standby takes over in about a seventh of a second.
+We also had a stretch where the live numbers read zero for hours while every part of the app reported success. The data had simply stopped arriving. Since then a small script checks the actual values every few minutes.
 
-Somewhere in there a laptop died.
+In the afternoon we started on the QNX part: a Raspberry Pi with a webcam that acts as a lookout. If it sees a boat and nothing nearby is broadcasting, it raises an alarm within 200 ms. A small safety loop owns that alarm, and the AI detector only feeds it. Getting the priorities right mattered more than anything: under the same overload test, 10 of 27 alarms met the deadline before we fixed the order, and 63 of 64 after. If the AI dies, the Pi says "lookout blind" instead of going quiet, and a standby takes over in about 150 ms.
 
-## Saturday night: we were wrong, twice, in good ways
+## Saturday night: checking our own results
 
-For Hormuz we used two years of satellite radar, which sees ships whether they broadcast or not. The share of ships that weren't broadcasting roughly doubled after the war started this year. To check it wasn't just bad reception, we compared it with the Gulf of Oman next door.
+For Hormuz we used two years of satellite radar, which sees ships whether they broadcast or not. The share of ships not broadcasting roughly doubled after the war began this year. To make sure that wasn't just bad reception, we compared it with the Gulf of Oman next door.
 
-Late Saturday night we realized our "Hormuz" box actually contained the Gulf of Oman box. We'd been comparing a place with part of itself. We redrew it and re-ran everything, honestly expecting the finding to fall apart. It got slightly stronger. That was a relief.
+Late that night we found a mistake: our Hormuz area contained the Gulf of Oman area we were comparing it to. We redrew the boundaries and re-ran everything. The result held, and got slightly stronger.
 
-The other surprise was ten ships that "switched off" within two hours of each other far out at sea and came back together a day later at one spot near the UAE. To do that they'd have needed about 29 knots, and they can't go that fast. Their positions were faked, probably by GPS jamming. So the same physics that flags suspicious ships also clears innocent ones, which we hadn't thought about going in.
+The same physics also cleared some ships. Ten ships went silent far out at sea and reappeared a day later at one spot near the UAE, a trip that would have needed about 29 knots. They can't go that fast, so their positions were faked, most likely by GPS jamming, and we don't flag them.
 
-We also built a satellite check for live ships, pulling the latest radar image over the area a dark ship could have reached. It hasn't caught one in the act yet; the closest pass was 17 hours early. And on a stormy night the sea got so bright on radar that our detector decided most of it was land. That one took a while.
+We also added a satellite check for live alerts: the newest Sentinel-1 radar image over the circle, our own ship detection on it, and a red mark for every ship the radar sees that isn't broadcasting. So far no pass has caught a ship while it was dark. The closest came 17 hours early, and the app says so.
 
-## Sunday, after midnight
+## Sunday: making it demo-able
 
-Our first guided demo was bad. Somebody looked at it and called it useless, and they were right, so we threw it out and built a story that follows one real ship instead: it switches off, a circle grows around everywhere it could be, and two ships on sanctions lists show up inside it.
+Our first guided tour of the app didn't work, so we replaced it with a story that follows one real ship: it switches off, the circle grows, and two ships on sanctions lists appear inside it. Just after midnight we held a photo of a boat up to the Pi's webcam and watched the alarm go off, which was the moment the whole thing felt real.
 
-Then, a bit after midnight, we held a photo of a boat up to the webcam and watched the alarm go red. Best moment of the weekend.
+## What we learned
 
-The demo video took three tries. The first one looked like a screen recording someone forgot to crop.
+Start collecting data before the idea is finished. Check the actual numbers, not just whether the system says it's healthy. And treat it as good news when the data disagrees with you: our best findings came from those moments.
 
-## What we'd tell ourselves on Friday
-
-Start recording before you know what you're building. Look at the actual numbers, not whether the app says it's OK. And when your data disagrees with you, that's usually the interesting part.
-
-We used AI coding agents for a lot of the code. Most of our time went into deciding what to build and checking their work against real data.
+We used AI coding agents for much of the code. Most of our time went into deciding what to build and checking the results against real data.
 
 **Code:** https://github.com/kassem-kanjo/Hack-Western
 **Video:** (link added after upload)
