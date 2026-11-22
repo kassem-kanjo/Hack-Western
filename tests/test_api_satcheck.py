@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+Image = pytest.importorskip("PIL.Image")  # Pillow ships in the 'sat' extra, not in CI
 from fastapi.testclient import TestClient
-from PIL import Image
 
 from darkfleet.api.app import app, reset_cache
 
