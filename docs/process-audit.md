@@ -223,3 +223,9 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** guidance on every screen; app rebuilds a stale build on launch (#248); writer back on main; Pi redeploy held until Kassem's photo test.
 - **Code share since audit 31:** builders ~80%; Chief: honesty fix on the 66% window, wording, integration, process restarts.
 - **Change for next 30 min:** the 5-second test (fresh agent, first visit, no narrator) gates every UI change from now on.
+
+## Sat 21 Nov, 22:21 ET (audit 33, covers 21:51-22:21)
+- **Went well:** the 5-second test (fresh agent, first visit, no narrator) is now the gate. Round 1 failed Hormuz + Patrol; fixes #260 (tour counter, true captions, plain Patrol, recorded sighting) and #261 (Hormuz place names + story markers, Watch wording). Round 2 passed first visit, Watch and Hormuz; Patrol still contradicted itself; round-3 fixes #262 (recorded example drives banner + chain) and #263 (no label overlaps, figure captions). Round 3 test running.
+- **Went wrong:** a fix that "hid" Patrol's figures didn't (CSS display beat the hidden attribute) and only a fresh-eyes test caught it; the tour claimed "the detector is switched off" while nothing happened; one builder handed back before its coders finished.
+- **Code share since audit 32:** builders ~85%; Chief: the banner-follows-recorded fix, integration, test orchestration.
+- **Change for next 30 min:** hand V3 to Kassem only after a round passes on every screen; captions may describe only what the screen shows at that moment.
