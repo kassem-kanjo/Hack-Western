@@ -211,6 +211,32 @@ body.is-presenting .toasts {
   }
 }
 
+/* ---------- highlighted target ---------- */
+
+/* Step 5 outlines the Kill button (CSS only; the tour never clicks it).
+   Outline only, so the button's size and layout do not move. */
+body[data-present-highlight="patrol-kill"] .patrol-kill {
+  outline: 2px solid var(--c-error);
+  outline-offset: 3px;
+  animation: present-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes present-pulse {
+  0%,
+  100% {
+    outline-color: var(--c-error);
+  }
+  50% {
+    outline-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-present-highlight="patrol-kill"] .patrol-kill {
+    animation: none;
+  }
+}
+
 /* Phones and narrow tablets: the tour is desktop-only, so there is no panel. */
 @media (max-width: 1000px) {
   .present-root {

@@ -301,6 +301,10 @@ function show(at: number): void {
   if (headline !== null) headline.textContent = text.headline;
   if (line !== null) line.textContent = text.line;
   if (caption !== null) caption.dataset["dock"] = scene.dock ?? "bottom";
+  // CSS-only highlight: the body attribute lets the stylesheet find the element,
+  // which may not exist yet when the route is still changing.
+  if (scene.highlight !== undefined) document.body.dataset["presentHighlight"] = scene.highlight;
+  else delete document.body.dataset["presentHighlight"];
   if (progressFill !== null) progressFill.style.width = `${((at + 1) / SCENES.length) * 100}%`;
   progressBar?.setAttribute("aria-valuemax", String(SCENES.length));
   progressBar?.setAttribute("aria-valuenow", String(at + 1));
@@ -407,6 +411,7 @@ export function exitPresent(): void {
   clearEndTimer();
   requestHormuzCard(null);
   document.body.classList.remove("is-presenting");
+  delete document.body.dataset["presentHighlight"];
   root?.remove();
   root = null;
   caption = null;
