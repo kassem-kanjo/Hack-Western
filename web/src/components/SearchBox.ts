@@ -6,6 +6,9 @@
  * results, Enter dispatches `df:focus-vessel` on `window` with {mmsi, lat, lon}
  * so the map (or a dossier) can fly to the hull, and Escape closes the list.
  *
+ * A Hormuz story hull is not on the Watch map: choosing it goes to `#/hormuz`,
+ * where its story lives.
+ *
  * The list is a dense console table, not a palette: hairline borders, mono
  * MMSI, a small-caps count header and a sanctions tag that is the only colour.
  */
@@ -23,6 +26,8 @@ export interface SearchHit {
   lat: number;
   lon: number;
   area: string | null;
+  /** "hormuz_story" rows open the Hormuz screen; watch rows omit the field. */
+  source: "hormuz_story" | null;
 }
 
 /** The payload carried by `df:focus-vessel`. */
@@ -92,6 +97,7 @@ function toHit(value: unknown): SearchHit | null {
     lat: row.lat,
     lon: row.lon,
     area: typeof row.area === "string" ? row.area : null,
+    source: row.source === "hormuz_story" ? "hormuz_story" : null,
   };
 }
 
@@ -100,10 +106,10 @@ function displayName(hit: SearchHit): string {
   return name !== undefined && name.length > 0 ? name : `MMSI ${hit.mmsi}`;
 }
 
-/** "cargo" -> "Cargo"; a missing class is an honest dash. */
+/** "cargo" -> "Cargo"; a missing class names what is missing, never a dash. */
 function typeLabel(type: string | null): string {
   const text = type?.trim();
-  if (text === undefined || text.length === 0) return "\u2014";
+  if (text === undefined || text.length === 0) return "No flag broadcast";
   const plain = text.replace(/_/g, " ");
   return plain.charAt(0).toUpperCase() + plain.slice(1);
 }
@@ -111,7 +117,7 @@ function typeLabel(type: string | null): string {
 function watchTag(watchlist: SearchHit["watchlist"]): { label: string; className: string } {
   if (watchlist === "sanctioned") return { label: "Sanctioned", className: "is-sanctioned" };
   if (watchlist === "shadow_fleet") return { label: "Shadow fleet", className: "is-shadow" };
-  return { label: "\u2014", className: "is-none" };
+  return { label: "Not on a sanctions list", className: "is-none" };
 }
 
 /**
@@ -234,11 +240,16 @@ export function mountSearchBox(): HTMLElement {
   }
 
   function choose(hit: SearchHit): void {
-    window.dispatchEvent(
-      new CustomEvent<FocusVessel>(VESSEL_FOCUS_EVENT, {
-        detail: { mmsi: hit.mmsi, lat: hit.lat, lon: hit.lon },
-      }),
-    );
+    // A story hull lives on the Hormuz screen, not on the Watch map the event drives.
+    if (hit.source === "hormuz_story") {
+      window.location.hash = "#/hormuz";
+    } else {
+      window.dispatchEvent(
+        new CustomEvent<FocusVessel>(VESSEL_FOCUS_EVENT, {
+          detail: { mmsi: hit.mmsi, lat: hit.lat, lon: hit.lon },
+        }),
+      );
+    }
     input.value = "";
     rows = [];
     close();
@@ -321,7 +332,8 @@ export function mountSearchBox(): HTMLElement {
     if (event.key === "Enter") {
       if (!expanded) return;
       event.preventDefault();
-      const hit = rows[active];
+      // Enter with nothing highlighted still opens the best match.
+      const hit = rows[active] ?? rows[0];
       if (hit !== undefined) choose(hit);
       return;
     }
