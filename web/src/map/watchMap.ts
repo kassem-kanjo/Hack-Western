@@ -603,6 +603,8 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     reach: '<circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor"/>',
   };
   const layerPanel = h("div", { class: "watch-layers", role: "group", "aria-label": "Map legend" });
+  // Layer switches sit behind one closed row so the key stays small over the map.
+  const layerRows = h("details", { class: "watch-layer-toggles" }, h("summary", null, "Layers"));
   for (const [key, label] of [
     ["vessels", "Ships"],
     ["events", "Alerts"],
@@ -622,7 +624,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       row.setAttribute("aria-pressed", layerState[key] ? "true" : "false");
       applyLayerVisibility();
     });
-    layerPanel.append(row);
+    layerRows.append(row);
   }
 
   // The key says what the marks mean; the rows above switch the layers, this
@@ -631,32 +633,32 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     h(
       "div",
       { class: "watch-marks-key" },
-      h("h4", null, "Marks on the map"),
-      h(
+            h(
         "div",
         { class: "watch-marks-row" },
         h("span", { class: "watch-marks-swatch is-red-label" }),
-        "Red label: could have met, on a sanctions list",
+        "Could meet \u00b7 sanctioned",
       ),
       h(
         "div",
         { class: "watch-marks-row" },
         h("span", { class: "watch-marks-swatch is-orange-label" }),
-        "Orange label: could have met",
+        "Could meet",
       ),
       h(
         "div",
         { class: "watch-marks-row" },
         h("span", { class: "watch-marks-swatch is-orange-dot" }),
-        "Orange dot: another ship that switched off",
+        "Also switched off",
       ),
       h(
         "div",
         { class: "watch-marks-row" },
         h("span", { class: "watch-marks-swatch is-grey-dot" }),
-        "Grey or white dot: other ships, broadcasting normally",
+        "Broadcasting",
       ),
     ),
+    layerRows,
   );
 
   const cursorEl = h(
