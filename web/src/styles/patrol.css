@@ -242,7 +242,8 @@
 /* The alarm banner leads the rail: big, one state at a time. Amber = blind, red = vessel not broadcasting. */
 .patrol-verdict {
   margin-top: var(--sp-4);
-  font-size: 22px;
+  font-size: 34px;
+  line-height: 1.2;
   letter-spacing: 0.01em;
 }
 
@@ -260,6 +261,68 @@
 
 .patrol-alarm-sub[hidden] {
   display: none;
+}
+
+/* The why-line: one plain sentence under the verdict. */
+.patrol-why {
+  margin: var(--sp-2) 0 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--c-text-2);
+}
+
+/* The one number: the live alarm latency. A dash until a live alarm lands. */
+.patrol-big-number {
+  margin: var(--sp-5) 0 0;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  line-height: 1.2;
+  color: var(--c-text-1);
+}
+
+.patrol-big-number.is-bad {
+  color: var(--c-error);
+}
+
+/* The "Recorded sighting" link row sits under the two buttons. */
+.patrol-recorded-row {
+  margin-top: var(--sp-3);
+}
+
+/* The one overload line under the buttons. */
+.patrol-overload-line {
+  margin: var(--sp-4) 0 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--c-text-2);
+}
+
+.patrol-overload-line[hidden] {
+  display: none;
+}
+
+/* Details: closed by default, a plain disclosure under the one-line overload result. */
+.patrol-details {
+  margin-top: var(--sp-5);
+  border-top: 1px solid var(--c-line);
+}
+
+.patrol-details-summary {
+  padding: var(--sp-3) 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-1);
+  cursor: pointer;
+  list-style: none;
+}
+
+.patrol-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.patrol-details-body {
+  padding-bottom: var(--sp-4);
 }
 
 .patrol-metrics {
@@ -436,19 +499,20 @@
 /* ---------- the two demo actions ---------- */
 
 .patrol-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--sp-2);
-  margin-top: var(--sp-5);
+  margin-top: var(--sp-4);
 }
 
 .patrol-kill,
 .patrol-stress {
-  padding: 7px 12px;
+  padding: 14px 16px;
   border-radius: 0;
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 15px;
+  font-weight: 600;
+  min-height: 48px;
   cursor: pointer;
 }
 
@@ -494,12 +558,22 @@
   outline-offset: 2px;
 }
 
-/* Secondary: outlined, same size as Overload. It opens an example, never a live feed. */
+/* Secondary: a plain text link under the two buttons. It opens an example, never a live feed. */
 .patrol-recorded-btn {
-  padding: 7px 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
   font-family: inherit;
   font-size: 12px;
+  color: var(--c-text-2);
+  text-decoration: underline;
   cursor: pointer;
+}
+
+.patrol-recorded-btn:focus-visible {
+  outline: 1px solid var(--c-focus);
+  outline-offset: 2px;
 }
 
 /* ---------- recorded sighting: an example panel over the frame, never live ---------- */
@@ -640,8 +714,6 @@
 
   .patrol-kill,
   .patrol-stress {
-    flex: 1;
-    justify-content: center;
-    min-height: 44px;
+    min-height: 48px;
   }
 }
