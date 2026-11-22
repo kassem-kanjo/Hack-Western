@@ -1,6 +1,26 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 21:51 ET · V3 + audit-4 fixes live (#250-#257) · Kassem reviewing; launch paused until his sign-off · Pi redeploy (BLIND 0.8 s, #256) waits for his photo test · 5-second test running
+Updated: Sat 21 Nov, 23:00 ET · HANDOVER for a new chat: read 'Handover' below first · V3 passed the 5-second test; Kassem reviewing · launch work paused until his 'happy' (except video + voice-over, which he asked for)
+
+## Handover (Sat 21 Nov, 23:00 ET) — start here in a new chat
+
+**Running when this was written (two builders, local worktrees, not pushed yet):**
+- #266 Hormuz comparison areas overlap: the Gulf of Oman control box sits inside the 'Hormuz' box. Builder re-measures Hormuz without the control area, re-runs the validation (scripts/hormuz_validation.py), draws both areas on the map (red/grey), updates insights 16 + Devpost numbers. Worktree: .claude/worktrees/agent-ab1ad892e5602726c (branch worktree-agent-ab1ad892e5602726c). If the builder is gone: check its commits there, gate (pytest, ruff, tsc/build), cherry-pick onto a branch off origin/main, PR, merge on green. Headline numbers (66%, 32%, +14.5) may change: use only the new ones.
+- #268 Satellite check: click a dark ship -> newest real Sentinel-1 pass over its reach area, detections matched to our AIS, not-broadcasting in red with chips. Worktree: .claude/worktrees/agent-a80e7eaa7f10db212 (branch worktree-agent-a80e7eaa7f10db212). Same landing steps. If no real pass caught a dark ship, Kassem approved a clearly labelled 'Scenario' (banner: 'Scenario: how an alert looks when a satellite pass catches a dark ship'), built from real parts, never mixed with live numbers.
+
+**Next, in order:**
+1. Land #266 and #268 (gate, PR, merge, rebuild web, restart nothing else).
+2. Fresh-agent 5-second test on the result (first visit, 1280x720, no narrator; hide the camera image in Patrol shots).
+3. Kassem reviews V3 (tour: P on Hormuz, arrows). Launch material only after he says he's happy.
+4. Pi: redeploy with the 0.8 s BLIND threshold (#256 merged): `bash` the deploy in docs/patrol-demo.md with .env loaded (EDGE_STATUS_TOKEN). Only when Kassem isn't using the Patrol screen; ~1 min downtime. Then his ship-photo test (#237's last item).
+5. Demo video: scripts/record_demo.py (Present mode, 1280x720 x1.5; on the Patrol beat use 'Show a recorded sighting', never live camera frames with people); encode with the ffmpeg bundled in PyPI imageio-ffmpeg (`uv run --with imageio-ffmpeg python -c "import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())"`). Voice-over: docs/voiceover.md (replace [check] numbers after #266).
+6. Devpost: docs/devpost-v2-draft.md ('we/our', no slogans); Kassem submits by 08:30 ET Sunday.
+
+**Open decision for Kassem:** live alerts are Baltic-only because the coverage check needs 150 reports/min (Malaysia ~45, Hormuz ~2). Option: per-region coverage relative to each region's own normal rate, tested on Malaysia data first. Not started.
+
+**Running processes (laptop):** recorder + scripts/recorder_watchdog.sh; build_watch.py --loop 60 --hours 12 (from main); tiger_sink.py --loop 30 under a bash restart loop; uvicorn on :8000 (EDGE_HOST, EDGE_DEMO_CONTROLS, DARKFLEET_DATA, DARKFLEET_WEB_DIST; .env loaded); scripts/sentinel.sh --loop 300 -> logs/sentinel.events. Restart processes by PID, never pkill -f a pattern a supervisor loop also matches.
+
+**Rules learned tonight (also in memory/skills):** Kassem's sign-off before any launch material; public copy in 'we/our'; plain words (docs/copy-rules.md); every UI change passes the 5-second test; captions only state what is on screen; never fabricate data (labelled scenarios OK).
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
