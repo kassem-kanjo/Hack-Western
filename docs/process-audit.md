@@ -210,3 +210,9 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Went wrong:** the first recording captured a person's face on the Pi's live camera; caught before anything was encoded or shared. Encoding blocked on ffmpeg (not installed). Kassem's V3 review and Pi ship-photo test still pending.
 - **Code share since audit 29:** builder ~80% (recorder); Chief: ranking fix, lint fixes, docs.
 - **Change for next 30 min:** nothing ships with live-camera frames until the Patrol beat is re-shot with the ship photo in view.
+
+## Sat 21 Nov, 20:52 ET (audit 31, covers 20:22-20:52)
+- **Went well:** Kassem started the V3 walkthrough; his first note (old per-day radar bars and fast replay on Watch) was removed within minutes (#244, -104 lines). Devpost rewritten in plain words with real numbers, then in "we/our" at his request (#245, #246). ffmpeg obtained without an install (imageio-ffmpeg's bundled binary). QNX path confirmed live (Pi at 8 fps, safety core alive).
+- **Went wrong:** I started launch material (video, teaser GIF) before Kassem had reviewed V3; he called it out. I wrote "I/my" in public copy although the work presents as a team. Both saved as rules (memory: ceo-signoff-before-launch, public-voice-we).
+- **Code share since audit 30:** Chief ~70% (small deletions and copy during his live review); builders: product audit running.
+- **Change for next 30 min:** launch work stays paused until Kassem says he is happy; drive his walkthrough screen by screen and turn each note into a fix immediately; act on the keep/fix/cut audit when it lands.
