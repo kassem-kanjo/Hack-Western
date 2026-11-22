@@ -12,6 +12,11 @@ export function fmtInt(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+/** 1334.25, 1 -> "1,334.3": a fixed number of decimals with thousands separators. */
+export function fmtDec(n: number, digits: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
 /** 22.9 -> "22.9 h" */
 export function fmtHours(h: number): string {
   return `${h.toFixed(1)} h`;

@@ -39,7 +39,7 @@ import {
 } from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
-import { fmtInt, fmtUtc } from "../format";
+import { fmtDec, fmtInt, fmtUtc } from "../format";
 import { fetchListeningRate } from "../model/areaStats";
 import { timeAgo } from "../model/liveFacts";
 import { LIVE_REGIONS, openLiveFeed, type LiveFeed } from "../model/liveFeed";
@@ -145,7 +145,7 @@ const KIND_NAME: Record<WatchAlertKind, string> = {
 
 /** Short filter-chip labels; the row tag keeps the full kind name. */
 const KIND_CHIP: Record<WatchAlertKind, string> = {
-  dark: "Dark",
+  dark: "Switched off",
   sanctioned_stop: "Stopped",
   spoof: "Faked position",
   meeting: "Meeting",
@@ -190,12 +190,21 @@ const KIND_ORDER: WatchAlertKind[] = [
   "radar_unmatched",
 ];
 
+/** "2026-11-14" -> "14 Nov": the radar day, short enough for a row. */
+function radarDay(day: string): string {
+  return fmtUtc(`${day}T00:00:00Z`).slice(0, 6);
+}
+
 /** A vessel name, or the contract's honest placeholder. */
 function alertName(alert: WatchAlert): string {
   // A radar alert is fleet-level: it names no hull, so the row says what it saw.
   if (alert.kind === "radar_unmatched") {
     const n = alert.evidence["unmatched"];
-    return typeof n === "number" ? `Radar \u00b7 ${n} seen, not broadcasting` : shortLabel(alert.label);
+    if (typeof n !== "number") return shortLabel(alert.label);
+    // The date keeps this apart from the Hormuz "today" count.
+    const day = alert.evidence["day"];
+    const when = typeof day === "string" && Number.isFinite(Date.parse(`${day}T00:00:00Z`)) ? ` on ${radarDay(day)}` : "";
+    return `${fmtInt(n)} seen by radar${when}, not broadcasting`;
   }
   const trimmed = alert.name?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : `Unnamed \u00b7 MMSI ${alert.mmsi}`;
@@ -891,7 +900,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   function paintStatus(nowMs: number): void {
     statusClock.textContent = new Date(nowMs).toISOString().slice(11, 19) + "Z";
     if (data !== null) {
-      statusSnap.textContent = `${fmtUtcZ(data.generated_at).slice(7)} · ${data.counts.ships} ships`;
+      statusSnap.textContent = `${fmtUtcZ(data.generated_at).slice(7)} · ${fmtInt(data.counts.ships)} ships`;
     }
     statusFeed.textContent =
       receiverRate === null ? "waiting" : `${fmtInt(receiverRate)} position reports a minute`;
@@ -922,10 +931,10 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       panelParts.duration.textContent = fmtDuration(durationMs(current, now));
       if (panelParts.radius !== null) {
         const atMs = reachTimeMs(current, now);
-        panelParts.radius.textContent = `${Math.round(reachRadiusKm(current, atMs))} km`;
+        panelParts.radius.textContent = `${fmtInt(Math.round(reachRadiusKm(current, atMs)))} km`;
       }
       if (panelParts.other !== null) {
-        panelParts.other.textContent = `Other ships where it could have gone: ${otherShipsInReach(data, current, reachTimeMs(current, now))}`;
+        panelParts.other.textContent = `Other ships where it could have gone: ${fmtInt(otherShipsInReach(data, current, reachTimeMs(current, now)))}`;
       }
     }, 1000);
   }
@@ -985,18 +994,18 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   function syncFilters(snapshot: WatchResponse): void {
     const counts = kindCounts(scopedAlerts(snapshot, state));
     for (const entry of kindButtons) {
-      entry.count.textContent = String(counts.get(entry.kind) ?? 0);
+      entry.count.textContent = fmtInt(counts.get(entry.kind) ?? 0);
       setPressed(entry.button, state.kinds.has(entry.kind));
     }
     for (const entry of areaChips) setPressed(entry.chip, entry.id === (state.areaId ?? ""));
-    hiddenRoutine.textContent = `${snapshot.counts.hidden_routine} routine events hidden`;
+    hiddenRoutine.textContent = `${fmtInt(snapshot.counts.hidden_routine)} routine events hidden`;
   }
 
   function renderRows(snapshot: WatchResponse): void {
     const now = Date.now();
     const alerts = visibleAlerts(snapshot, state);
     exportRows = alerts;
-    eventsCount.textContent = String(alerts.length);
+    eventsCount.textContent = fmtInt(alerts.length);
     rowsEl.replaceChildren();
 
     if (alerts.length === 0) {
@@ -1114,7 +1123,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "button",
         { class: "watch-seg-btn", type: "button", "aria-pressed": "false" },
         h("span", null, label),
-        h("span", { class: "watch-mono" }, String(count)),
+        h("span", { class: "watch-mono" }, fmtInt(count)),
       );
       button.addEventListener("click", onPick);
       seg.append(button);
@@ -1209,11 +1218,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           class: sanctioned ? "is-sanctioned" : null,
           tabindex: "0",
           role: "button",
-          "aria-label": `${contactName(contact)}, ${contact.min_dist_km.toFixed(1)} km`,
+          "aria-label": `${contactName(contact)}, ${fmtDec(contact.min_dist_km, 1)} km`,
         },
         h("td", { class: "watch-nearby-name" }, contactName(contact)),
         h("td", { class: "watch-mono" }, String(contact.mmsi)),
-        h("td", { class: "watch-mono watch-num" }, contact.min_dist_km.toFixed(1)),
+        h("td", { class: "watch-mono watch-num" }, fmtDec(contact.min_dist_km, 1)),
         h("td", null, contact.stopped ? "Stopped" : "Moving"),
         h("td", null, watchlistLabel(contact)),
       );
@@ -1281,7 +1290,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "tr",
         { tabindex: "0", role: "button", title: label },
         h("td", { class: "watch-nearby-name" }, label),
-        h("td", { class: "watch-mono watch-num" }, vessel.offset_km.toFixed(1)),
+        h("td", { class: "watch-mono watch-num" }, fmtDec(vessel.offset_km, 1)),
         h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_in_kn)}`),
         h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_out_kn)}`),
       );
@@ -1339,7 +1348,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       alert.kind === "dark" ? "Where it could have gone" : alert.kind === "sanctioned_stop" ? "Distance checked" : null;
     let radiusEl: HTMLElement | null = null;
     if (radiusLabel !== null) {
-      radiusEl = h("span", { class: "watch-mono" }, `${Math.round(reachRadiusKm(alert, atMs))} km`);
+      radiusEl = h("span", { class: "watch-mono" }, `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`);
     }
 
     const imo = imoOf(alert);
@@ -1384,8 +1393,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "div",
           { class: "watch-figs" },
           figure(fmtDuration(durationMs(alert, now)), "Switched off for"),
-          figure(`${Math.round(reachRadiusKm(alert, atMs))} km`, "Could have gone this far"),
-          figure(String(met), "Ships it could have met"),
+          figure(`${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`, "Could have gone this far"),
+          figure(fmtInt(met), "Ships it could have met"),
         ),
       );
     }
@@ -1471,7 +1480,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       otherEl = h(
         "div",
         { class: "watch-other" },
-        `Other ships where it could have gone: ${otherShipsInReach(snapshot, alert, atMs)}`,
+        `Other ships where it could have gone: ${fmtInt(otherShipsInReach(snapshot, alert, atMs))}`,
       );
       parts.push(
         section(
@@ -1513,7 +1522,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       { class: "watch-fields" },
       ...field("Area", h("span", { class: "watch-vessel" }, area.name)),
       ...field("Kind", area.kind === "watched" ? "Watched" : "Listening"),
-      ...field("Ships heard", h("span", { class: "watch-mono" }, String(heard))),
+      ...field("Ships heard", h("span", { class: "watch-mono" }, fmtInt(heard))),
       ...field("Events, 12 h", h("span", { class: "watch-mono" }, String(inArea.length))),
       ...field(
         "Box",

@@ -7,6 +7,7 @@
 import type * as maplibregl from "maplibre-gl";
 
 import type { HormuzCardKey } from "../present/cardRequest";
+import { fmtInt } from "../format";
 import { h } from "./dom";
 
 const SOURCE = "hormuz-stories";
@@ -215,7 +216,7 @@ export function showCluster(map: maplibregl.Map, cluster: StoryCluster): void {
 /** The cluster card's text: every number from the cluster, the physics that rules out real voyages. */
 function clusterSentence(c: StoryCluster): string {
   const head = `${dayLabel(c.day)}: ${c.vessels} ships switched off their transponders within ${c.span_hours.toFixed(1)} hours.`;
-  const where = ` Their last positions were up to ${Math.round(c.max_km)} km out in the Arabian Sea. About ${Math.round(c.median_hours)} h later they came back at the same spot off the UAE.`;
+  const where = ` Their last positions were up to ${fmtInt(Math.round(c.max_km))} km out in the Arabian Sea. About ${Math.round(c.median_hours)} h later they came back at the same spot off the UAE.`;
   const speed =
     c.median_kn === null ? "" : ` The trip needs ${Math.round(c.median_kn)} knots, which these ships can't sail.`;
   return `${head}${where}${speed} Their positions look faked, likely by GPS interference, so we don't rank them.`;
@@ -250,7 +251,7 @@ export function storyCards(stories: HormuzStories, onPick: (key: HormuzCardKey) 
     // Direction from the two positions; "closer to the strait" only when the data says so.
     const way = lead.on.lon < lead.off.lon ? "west" : "east";
     const closer = (lead.closer_to_strait_km ?? 0) > 0 ? ", closer to the strait" : "";
-    const moved = lead.moved_km === null ? "" : ` It came back ${Math.round(lead.moved_km)} km ${way}${closer}.`;
+    const moved = lead.moved_km === null ? "" : ` It came back ${fmtInt(Math.round(lead.moved_km))} km ${way}${closer}.`;
     cards.push(
       storyCard(
         "sea1",
