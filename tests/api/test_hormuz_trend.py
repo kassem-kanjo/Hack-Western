@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from darkfleet.api import hormuz
 from darkfleet.api.app import app
+from darkfleet.ingest.regions import overlap_area, region_geometry
 
 HORMUZ_LONG: dict[str, Any] = {
     "region": "HORMUZ",
@@ -173,6 +174,21 @@ def test_trend_events_carry_the_fields_the_panel_draws(client: TestClient) -> No
 
 def test_trend_regime_is_served_verbatim(client: TestClient) -> None:
     assert client.get("/api/hormuz/trend").json()["regime"] == VALIDATION["regime"]
+
+
+def test_trend_areas_come_from_the_region_registry(client: TestClient) -> None:
+    areas = client.get("/api/hormuz/trend").json()["areas"]
+    treated, control = areas["treated"], areas["control"]
+
+    assert treated["id"] == "HORMUZ"
+    assert treated["label"] == "Hormuz (measured)"
+    assert treated["geometry"] == region_geometry("HORMUZ")
+    assert control["id"] == "GULF_OF_OMAN_CONTROL"
+    assert control["label"] == "Gulf of Oman (comparison)"
+    assert control["geometry"] == region_geometry("GULF_OF_OMAN_CONTROL")
+    assert treated["geometry"]["type"] == "Polygon"
+    assert control["geometry"]["type"] == "Polygon"
+    assert overlap_area(treated["geometry"], control["geometry"]) == 0.0
 
 
 def test_trend_unreadable_days_and_rows_are_skipped(client: TestClient, tmp_path: Path) -> None:

@@ -1,7 +1,6 @@
 # Demo video voice-over (about 2:20)
 
 Read it slowly and plainly. One sentence per breath. The video follows the tour (press P on Hormuz, then the right arrow); each block below is one step.
-Numbers marked **[check]** come from the Hormuz re-measure running tonight; read whatever the screen shows.
 
 ---
 
@@ -9,8 +8,8 @@ Numbers marked **[check]** come from the Hormuz re-measure running tonight; read
 Every big ship broadcasts where it is. It's called a transponder.
 Some ships switch it off. Usually because they're moving sanctioned oil.
 This is the Strait of Hormuz. Satellite radar sees every ship, broadcasting or not.
-After the war began, about **two in three [check]** ships here stopped broadcasting. Before, it was **one in three [check]**.
-We checked it isn't just bad reception: next door, in the Gulf of Oman, the rise was smaller **[check]**.
+After the war began, about two in three ships here weren't broadcasting. In 2025, it was one in three.
+We checked it isn't just bad reception: next door, in the Gulf of Oman, the rise was much smaller.
 
 **2 · One ship (0:25–0:45)**
 Here's one of them. SEA 1, a ship on a shadow-fleet list.

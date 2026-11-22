@@ -2,7 +2,15 @@
 
 import pytest
 
-from darkfleet.ingest.regions import BALTIC_WATCH, HORMUZ, REGIONS, polygon_from_bbox, region_geometry
+from darkfleet.ingest.regions import (
+    BALTIC_WATCH,
+    GULF_OF_OMAN_CONTROL,
+    HORMUZ,
+    REGIONS,
+    overlap_area,
+    polygon_from_bbox,
+    region_geometry,
+)
 
 
 def _ring(region: dict) -> list:
@@ -32,11 +40,21 @@ def test_hormuz_bbox():
     lats = [point[1] for point in ring]
 
     assert min(lons) == 54.0
-    assert max(lons) == 60.5
+    assert max(lons) == 57.6
     assert min(lats) == 22.0
     assert max(lats) == 27.5
     assert ring[0] == ring[-1]
     assert len(ring) == 5
+
+
+def test_hormuz_does_not_overlap_control():
+    assert overlap_area(HORMUZ, GULF_OF_OMAN_CONTROL) == 0.0
+
+
+def test_control_was_inside_the_old_box():
+    old_box = polygon_from_bbox(54.0, 60.5, 22.0, 27.5)
+
+    assert overlap_area(old_box, GULF_OF_OMAN_CONTROL) == pytest.approx(2.2 * 1.6)
 
 
 def test_baltic_watch_bbox():

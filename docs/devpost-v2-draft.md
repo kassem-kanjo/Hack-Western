@@ -12,7 +12,7 @@ We wanted to answer one question a sanctions analyst or a coast guard asks every
 
 There are three screens.
 
-**Hormuz.** We pulled two years of satellite radar for the Strait of Hormuz. Before the war, 32% of the ships radar saw there weren't broadcasting. Since the strikes on 28 Feb 2026 it's 66%. To check that isn't just bad reception, we compared it with the Gulf of Oman next door. Hormuz went up 14.5 points more (95% CI 2 to 26).
+**Hormuz.** We pulled two years of satellite radar for the Strait of Hormuz. In 2025, 32% of the ships radar saw there weren't broadcasting. From March to June 2026, after the strikes on 28 Feb, it was 68%. To check that isn't just bad reception, we compared it with the Gulf of Oman next door, kept as a separate area. Hormuz went up 16 points more (95% CI 3 to 27).
 
 Two real stories sit under that. SEA 1, a ship on a shadow-fleet list, switched off for 13.1 hours in the Gulf of Oman, nine days after the strikes, and came back 96 km further west, closer to the strait. And on 12 March, 10 ships "switched off" far out in the Arabian Sea and came back 22 hours later at one spot off the UAE. That trip needs 29 knots. None of them can go that fast, so their positions were faked, probably by GPS interference. The app doesn't flag them as hiding.
 

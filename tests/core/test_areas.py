@@ -65,7 +65,12 @@ def test_listening_boxes_match_the_in_package_region_registry() -> None:
     # scripts/record_ais.py restates these boxes; darkfleet.ingest.regions is the copy the
     # package itself uses, so a drift there means the recorder list changed without us.
     assert _area("BALTIC_WATCH")["bbox"] == _bbox_of(INGEST_REGIONS["BALTIC_WATCH"])
-    assert _area("HORMUZ")["bbox"] == _bbox_of(INGEST_REGIONS["HORMUZ"])
+    # The measured Hormuz area (#266) is narrower than the listening box: it stops west of the
+    # Gulf of Oman comparison area, which the recorder must still hear.
+    listen_w, listen_s, listen_e, listen_n = _area("HORMUZ")["bbox"]
+    measured_w, measured_s, measured_e, measured_n = _bbox_of(INGEST_REGIONS["HORMUZ"])
+    assert listen_w <= measured_w and measured_e <= listen_e
+    assert listen_s <= measured_s and measured_n <= listen_n
 
 
 def test_ids_are_unique_across_both_tables() -> None:
