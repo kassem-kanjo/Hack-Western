@@ -154,29 +154,22 @@ function tokensFromStories(stories: HormuzStories): TokenValues {
 }
 
 /**
- * The alert the live beat focuses. Strongest first: an ongoing dark ship with the
- * most ships it could have met (the beat is about a ship switching off), then any
- * ongoing alert (the watch list leads with it), then the cold open's own order:
- * the newest earlier dark alert a sanctioned ship could have met, the newest
- * sanctioned stop, the newest faked position.
+ * The alert the live beat focuses: a ship that switched off its transponder, because the
+ * caption says so. Ongoing first, then the most ships it could have met, then the newest.
+ * Null when the data has no switch-off; the beat is then skipped rather than shown over a
+ * different kind of event.
  */
 function strongestAlert(alerts: readonly WatchAlert[]): WatchAlert | null {
   const met = (alert: WatchAlert): number => alert.contacts.filter((contact) => contact.could_meet === true).length;
-  const newest = [...alerts].sort((a, b) => Date.parse(b.t_start) - Date.parse(a.t_start));
-  const ongoing = newest.filter((alert) => alert.status === "ongoing");
-  const liveDark = ongoing.filter((alert) => alert.kind === "dark").sort((a, b) => met(b) - met(a));
-  if (liveDark[0] !== undefined) return liveDark[0];
-  if (ongoing[0] !== undefined) return ongoing[0];
-  return (
-    newest.find(
-      (alert) =>
-        alert.kind === "dark" &&
-        alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned"),
-    ) ??
-    newest.find((alert) => alert.kind === "sanctioned_stop") ??
-    newest.find((alert) => alert.kind === "spoof") ??
-    null
-  );
+  const dark = alerts
+    .filter((alert) => alert.kind === "dark")
+    .sort(
+      (a, b) =>
+        Number(b.status === "ongoing") - Number(a.status === "ongoing") ||
+        met(b) - met(a) ||
+        Date.parse(b.t_start) - Date.parse(a.t_start),
+    );
+  return dark[0] ?? null;
 }
 
 /**
@@ -212,6 +205,7 @@ async function loadTourValues(): Promise<{
   if (trend.status === "fulfilled") Object.assign(tokens, tokensFromTrend(trend.value));
   // A stories answer with no listed ship means the SEA 1 scene has nothing to tell.
   const absent: PresentToken[] = [];
+  if (strongest === null) absent.push("dark_alert");
   if (stories.status === "fulfilled") {
     Object.assign(tokens, tokensFromStories(stories.value));
     if (leadListed(stories.value) === null) absent.push("sea1_hours");
