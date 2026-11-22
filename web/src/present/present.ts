@@ -36,7 +36,6 @@ const STORIES_URL = "/api/hormuz/stories";
 const PHONE_QUERY = "(max-width: 1000px)";
 
 /** After the last beat the tour leaves on its own, so a finished demo never sits on a caption. */
-const END_HOLD_MS = 12000;
 
 const TOKEN = /\{([a-z_0-9]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
@@ -58,7 +57,7 @@ let strongestId: string | null = null;
 
 let active = false;
 let index = 0;
-/** Leaves the tour END_HOLD_MS after the last beat appears; cleared by any other beat. */
+/** Reserved for a timed exit; unused while the last beat waits for the presenter. */
 let endTimer: number | null = null;
 /** Bumped on start/exit so a fetch from an earlier run cannot repaint this one. */
 let run = 0;
@@ -204,7 +203,9 @@ async function loadTourValues(): Promise<{
     const focus = strongestAlert(alerts);
     if (focus !== null) {
       strongest = focus.id;
-      tokens.met = String(focus.contacts.filter((contact) => contact.could_meet === true).length);
+      // Only a plural count reads well ("the 8 ships"); 0 or 1 falls back to the line without it.
+      const metCount = focus.contacts.filter((contact) => contact.could_meet === true).length;
+      if (metCount >= 2) tokens.met = String(metCount);
     }
   }
 
@@ -302,7 +303,7 @@ function show(at: number): void {
   const text = captionFor(scene);
   index = at;
   clearEndTimer();
-  if (at === SCENES.length - 1) endTimer = window.setTimeout(exitPresent, END_HOLD_MS);
+  // No auto-exit: the presenter may still be speaking on the last beat; → or Esc leaves.
   navigate(routeFor(scene));
   requestHormuzCard(scene.card ?? null);
 

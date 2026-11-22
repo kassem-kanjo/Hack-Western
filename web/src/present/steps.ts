@@ -123,7 +123,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
         headline: "Our own receivers caught a ship switching off",
         line: "Here is where it could have gone, and the {met} ships it could have met.",
         fallback: {
-          line: "Here is where it could have gone, and the ships it could have met.",
+          line: "Here is where it could have gone while its transponder was off.",
         },
       },
     ],

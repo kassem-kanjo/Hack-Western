@@ -194,7 +194,7 @@ function topBox(ai: EdgeAi | null | undefined): { label: string; score: number }
 /** "boat 82%": the one detection line a judge can read at 1 m. */
 function aiText(ai: EdgeAi | null | undefined): string {
   const box = topBox(ai);
-  if (box === null) return "nothing";
+  if (box === null) return "No vessel in view";
   const pct = box.score <= 1 ? Math.round(box.score * 100) : Math.round(box.score);
   return `${box.label} ${pct}%`;
 }
