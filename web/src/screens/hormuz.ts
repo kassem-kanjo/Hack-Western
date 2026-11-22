@@ -14,6 +14,7 @@ import * as maplibregl from "maplibre-gl";
 import { offlineStyle } from "../basemap";
 import { attribution } from "../components/Attribution";
 import { h } from "../components/dom";
+import { fmtInt } from "../format";
 import { fetchHormuz } from "../components/hormuz";
 import {
   addStoryLayers,
@@ -52,7 +53,7 @@ const STRAIT: [[number, number], [number, number]] = [
 ];
 
 /** Said plainly under the chips: the receivers were off during this pass. */
-const AIS_NOTE = "Our AIS receivers did not cover this pass, so we can't say which of these switched off.";
+const AIS_NOTE = "Our receivers did not cover this pass, so we can't say which of these switched off.";
 
 interface SarDetection {
   lat: number;
@@ -248,7 +249,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       "section",
       { class: "hz-section" },
       h("h2", { class: "hz-label" }, "Today's satellite pass"),
-      h("p", { class: "hz-figure-line" }, `${count} ships seen by radar · ${passLabel(scan.time)}`),
+      h("p", { class: "hz-figure-line" }, `${fmtInt(count)} ships seen by radar · ${passLabel(scan.time)}`),
       h("div", { class: "hz-chips" }, ...chips),
       sarBox,
       h("p", { class: "hz-small" }, AIS_NOTE),

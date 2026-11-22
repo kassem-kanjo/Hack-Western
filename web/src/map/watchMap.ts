@@ -36,6 +36,7 @@ import type {
 import type { LivePosition } from "../model/liveFeed";
 import { offlineStyle } from "../basemap";
 import { h } from "../components/dom";
+import { fmtInt } from "../format";
 import { rgba, themeColor } from "./theme";
 
 type LngLat = [number, number];
@@ -912,7 +913,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
           "stroke-dasharray": "5 3",
           "stroke-opacity": 0.9,
         });
-        line.append(svgTitle(`${displayName(contact.name, contact.mmsi)} \u00b7 ${Math.round(contact.min_dist_km)} km from the false point`));
+        line.append(svgTitle(`${displayName(contact.name, contact.mmsi)} \u00b7 ${fmtInt(Math.round(contact.min_dist_km))} km from the false point`));
         focusLineLayer.append(line);
         spoofLines.push({ line, from: [contact.lon, contact.lat] });
       }
@@ -933,7 +934,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
         "stroke-width": 1.5,
       });
       circle.append(
-        svgTitle(`${displayName(contact.name, contact.mmsi)} \u00b7 ${Math.round(contact.min_dist_km)} km`),
+        svgTitle(`${displayName(contact.name, contact.mmsi)} \u00b7 ${fmtInt(Math.round(contact.min_dist_km))} km`),
       );
       contactLayer.append(circle);
 

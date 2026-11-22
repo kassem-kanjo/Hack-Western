@@ -120,15 +120,15 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
-  max-width: calc(100% - 220px);
-  padding: 0 var(--sp-2);
+  /* Wraps to two lines rather than clipping: the zoom controls sit at the right edge. */
+  max-width: calc(100% - 64px);
+  min-height: 22px;
+  padding: 3px var(--sp-2);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
+  line-height: 15px;
   color: var(--text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
 }
 
 .watch-live-dot {
@@ -466,12 +466,11 @@
 
 .watch-search::placeholder { color: var(--text-4); }
 
-/* Kind chips: one grid row, dashed when off, ice when on. */
+/* Kind chips: wrap inside the 320 px panel, dashed and muted when off, filled when on. */
 .watch-filter-kinds {
-  display: grid;
-  grid-template-columns: repeat(4, auto);
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  justify-content: space-between;
 }
 
 .watch-kind {
@@ -498,6 +497,19 @@
   border: 1px solid var(--text-1);
   background: var(--text-1);
   color: var(--surface-0);
+}
+
+/* Off: no colour at all, the glyph and count go to the muted tone. */
+.watch-kind[aria-pressed="false"] {
+  color: var(--text-4);
+}
+
+.watch-kind[aria-pressed="false"] .watch-glyph {
+  color: var(--text-4) !important;
+}
+
+.watch-kind[aria-pressed="false"] .watch-kind-count {
+  color: var(--text-4);
 }
 
 .watch-kind[aria-pressed="true"] .watch-glyph {
