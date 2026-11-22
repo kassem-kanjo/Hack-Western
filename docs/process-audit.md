@@ -236,3 +236,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** Chief probed the endpoint directly (200), found the comment, re-ran in 30-day chunks; sanctions line is the top item of #270, queued behind #268 (same file).
 - **Code share since audit 33:** builders ~75%; Chief: token diagnosis, validation re-run, test fix, landing.
 - **Change for next 30 min:** before reporting a key "invalid", probe it with one direct request; load .env with python-dotenv, never a hand parser.
+
+## Sat 21 Nov, 23:25 ET (audit 35, covers 22:58-23:25)
+- **Went well:** Satellite check (#277), Patrol cut to what a judge needs (#280), writeup/table script/voice-over (#276), submission checklist (#273) merged; Pi redeployed with the 800 ms threshold and passed the real ship-photo test; Devpost filled and saved as a draft; Watch sanctions line (#281) on CI; video being recorded from the real app.
+- **Went wrong:** a merge script merged #277 with red CI (`;` ignored the exit code); a symlinked .venv let uv repoint the live environment at a temp worktree; the old tour showed black maps on 3 of 6 steps.
+- **Fixes:** merges now sit inside `if gh run watch --exit-status` and match the pushed SHA; env repaired with uv sync from main; tour replaced by the "follow one ship" story (#274, building).
+- **Code share since audit 34:** builders ~85%; Chief: CI fix, landings, Devpost form, Pi deploy.
+- **Change for next 30 min:** video first (Kassem waiting), then story, then fresh-eyes test.
