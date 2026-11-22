@@ -1,98 +1,56 @@
 ---
-title: "Dark Fleet: tracking ships that switch off their transponders, and what the data taught us"
+title: "Our Hack Western weekend chasing ships that switch off their transponders"
 published: false
 tags: mlhacks, devchallenge, hackathon, python
 ---
 
 *This is a submission for the MLH DEV Writing Challenge, from Hack Western 13.*
 
-## What We Built
+Big ships carry a transponder, a radio that keeps telling everyone where they are. Some switch it off. Sometimes it's a broken radio. Sometimes it's a tanker meeting another ship in the middle of the sea to move oil that's under sanctions.
 
-Every large ship carries a transponder: the radio that broadcasts its position. Some ships switch it off, often tankers moving sanctioned oil to meet another ship at sea where nobody is watching.
+We wanted to build the thing someone in a sanctions team or a coast guard would open in the morning: which ships went quiet overnight, where could they have gone, and who could they have met. That became Dark Fleet. Here's how the weekend actually went.
 
-Dark Fleet is for the sanctions analyst or coast guard officer who asks the same question every morning: did a ship we care about go dark, and who could it have met?
+## Friday night: just start recording
 
-- **Watch (live):** we record transponder broadcasts from six regions. When a ship switches off, Dark Fleet draws everywhere it could have gone at its top speed and lists every ship it could have met inside that circle, flagging the ones on a sanctions list (matched by IMO number, not by name).
-- **Satellite check:** for a ship that went dark, we pull the newest Sentinel-1 radar pass over its circle, run our own ship detection, and show in red the ships radar saw that weren't broadcasting.
-- **Patrol unit:** a Raspberry Pi 5 running QNX with a camera. If it sees a vessel and nothing nearby is broadcasting, it raises an alarm within 200 ms. If its AI dies, it says "lookout blind" instead of going quiet.
-- **Hormuz:** two years of satellite radar. 32% of radar-seen ships weren't broadcasting in 2025; 68% from March to June 2026, after the strikes. The Gulf of Oman next door rose too, and Hormuz rose 16 points more.
+We didn't have a finished idea yet, but we knew we'd need data, and live ship data only exists if you're listening at the time. So the first real thing we did, around 11 PM, was start a recorder on six regions around the world and leave it running. It's still running as we write this.
 
-Two ships side by side with their transponders off is how sanctioned oil moves from one hull to another. We can't prove a meeting. We can show it could have happened, and where to look.
+The Baltic turned out to be the busy one, thousands of position reports every few minutes. The Strait of Hormuz, the place we actually cared about most, barely gave us anything. Our receivers there hear a handful of ships. That changed the whole plan: live stories would come from the Baltic, and for Hormuz we'd need satellites.
 
-## Demo
+## Saturday: the data starts arguing back
 
-- **Video:** [link]
-- **Code:** https://github.com/kassem-kanjo/Hack-Western
-- **Try it:** run the app, press **Follow one ship** (or P) and step through with the arrow keys. It walks one real case: a ship on a sanctions list goes dark in the Baltic, its reach circle grows, and two listed ships light up inside it.
+On Saturday we matched the ships in our Hormuz data against sanctions lists and got excited for a bit. Four hits. Then we looked closer and three of them were on a list of port inspections, not sanctions. Not the same thing at all. Now the app always says which list a ship is on.
 
-## How We Built It
+Later we noticed our live numbers had been reading zero for hours, while every part of the app said everything was fine. Nothing was crashing. The data just wasn't arriving. After that we wrote a small script that looks at the actual numbers every few minutes and complains if they stop moving.
 
-- A recorder takes one live transponder feed across six regions. A Python engine does the physics: how far a ship could have gone, whether two ships could have met, and whether a jump in position is even possible.
-- Tiger Data (TimescaleDB) is the live store: every position streams into a hypertable, and a per-minute continuous aggregate drives the live rates on screen.
-- Satellite radar from Global Fishing Watch, plus our own detection on Sentinel-1 scenes from Microsoft Planetary Computer.
-- FastAPI behind a TypeScript front end with MapLibre.
-- On the Pi: QNX 8, a small C helper for the camera, and YOLOX-nano through OpenCV's DNN module from QNX's own package repository. A safety loop at top priority owns the alarm; the AI runs lower and is untrusted.
+In the afternoon we got a Raspberry Pi with QNX from the QNX table and turned it into a lookout: a webcam, an object detector, and a small safety loop that owns the alarm. The first time we put it under load, the camera froze after three frames. We'd given the AI a higher priority than the camera. Once we got the order right, the numbers flipped: under the same overload, 10 of 27 alarms made the 200 ms deadline before, and 63 of 64 after. Kill the AI now and the Pi says "lookout blind" instead of going quiet, and a standby takes over in about a seventh of a second.
 
-## What the Data Taught Us
+Somewhere in there a laptop died.
 
-Most of what we learned came from the places where our own data or our own code proved us wrong.
+## Saturday night: we were wrong, twice, in good ways
 
-### Our validation compared a region with part of itself
+For Hormuz we used two years of satellite radar, which sees ships whether they broadcast or not. The share of ships that weren't broadcasting roughly doubled after the war started this year. To check it wasn't just bad reception, we compared it with the Gulf of Oman next door.
 
-We measured how many ships seen by satellite radar were not broadcasting in the Strait of Hormuz. To make sure the rise was not just regional jamming, we compared it with the Gulf of Oman next door.
+Late Saturday night we realized our "Hormuz" box actually contained the Gulf of Oman box. We'd been comparing a place with part of itself. We redrew it and re-ran everything, honestly expecting the finding to fall apart. It got slightly stronger. That was a relief.
 
-Late on, we found that our Hormuz box contained the Gulf of Oman area. The control was 5.8% of the box's radar detections (9,508 of 165,272). That bias pushes the gap toward zero.
+The other surprise was ten ships that "switched off" within two hours of each other far out at sea and came back together a day later at one spot near the UAE. To do that they'd have needed about 29 knots, and they can't go that fast. Their positions were faked, probably by GPS jamming. So the same physics that flags suspicious ships also clears innocent ones, which we hadn't thought about going in.
 
-We re-ran it with a strait-only area. The gap grew from 14.5 to 15.8 points (95% CI 3 to 27), the direction the bias predicted. Hormuz went from 31.9% to 67.5%. We published the corrected figure.
+We also built a satellite check for live ships, pulling the latest radar image over the area a dark ship could have reached. It hasn't caught one in the act yet; the closest pass was 17 hours early. And on a stormy night the sea got so bright on radar that our detector decided most of it was land. That one took a while.
 
-For anyone publishing a before-and-after chart: a control area only helps if it is really separate from the area it controls.
+## Sunday, after midnight
 
-### Physics clears ships as well as flagging them
+Our first guided demo was bad. Somebody looked at it and called it useless, and they were right, so we threw it out and built a story that follows one real ship instead: it switches off, a circle grows around everywhere it could be, and two ships on sanctions lists show up inside it.
 
-In Global Fishing Watch's gap events, 10 ships stopped broadcasting within 1.7 hours on 12 March 2026. They were last seen up to 1,334 km out in the Arabian Sea and reappeared about 22 hours later at one spot off the UAE.
+Then, a bit after midnight, we held a photo of a boat up to the webcam and watched the alarm go red. Best moment of the weekend.
 
-That trip needs a median 29 knots. All 10 exceed their class speed cap of 16.1 knots. Their reported positions were faked, most likely by GPS interference.
+The demo video took three tries. The first one looked like a screen recording someone forgot to crop.
 
-A simple "went quiet" detector turns one interference event into ten suspects. A speed check turns it into one finding. We do not rank those ships as hiding.
+## What we'd tell ourselves on Friday
 
-### "On a list" is not "sanctioned"
+Start recording before you know what you're building. Look at the actual numbers, not whether the app says it's OK. And when your data disagrees with you, that's usually the interesting part.
 
-We matched gap events against the OpenSanctions maritime list by ship ID and got four ships. Three of them appeared only in the Tokyo MOU port-state-control data, which records port inspections and carries no risk tag. Only one, SEA 1, carried a shadow-fleet tag.
+We used AI coding agents for a lot of the code. Most of our time went into deciding what to build and checking their work against real data.
 
-Our first count was inflated. We now count only ships on sanctions or shadow-fleet lists. A compliance tool has to say which list a ship is on and why.
+**Code:** https://github.com/kassem-kanjo/Hack-Western
+**Video:** (link added after upload)
 
-### A real-time operating system is not enough on its own
-
-Our patrol unit is a Raspberry Pi 5 running QNX with a camera. It must raise an alarm within 200 ms.
-
-We loaded all four cores for 10 seconds. Without our priority guard, 10 of 27 alarms met the deadline. With it, 63 of 64 did. The safety loop's worst delay fell from 24 ms to 1.8 ms.
-
-Two things surprised us. Giving the AI a higher priority than the camera froze the camera after 3 frames. And the safety loop's worst stalls, up to 270 ms, came from its own disk writes, not from CPU load. Moving the writes off the loop fixed it.
-
-The operating system gave us the tools. Where each task sat in the priority order, and what blocked inside the loop, decided whether the deadline held.
-
-### A store that loaded once looks alive for hours
-
-Our live database held 265,250 position reports from one morning load. For about 8 hours nothing new arrived, and every screen still answered with a success code.
-
-After we connected a live feed, the area rates read zero everywhere, again with every route returning success. The newest minutes had not been summarised yet, and quiet regions only update every five minutes.
-
-Only checking values caught it. Checking that the service was up did not.
-
-### Satellites are rarely overhead at the right moment
-
-We added a satellite check: for a ship that switched off, find the newest Sentinel-1 radar pass over the area it could have reached, detect every ship in it, and match them against the broadcasts we heard. Red means radar saw a ship that wasn't broadcasting.
-
-Of the first five live Baltic cases, three had no pass in the 48 hours around the switch-off. The two that did were 17 hours early, so neither shows the ship while it was dark. The tool says that plainly instead of implying a catch.
-
-The detector also surprised us. On a stormy night the radar-bright sea tripped our land test, which blanked about 95% of the water and found zero ships in a scene with dozens of raw detections. Bright-sea scenes now skip that test and rely on the coastline.
-
-## What's Next
-
-We want more regions and more receivers. Our Hormuz receivers hear only about 17 ships, so live stories there are not yet possible. We also want to put the lookout on a real patrol boat. Commercial transponder and radar feeds would let us serve real clients; ours are non-commercial.
-
-## Hackathon Experience
-
-We built this in 36 hours at Hack Western 13. AI coding agents wrote most of the code in parallel lanes; our job was deciding what to build, checking every change on real recorded data, and throwing out what didn't hold up. The best moments were the ones where the data disagreed with us, which is why this post is mostly about those.
-
-Powered by Global Fishing Watch. Sanctions data from OpenSanctions (CC BY-NC). Radar from Copernicus Sentinel-1 via Microsoft Planetary Computer.
+*Powered by Global Fishing Watch. Sanctions data from OpenSanctions (CC BY-NC). Radar from Copernicus Sentinel-1 via Microsoft Planetary Computer.*
