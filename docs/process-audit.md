@@ -271,3 +271,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** the voice is now the master: gaps removed, 0.42 s between sentences, 1.25 s between sections (1:57); v5 recomposes the footage to the voice, cutting holds to ~1 s, playbackRate 0.85-1.6, zooms re-keyed to spoken words, crossfades at section joins.
 - **Code share since audit 38:** builders ~60%; Chief: Whisper alignment and mixing pipeline, Devpost/DEV text.
 - **Change for next 30 min:** never let a render write to a path a user may be holding; new name first, always.
+
+## Sun 22 Nov, 02:50 ET (audit 40, covers 02:20-02:50)
+- **Went well:** v5 shipped: the voice is the master track and the footage follows it; the new builder found 60% of the old plan was frozen frames and rebuilt it with none; the captioned cut had overlapping subtitles, caught on the contact sheet and fixed before Kassem saw it.
+- **Went wrong:** the first video builder ran ~3 h, its context grew past 450k tokens and it stalled in a stop/refused-report loop.
+- **Fixes:** stopped it and handed a self-contained brief to a fresh builder; Desktop cleaned to the two final files.
+- **Code share since audit 39:** builders ~80%; Chief: QA, decisions, file hygiene.
+- **Change for next 30 min:** restart long-running agents after one big deliverable instead of chaining revisions into one context.

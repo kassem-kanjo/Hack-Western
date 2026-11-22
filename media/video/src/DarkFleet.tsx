@@ -32,7 +32,6 @@ const TL = timeline as Timeline;
 
 const TITLE_S = TL.title_s;
 const END_S = TL.end_s;
-const END_LINE = "Dark Fleet. Built for sanctions teams and coast guards.";
 
 // Window geometry (frame px): the clip at 0.854 scale with margins for the frame.
 const WIN_W = 1640;
@@ -154,32 +153,29 @@ const Window: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </div>
 );
 
+/** A subtitle: plain white text with a soft shadow, no box. Fades in and out within 4 frames (~130 ms). */
 const Pill: React.FC<{ text: string; start: number; end: number }> = ({ text, start, end }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const f0 = Math.round(start * fps);
   const f1 = Math.round(end * fps);
-  const fade = 6; // 0.2 s
+  const fade = 4;
   const opacity = interpolate(frame, [f0, f0 + fade, f1 - fade, f1], [0, 1, 1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const rise = spring({ frame: frame - f0, fps, config: { damping: 200 } });
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, bottom: 20, display: "flex", justifyContent: "center", opacity }}>
+    <div style={{ position: "absolute", left: 0, right: 0, bottom: 44, display: "flex", justifyContent: "center", opacity }}>
       <div
         style={{
           fontFamily: FONT,
-          fontSize: 46,
+          fontSize: 36,
           fontWeight: 600,
-          lineHeight: 1.25,
+          lineHeight: 1.3,
           color: "#ffffff",
-          background: "rgba(7,11,20,0.78)",
-          padding: "12px 30px 14px",
-          borderRadius: 16,
+          textShadow: "0 2px 6px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.85)",
           maxWidth: 1500,
           textAlign: "center",
-          transform: `translateY(${(1 - rise) * 14}px)`,
         }}
       >
         {text}
@@ -227,7 +223,24 @@ const OverrideLayer: React.FC<{ o: Override }> = ({ o }) => {
   );
 };
 
-const ClipScene: React.FC<{ clip: Clip; captions: boolean }> = ({ clip, captions }) => {
+const GuideTag: React.FC = () => (
+  <div
+    style={{
+      position: "absolute",
+      right: 40,
+      top: 18,
+      fontFamily: FONT,
+      fontSize: 22,
+      fontWeight: 600,
+      color: "#c9d3e0",
+      letterSpacing: 0.5,
+    }}
+  >
+    GUIDE VOICE · macOS say
+  </div>
+);
+
+const ClipScene: React.FC<{ clip: Clip; captions: boolean; guide: boolean }> = ({ clip, captions, guide }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const z = zoomAt(keysOf(clip), frame, fps);
@@ -252,6 +265,7 @@ const ClipScene: React.FC<{ clip: Clip; captions: boolean }> = ({ clip, captions
         .map((l) => (
           <ChapterLabel key={`g${l.start}`} text={l.group as string} start={l.start} />
         ))}
+      {guide && <GuideTag />}
       {captions &&
         clip.lines.map((l) => <Pill key={`c${l.start}`} text={l.text} start={l.start} end={l.end} />)}
     </AbsoluteFill>
@@ -275,7 +289,7 @@ const TitleScene: React.FC = () => {
   );
 };
 
-const EndScene: React.FC<{ captions: boolean }> = ({ captions }) => {
+const EndScene: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = spring({ frame, fps, config: { damping: 200 } });
@@ -287,23 +301,22 @@ const EndScene: React.FC<{ captions: boolean }> = ({ captions }) => {
         <div style={{ marginTop: 20, fontSize: 44, color: "#9aa7b5" }}>github.com/kassem-kanjo/Hack-Western</div>
         <div style={{ marginTop: 12, fontSize: 34, color: "#6d7a8c" }}>Hack Western 13</div>
       </div>
-      {captions && <Pill text={END_LINE} start={0.4} end={END_S} />}
     </AbsoluteFill>
   );
 };
 
-export const DarkFleet: React.FC<{ captions: boolean }> = ({ captions }) => (
+export const DarkFleet: React.FC<{ captions: boolean; guide: boolean }> = ({ captions, guide }) => (
   <AbsoluteFill style={{ background: "#070b14" }}>
     <Sequence from={0} durationInFrames={Math.round(TITLE_S * FPS)}>
       <TitleScene />
     </Sequence>
     {TL.clips.map((c, i) => (
       <Sequence key={c.key} from={Math.round(starts[i] * FPS)} durationInFrames={Math.round(c.dur * FPS)}>
-        <ClipScene clip={c} captions={captions} />
+        <ClipScene clip={c} captions={captions} guide={guide} />
       </Sequence>
     ))}
     <Sequence from={Math.round(CLIPS_END_S * FPS)} durationInFrames={Math.round(END_S * FPS)}>
-      <EndScene captions={captions} />
+      <EndScene />
     </Sequence>
   </AbsoluteFill>
 );
