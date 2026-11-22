@@ -28,13 +28,12 @@ export function topBar(opts: {
   const tab = (label: string, href: string, isActive: boolean): HTMLElement =>
     h("a", { class: `tab${isActive ? " is-active" : ""}`, href }, label);
 
-  // Evidence is the old Global funnel and the case files behind it; the radar
-  // picture of the strait has its own tab because it is the strongest single view.
-  const evidenceActive = opts.active === "overview" || opts.active === "case";
+  // The menu follows the demo story: Hormuz (why it matters), Watch (live stories), Patrol
+  // unit (the edge lookout). Evidence (South Atlantic case files and our self-checks) is off
+  // the menu because it is not part of that story; #/evidence still opens for Q&A.
   const tabs = [
     tab("Hormuz", "#/hormuz", opts.active === "hormuz"),
     tab("Watch", "#/watch", opts.active === "watch"),
-    tab("Evidence", "#/evidence", evidenceActive),
     tab("Patrol unit", "#/patrol", opts.active === "patrol"),
   ];
 
