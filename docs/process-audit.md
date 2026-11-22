@@ -243,3 +243,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** merges now sit inside `if gh run watch --exit-status` and match the pushed SHA; env repaired with uv sync from main; tour replaced by the "follow one ship" story (#274, building).
 - **Code share since audit 34:** builders ~85%; Chief: CI fix, landings, Devpost form, Pi deploy.
 - **Change for next 30 min:** video first (Kassem waiting), then story, then fresh-eyes test.
+
+## Sat 21 Nov, 23:50 ET (audit 36, covers 23:25-23:50)
+- **Went well:** "Follow one ship" story merged (#285; LAVENDER, listed itself, could have met NERO and GREGAL); Watch sanctions lines + compact legend merged (#281, #283); merges gated on the pushed commit's CI.
+- **Went wrong:** the first demo video was recorded before anyone checked how good demos are made: page in the top-left with grey around it, old UI. Kassem saw it and was rightly angry. The story first froze a case with nobody to meet; a shadow-fleet ship was labelled "sanctions list". Two OpenCode lanes stalled with no diff.
+- **Fixes:** research first (Screen Studio look), clean 1920x1080 capture + Remotion composition with spring zooms, rounded window, title cards; old file moved off the Desktop; freeze rule needs could-meet >= 1; shadow-fleet label; OpenCode dropped for the night (Kassem's call).
+- **Code share since audit 35:** builders ~80%; Chief: Watch text fixes, conflict resolution, landings.
+- **Change for next 30 min:** check a frame from every deliverable before Kassem can see it; restart :8000 for /api/story only after the video capture ends.
