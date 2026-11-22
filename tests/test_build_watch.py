@@ -248,7 +248,7 @@ def test_dark_ship_has_one_ongoing_alert_inside_hormuz(tmp_path: Path) -> None:
     assert alert["mmsi"] == DARK
     assert alert["name"] == "AFRA STAR"
     assert alert["area_id"] == "HORMUZ_STRAIT"
-    assert alert["label"] == "Went dark near sanctioned ship"
+    assert alert["label"] == "Switched off within reach of a sanctioned ship (2 km)"
     assert alert["t_end"] is None
     assert alert["last"]["sog"] == 12.0
     assert alert["id"].startswith(f"dark-{DARK}-")
@@ -345,7 +345,7 @@ def test_cargo_dark_near_a_sanctioned_tanker_stopped_offshore(tmp_path: Path) ->
     assert len(dark_alerts) == 1
     alert = dark_alerts[0]
     assert alert["mmsi"] == DARK
-    assert alert["label"] == "Went dark near sanctioned ship"
+    assert alert["label"] == "Switched off within reach of a sanctioned ship (2 km)"
     contact = next(contact for contact in alert["contacts"] if contact["mmsi"] == SANCTIONED)
     assert contact["stopped"] is True
     assert contact["could_meet"] is True

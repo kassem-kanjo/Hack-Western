@@ -4,6 +4,13 @@
    is 62 %, the decision 38 %. Colour means something: green a running step,
    amber a step coming back or under load, red the alert. */
 
+/* The guidance line sits between the top bar and the main grid, full width.
+   The app template only has two rows, so add a middle auto row while the line is
+   showing; when it is dismissed it is hidden and the two-row template returns. */
+.app:has(> .guide-line.is-patrol:not([hidden])) {
+  grid-template-rows: var(--topbar-h) auto minmax(0, 1fr);
+}
+
 .main.patrol-main {
   grid-template-columns: minmax(0, 62fr) minmax(360px, 38fr);
   grid-template-rows: minmax(0, 1fr);
@@ -62,6 +69,38 @@
 
 .patrol-frame-empty[hidden] {
   display: none;
+}
+
+/* Photo instruction: centred over the frame, in front of the image, never part
+   of it. It fades once the AI reports a vessel or the camera goes offline. */
+.patrol-frame-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  max-width: min(92%, 420px);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-ui);
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  opacity: 1;
+  transition: opacity 300ms var(--ease-out);
+}
+
+.patrol-frame-hint.is-hidden {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .patrol-frame-hint {
+    transition: none;
+  }
 }
 
 /* Frame 1234 · 21 Nov 20:41:07Z · AI 172 ms */

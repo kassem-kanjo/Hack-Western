@@ -1,5 +1,12 @@
 /* Hormuz view (#200 V3): headline, one chart, the story cards. Tokens only. */
 
+/* The guidance line sits between the top bar and the main grid, full width.
+   The app template only has two rows, so add a middle auto row while the line is
+   showing; when it is dismissed it is hidden and the two-row template returns. */
+.app:has(> .guide-line.is-hormuz:not([hidden])) {
+  grid-template-rows: var(--topbar-h) auto minmax(0, 1fr);
+}
+
 .hormuz-main {
   grid-template-columns: minmax(0, 1fr) 380px;
   height: 100%;

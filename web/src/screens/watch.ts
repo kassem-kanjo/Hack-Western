@@ -28,6 +28,7 @@ import {
 import type { WatchArea, WatchRecording } from "../api";
 import { mountReplay, type ReplayView } from "../components/AlertReplay";
 import { h } from "../components/dom";
+import { guideLine } from "../components/GuideLine";
 import { onVesselFocus } from "../components/SearchBox";
 import {
   SIGHTINGS_POLL_MS,
@@ -718,6 +719,9 @@ function spoofContacts(snapshot: WatchResponse, alert: WatchAlert): WatchContact
 /** Past this, the recorder is behind and the chip says so. */
 const DELAYED_MS = 15 * 60_000;
 
+/** A stopped ship has no reach area, so its nearby table and map contacts use the stated 10 km. */
+const STOP_NEARBY_KM = 10;
+
 /**
  * How far behind real time the newest recorded message is: the lag the build
  * measured, plus the time since the build.
@@ -857,7 +861,12 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     footEl,
   );
 
-  const detailBody = h("div", { class: "watch-details-body" });
+  const detailEmpty = h(
+    "div",
+    { class: "watch-none watch-details-empty" },
+    "Click an event on the left to see where the ship could have gone.",
+  );
+  const detailBody = h("div", { class: "watch-details-body" }, detailEmpty);
   const detailsTitle = h("span", { class: "watch-details-title" }, "Event details");
   const back = h(
     "button",
@@ -866,7 +875,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   );
   const details = h(
     "aside",
-    { class: "watch-details", hidden: true },
+    // #254: the panel stays on screen; with nothing selected it says what to click.
+    { class: "watch-details" },
     h("div", { class: "watch-details-head" }, back, detailsTitle),
     detailBody,
   );
@@ -900,10 +910,19 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   }
 
   const main = h("main", { class: "main watch-main" }, stage, events, details, status);
+  const screen = h(
+    "div",
+    { class: "watch-screen" },
+    guideLine(
+      "watch",
+      "Live: ships that switched off their transponder. Click one to see where it could have gone and who it could have met.",
+    ),
+    main,
+  );
 
   app.replaceChildren(
     topBar({ active: "watch", mode: "LIVE", generatedAt: null, caseHref: null, demoHref: null }),
-    main,
+    screen,
   );
 
   let data: WatchResponse | null = null;
@@ -1334,8 +1353,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   function mapAlertFor(snapshot: WatchResponse, alert: WatchAlert): WatchAlert {
     if (alert.kind === "spoof") return { ...alert, contacts: spoofContacts(snapshot, alert) };
     if (alert.kind !== "sanctioned_stop") return alert;
-    const radiusKm = reachRadiusKm(alert, Date.now());
-    return { ...alert, contacts: nearbyShips(snapshot, alert, 15, radiusKm).shown };
+    return { ...alert, contacts: nearbyShips(snapshot, alert, 15, STOP_NEARBY_KM).shown };
   }
 
   /**
@@ -1424,14 +1442,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
     if (alert.kind === "sanctioned_stop") {
       // A stopped ship has no reach story to tell: show who is nearest to it.
-      const radiusKm = reachRadiusKm(alert, atMs);
-      const { shown, within } = nearbyShips(snapshot, alert, 15, radiusKm);
+      const { shown, within } = nearbyShips(snapshot, alert, 15, STOP_NEARBY_KM);
       parts.push(
         section(
-          "Ships nearby",
+          `Ships within ${STOP_NEARBY_KM} km`,
           within,
           within === 0
-            ? h("div", { class: "watch-none" }, `No other ship heard within ${fmtInt(Math.round(radiusKm))} km`)
+            ? h("div", { class: "watch-none" }, `No other ship heard within ${STOP_NEARBY_KM} km`)
             : contactTable(snapshot, shown),
         ),
       );
@@ -1443,7 +1460,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       const rest = sorted.filter((contact) => contact.could_meet !== true);
       parts.push(
         section(
-          "Could have met",
+          "Sanctioned",
           met.length,
           met.length === 0
             ? h("div", { class: "watch-none" }, "No ship could have met it")
@@ -1600,7 +1617,6 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     if (alert === null || alert.kind !== "dark") dropReplay();
 
     main.classList.toggle("is-focus", open);
-    details.hidden = !open;
     markRows();
     for (const row of areasList.querySelectorAll<HTMLButtonElement>(".watch-area-row")) {
       if (row.dataset.areaId === area?.id && alert === null) row.setAttribute("aria-current", "true");
@@ -1608,7 +1624,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     }
 
     if (!open) {
-      detailBody.replaceChildren();
+      detailBody.replaceChildren(detailEmpty);
       panelParts = null;
       stopPanelTicker();
       disposeRadar();

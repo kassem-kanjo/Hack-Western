@@ -38,3 +38,10 @@ Delegating to `opencode-go/deepseek-v4.1-flash` via `delegate.sh` worked for bot
 - Worker reports say "npm ci in the worktree" is fine, but then they delete node_modules; keep the symlink line in the check.
 - Direct chart labels collided (two line ends about 7 px apart). Workers do not check label collisions; check the crop yourself and push labels apart in code.
 - Builder should not `git commit` when the brief says so and CLAUDE.md says Chief commits (non-negotiable 3): leave the diff in the worktree and say so.
+
+## Issue #254 (make the app explain itself, 2026-11-21)
+- Two deepseek-v4.1-flash lanes on disjoint files: 130 s (4 files, check 0) and 621 s (7 files, 177 tool events, check 0). Both applied with `git apply --check` then `git apply`.
+- Delegate base: the worker worktree is detached at HEAD, so shared files must be committed or they are invisible to the worker. I made a local WIP commit, dispatched on it, then `git reset --mixed <origin sha>` so nothing is left committed. Simpler: paste the shared file into the brief.
+- Worker check script: `cd web && node_modules/.bin/tsc --noEmit` via a symlink to the real `web/node_modules`, removed in an EXIT trap. Keep the symlink out of diff.patch.
+- The worker's "does it look right" was wrong twice, found only by screenshot: (1) a guide line as the first child of `.app` landed in the top-bar row (the grid has two rows; needed a `:has()` row rule); (2) the Watch details panel was `hidden` when nothing was selected, so its empty-state sentence never showed. Check screenshots, not the DOM text.
+- Workers did not warn about copy length. Two copy lines given verbatim were over an 18-word rule; I used the verbatim copy and flagged it.

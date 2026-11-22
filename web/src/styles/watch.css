@@ -5,8 +5,21 @@
 
 /* ---------- shell -------------------------------------------------------- */
 
+/* #254: the guidance line sits above the console, outside its grid. */
+.watch-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.watch-screen > .guide-line {
+  margin: var(--sp-3) var(--sp-4) 0;
+}
+
+/* #254: the details column is always there; with nothing selected it holds the prompt. */
 .main.watch-main {
-  grid-template-columns: var(--rail-l-w) minmax(0, 1fr);
+  grid-template-columns: var(--rail-l-w) minmax(0, 1fr) var(--rail-r-w);
   grid-template-rows: minmax(0, 1fr) var(--statusbar-h);
   height: 100%;
   min-width: 0;
@@ -311,6 +324,9 @@
 }
 
 .watch-contact-label.is-sanctioned { border-color: var(--st-sanctioned); color: var(--st-sanctioned); }
+
+/* #254: a hull the dark ship could have met, whether or not it is listed. */
+.watch-contact-label.is-meet { border-color: var(--st-dark); }
 
 .watch-contact-label.is-focus { border-color: var(--accent); }
 

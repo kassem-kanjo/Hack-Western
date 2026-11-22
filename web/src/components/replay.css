@@ -114,6 +114,15 @@
   color: var(--c-text-3);
 }
 
+/* #254: the playhead's UTC time, beside the elapsed clock. */
+.replay-utc {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text-2);
+  white-space: nowrap;
+}
+
 /* The reach at the playhead: the one number that moves. */
 .replay-radius {
   margin-left: auto;
