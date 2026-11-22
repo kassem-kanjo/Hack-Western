@@ -14,9 +14,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
 
 from darkfleet.api.app import app, reset_cache
+
+Image = pytest.importorskip("PIL.Image")  # Pillow ships in the 'sat' extra, not in CI
 
 ALERT_ID = "dark-230642000-1795306364"
 NOT_READY = "no satellite check for this event yet"
