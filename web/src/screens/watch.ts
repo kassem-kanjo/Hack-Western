@@ -257,7 +257,6 @@ const KIND_ORDER: WatchAlertKind[] = [
   "spoof",
   "meeting",
   "jump",
-  "radar_unmatched",
 ];
 
 /** "2026-11-14" -> "14 Nov": the radar day, short enough for a row. */
@@ -612,8 +611,9 @@ function scopedAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
 }
 
 function visibleAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
+  // The radar picture lives on the Hormuz screen, so its alert is no longer a list row (#249).
   return sortedAlerts(
-    scopedAlerts(data, state).filter((alert) => state.kinds.has(alert.kind)),
+    scopedAlerts(data, state).filter((alert) => alert.kind !== "radar_unmatched" && state.kinds.has(alert.kind)),
   );
 }
 
@@ -1207,52 +1207,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const areas = snapshot.areas
       .filter((area) => countIn(area.id) > 0)
       .sort((a, b) => countIn(b.id) - countIn(a.id));
+    // Issue #249: the region control and the list's own search are cut; the top-bar search and
+    // the map's area outlines do the same job. Only the kind filter stays in the list header.
     areaChips = [];
-    const seg = h("div", { class: "watch-seg", role: "group", "aria-label": "Area" });
-    const segment = (id: string, label: string, count: number, onPick: () => void): void => {
-      const button = h(
-        "button",
-        { class: "watch-seg-btn", type: "button", "aria-pressed": "false" },
-        h("span", null, label),
-        h("span", { class: "watch-mono" }, fmtInt(count)),
-      );
-      button.addEventListener("click", onPick);
-      seg.append(button);
-      areaChips.push({ id, chip: button });
-    };
-    segment("", "All", countIn(null), () => chooseArea(null));
-    for (const area of areas) {
-      segment(area.id, area.name, countIn(area.id), () =>
-        chooseArea(state.areaId === area.id ? null : area.id),
-      );
-    }
-
-    const search = h("input", {
-      class: "watch-search",
-      type: "search",
-      placeholder: "Find a ship by name or MMSI",
-      "aria-label": "Filter events by name or MMSI",
-      autocomplete: "off",
-      spellcheck: "false",
-    });
-    search.value = state.query;
-    search.addEventListener("input", () => {
-      state.query = search.value.trim().toLowerCase();
-      if (data !== null) {
-        syncFilters(data);
-        renderRows(data);
-      }
-    });
-    search.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        search.blur();
-      }
-    });
-    searchInput = search;
+    searchInput = null;
 
     filtersEl.classList.remove("is-loading");
-    filtersEl.replaceChildren(search, seg, kinds);
+    filtersEl.replaceChildren(kinds);
   }
 
   function renderEvents(snapshot: WatchResponse): void {
@@ -1366,69 +1327,24 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     return { ...alert, contacts: nearbyShips(snapshot, alert, 15, radiusKm).shown };
   }
 
-  /** One row per ship that reported the false point, with its offset and the speed the jump implies. */
-  function spoofSection(snapshot: WatchResponse, alert: WatchAlert): HTMLElement {
+  /**
+   * The faked-position event as one sentence (issue #249): how many ships jumped to the one point
+   * and the speed range the jump needs. The map keeps each ship's line; the per-ship table went.
+   */
+  function spoofSection(_snapshot: WatchResponse, alert: WatchAlert): HTMLElement {
     const raw = alert.evidence["vessels"];
     const vessels = Array.isArray(raw)
       ? (raw as { mmsi: number; offset_km: number; jump_in_kn: number; jump_out_kn: number }[])
       : [];
-    const located = new Map(spoofContacts(snapshot, alert).map((contact) => [contact.mmsi, contact]));
-    const byMmsi = new Map(snapshot.ships.map((ship) => [ship.mmsi, ship]));
-    const body = h("tbody");
-    for (const vessel of vessels) {
-      const ship = byMmsi.get(vessel.mmsi);
-      const label = ship?.name?.trim() ? (ship.name as string) : `MMSI ${vessel.mmsi}`;
-      const row = h(
-        "tr",
-        { tabindex: "0", role: "button", title: label },
-        h("td", { class: "watch-nearby-name" }, label),
-        h("td", { class: "watch-mono watch-num" }, fmtDec(vessel.offset_km, 1)),
-        h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_in_kn)}`),
-        h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_out_kn)}`),
-      );
-      const ring = (): void => {
-        const at = located.get(vessel.mmsi);
-        if (map === null || at === undefined) return;
-        map.focusContact({ mmsi: at.mmsi, name: at.name, lat: at.lat, lon: at.lon, sanctioned: false });
-        for (const current of document.querySelectorAll<HTMLTableRowElement>(".watch-spoof-table tbody tr")) {
-          current.removeAttribute("aria-current");
-        }
-        row.setAttribute("aria-current", "true");
-      };
-      row.addEventListener("click", () => {
-        ring();
-        openDossier(vessel.mmsi); // #182: a spoof-table row opens its dossier
-      });
-      row.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        ring();
-        openDossier(vessel.mmsi);
-      });
-      body.append(row);
+    if (vessels.length === 0) {
+      return section("Ships at the false point", 0, h("div", { class: "watch-none" }, "No ships nearby"));
     }
-    const table = h(
-      "table",
-      { class: "watch-nearby-table watch-spoof-table" },
-      h(
-        "thead",
-        null,
-        h(
-          "tr",
-          null,
-          h("th", { scope: "col" }, "Ship"),
-          h("th", { scope: "col" }, "Off (km)"),
-          h("th", { scope: "col" }, "In (kn)"),
-          h("th", { scope: "col" }, "Out (kn)"),
-        ),
-      ),
-      body,
-    );
-    return section(
-      "Ships at the false point",
-      vessels.length,
-      vessels.length === 0 ? h("div", { class: "watch-none" }, "No ships nearby") : table,
-    );
+    const speeds = vessels.flatMap((vessel) => [vessel.jump_in_kn, vessel.jump_out_kn]);
+    const low = Math.round(Math.min(...speeds));
+    const high = Math.round(Math.max(...speeds));
+    const noun = vessels.length === 1 ? "ship jumped" : "ships jumped";
+    const sentence = `${vessels.length} ${noun} to one point; reaching it needs ${low}–${high} knots`;
+    return section("Ships at the false point", vessels.length, h("p", { class: "watch-spoof-note" }, sentence));
   }
 
   function renderDetails(snapshot: WatchResponse, alert: WatchAlert): void {
@@ -1443,30 +1359,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       radiusEl = h("span", { class: "watch-mono" }, `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`);
     }
 
-    const imo = imoOf(alert);
+    // Four rows (issue #249): MMSI, IMO and type belong in the vessel dossier, not the event.
     const fields = h(
       "dl",
       { class: "watch-fields" },
       ...field("Vessel", h("span", { class: "watch-vessel" }, alertName(alert))),
-      ...field("MMSI", h("span", { class: "watch-mono" }, String(alert.mmsi))),
-      ...(imo !== null ? field("Permanent ID (IMO)", h("span", { class: "watch-mono" }, imo)) : []),
-      ...field("Type", shipType(snapshot, alert)),
       ...field("Flag", flagOf(alert.mmsi)),
-      ...field("Event", shortLabel(alert.label)),
-      ...field("Area", areaName(snapshot, alert.area_id)),
       ...field("Started", h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_start, now))),
-      ...field(
-        "Ended",
-        alert.t_end === null
-          ? h(
-              "span",
-              { class: "watch-ongoing" },
-              h("span", { class: "watch-row-live", "aria-hidden": "true" }),
-              "ongoing",
-            )
-          : h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_end, now)),
-      ),
-      ...field("Duration", duration),
       ...field(
         "Last position",
         h("span", { class: "watch-mono" }, `${alert.last.lat.toFixed(4)}, ${alert.last.lon.toFixed(4)}`),
