@@ -1,0 +1,22 @@
+{
+  "name": "darkfleet-demo-video",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Composes the Dark Fleet demo video from scripted app clips (Remotion).",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:captions": "remotion render src/index.ts DarkFleetDemo --codec h264 --crf 18 --props='{\"captions\":true}' --output=out/captions.mp4",
+    "render:clean": "remotion render src/index.ts DarkFleetDemo --codec h264 --crf 18 --props='{\"captions\":false}' --output=out/clean.mp4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.545",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.545",
+    "typescript": "^7.0.2"
+  }
+}
