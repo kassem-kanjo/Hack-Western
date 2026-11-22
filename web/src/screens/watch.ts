@@ -744,8 +744,17 @@ function overlappingGap(
   return null;
 }
 
-/** Hulls heard recently, nearest first with watchlisted ones ahead; the list for a stopped ship. */
-function nearbyShips(snapshot: WatchResponse, alert: WatchAlert, limit: number): WatchContact[] {
+/**
+ * Hulls heard recently, watchlisted ones ahead, then nearest; the list for a stopped ship.
+ * Only hulls inside the radius the event checked are listed (issue #249): the table used to show
+ * ships 9,949 km away under a "Distance checked 3 km" label. `within` is the count that passed.
+ */
+function nearbyShips(
+  snapshot: WatchResponse,
+  alert: WatchAlert,
+  limit: number,
+  radiusKm: number,
+): { shown: WatchContact[]; within: number } {
   const out: WatchContact[] = [];
   for (const ship of snapshot.ships) {
     if (ship.mmsi === alert.mmsi) continue;
@@ -768,8 +777,8 @@ function nearbyShips(snapshot: WatchResponse, alert: WatchAlert, limit: number):
     if (aW !== bW) return bW - aW;
     return a.min_dist_km - b.min_dist_km;
   });
-  // Sanctioned first, then the rest, but only those inside a radius a viewer can reason about.
-  return out.slice(0, limit);
+  const inside = out.filter((contact) => contact.min_dist_km <= radiusKm);
+  return { shown: inside.slice(0, limit), within: inside.length };
 }
 
 /** The hull names the rail's search matches against, in one place. */
@@ -1340,7 +1349,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   function mapAlertFor(snapshot: WatchResponse, alert: WatchAlert): WatchAlert {
     if (alert.kind === "spoof") return { ...alert, contacts: spoofContacts(snapshot, alert) };
     if (alert.kind !== "sanctioned_stop") return alert;
-    return { ...alert, contacts: nearbyShips(snapshot, alert, 15) };
+    const radiusKm = reachRadiusKm(alert, Date.now());
+    return { ...alert, contacts: nearbyShips(snapshot, alert, 15, radiusKm).shown };
   }
 
   /** One row per ship that reported the false point, with its offset and the speed the jump implies. */
@@ -1491,12 +1501,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
     if (alert.kind === "sanctioned_stop") {
       // A stopped ship has no reach story to tell: show who is nearest to it.
-      const near = nearbyShips(snapshot, alert, 15);
+      const radiusKm = reachRadiusKm(alert, atMs);
+      const { shown, within } = nearbyShips(snapshot, alert, 15, radiusKm);
       parts.push(
         section(
           "Ships nearby",
-          near.length,
-          near.length === 0 ? h("div", { class: "watch-none" }, "No ships heard nearby") : contactTable(snapshot, near),
+          within,
+          within === 0
+            ? h("div", { class: "watch-none" }, `No other ship heard within ${fmtInt(Math.round(radiusKm))} km`)
+            : contactTable(snapshot, shown),
         ),
       );
     } else if (alert.kind === "spoof") {
