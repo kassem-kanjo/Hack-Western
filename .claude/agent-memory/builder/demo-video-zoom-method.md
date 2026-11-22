@@ -19,4 +19,11 @@ a stale timeline; Kassem was angry about bad zooms (2026-11-22).
   zoom and look before rendering.
 - The outgoing clip under a crossfade must not run past a page jump: hold its last frame instead.
 - Recorded footage may simply lack an element the script names (e.g. "Alarm in N ms"); report it, don't fake it.
+- (v6A) An automatic edge search helps but is not enough: a 3 px edge band misses sliced text; use a band
+  that straddles the edge (+-6 px) and still eyeball every sim crop. Map circles/dots count as "ink" and
+  mislead it. Simulate on source frames (crop the clamped view rect) before any render: seconds, not minutes.
+- (v6A) Captions cover the bottom ~8% of the window: keep the zoom target in the upper ~86% of the view.
+- (v6A) A panel zoom at <= 2.2x always includes ~350 px of map to its left; map labels there get sliced too.
+- Remotion OffthreadVideo media time = startFrom/fps + seqFrame*playbackRate/fps (v4.0.545); a "held"
+  frame under a crossfade = same component with playbackRate 0.01.
 Related: [[qa-playwright-no-server]]
