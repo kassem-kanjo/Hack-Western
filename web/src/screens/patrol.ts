@@ -55,6 +55,29 @@ const SIGHTINGS_MS = 10000;
 /** A detector event younger than this means the supervisor is mid-restart. */
 const RESTART_WINDOW_MS = 5000;
 
+/**
+ * One recorded sighting for a visitor with no ship photo. Every value is the Pi's own output for
+ * frame 314 of a real run (21 Nov, 21:26:37Z). The photo in that frame is a third-party picture,
+ * so it is not shown: the camera area is an example panel that carries the same label, score and
+ * alert text. It is never presented as live.
+ */
+const RECORDED_SIGHTING = {
+  frame: 314,
+  when: "21 Nov 21:26:37Z",
+  label: "boat",
+  scorePct: 80,
+  inferenceMs: 108,
+  alert: "ALERT · Vessel seen, not broadcasting",
+  position: "Kiel Bight (54.45, 10.25)",
+} as const;
+
+/** The A/B card's rows, in the order armCells() fills them. Plain label; the detail is the tooltip. */
+const AB_ROWS: readonly { label: string; title: string }[] = [
+  { label: "Alarms on time", title: "Alarms raised before the deadline, out of the alarm frames the camera sent." },
+  { label: "Slowest alert", title: "Worst alarm latency in the test, in ms. Each alarm is judged against the deadline." },
+  { label: "Safety core's worst delay", title: "Worst lateness of the safety core's 20 Hz loop in the test, in ms." },
+];
+
 /** A chain square's meaning: running, coming back, stopped, or nothing yet. */
 type Tone = "ok" | "warn" | "bad" | "idle";
 
@@ -391,10 +414,32 @@ export function renderPatrol(app: HTMLElement): void {
 
   const caption = h("div", { class: "patrol-caption" }, "Waiting for the first decision");
 
+  /**
+   * The recorded example, laid over the frame. It says it is recorded and not live, and it covers
+   * the live image while open so the two can never be read as one.
+   */
+  const recordedPanel = h(
+    "div",
+    { class: "patrol-recorded", hidden: true, role: "region", "aria-label": "Recorded sighting, not live" },
+    h("p", { class: "patrol-recorded-tag" }, "Recorded on this Pi, 21 Nov · not live"),
+    h(
+      "div",
+      { class: "patrol-recorded-art", "aria-hidden": "true" },
+      h("span", { class: "patrol-recorded-box" }, `${RECORDED_SIGHTING.label} ${RECORDED_SIGHTING.scorePct}%`),
+      h("span", { class: "patrol-recorded-example" }, "example"),
+    ),
+    h("p", { class: "patrol-recorded-alert" }, RECORDED_SIGHTING.alert),
+    h(
+      "p",
+      { class: "patrol-recorded-note" },
+      `Frame ${RECORDED_SIGHTING.frame} at ${RECORDED_SIGHTING.when}, AI ${RECORDED_SIGHTING.inferenceMs} ms, ${RECORDED_SIGHTING.position}. The label, score and alert are the Pi's output for that frame; the photo is not shown.`,
+    ),
+  );
+
   const stage = h(
     "section",
     { class: "stage patrol-stage" },
-    h("div", { class: "patrol-frame" }, frameImg, framePlaceholder, frameHint),
+    h("div", { class: "patrol-frame" }, frameImg, framePlaceholder, frameHint, recordedPanel),
     caption,
   );
 
@@ -455,7 +500,7 @@ export function renderPatrol(app: HTMLElement): void {
   const latencyMetric = metric("Alarm latency vs deadline");
   latencyMetric.box.title = "p99 alarm latency against the deadline";
   const onTimeMetric = metric("Alarms on time");
-  const blindMetric = metric("Blind raised on time");
+  const blindMetric = metric("Blind warnings on time");
   const metrics = h("div", { class: "patrol-metrics" }, latencyMetric.box, onTimeMetric.box, blindMetric.box);
 
   const abBody = h("tbody", null);
@@ -463,7 +508,15 @@ export function renderPatrol(app: HTMLElement): void {
   const abBox = h(
     "div",
     { class: "patrol-ab-box", hidden: true },
-    h("h3", { class: "patrol-h" }, "Priority guard, same load"),
+    h(
+      "h3",
+      {
+        class: "patrol-h",
+        title:
+          "Priority guard: fixed scheduling priorities for the safety core and the AI detector. No adaptive partitioning on this image.",
+      },
+      "Same overload, with and without our priority fix",
+    ),
     h(
       "table",
       { class: "patrol-ab" },
@@ -503,7 +556,13 @@ export function renderPatrol(app: HTMLElement): void {
     "Overload the Pi (10 s)",
   );
   const hint = h("p", { class: "patrol-hint", hidden: true });
-  const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
+  // Always offered (Kill and Overload need the Pi's controls): a visitor with no ship photo can still see an alarm.
+  const recordedBtn = h(
+    "button",
+    { class: "btn patrol-recorded-btn", type: "button", "aria-expanded": "false" },
+    "Show a recorded sighting",
+  );
+  const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn, recordedBtn);
 
   const evidenceEl = h("p", { class: "patrol-evidence" }, "Evidence log: checking…");
   // The two demo actions sit directly under the alarm state and its figures, so
@@ -538,7 +597,7 @@ export function renderPatrol(app: HTMLElement): void {
     bar,
     guideLine(
       "patrol",
-      "A camera lookout on a QNX Raspberry Pi. Hold a ship photo to the camera, then try Kill or Overload.",
+      "A camera lookout on a QNX Raspberry Pi. Hold a ship photo to the camera, or show a recorded sighting, then try Kill or Overload.",
     ),
     main,
   );
@@ -745,7 +804,7 @@ export function renderPatrol(app: HTMLElement): void {
 
     latencyMetric.label.textContent = "Alarm latency vs deadline";
     onTimeMetric.label.textContent = "Alarms on time";
-    blindMetric.label.textContent = "Blind raised on time";
+    blindMetric.label.textContent = "Blind warnings on time";
     latencyMetric.box.title = "p99 alarm latency against the deadline";
     onTimeMetric.box.title = "";
     blindMetric.box.title = "";
@@ -783,20 +842,20 @@ export function renderPatrol(app: HTMLElement): void {
     if (result === null) return;
     const off = armCells(result.unguarded);
     const on = armCells(result.guarded);
-    const labels = ["Alarms on time", "Worst alarm latency", "Worst loop lateness"];
     abBody.replaceChildren(
-      ...labels.map((label, k) =>
+      ...AB_ROWS.map((row, k) =>
         h(
           "tr",
           null,
-          h("th", { scope: "row" }, label),
+          h("th", { scope: "row", title: row.title }, row.label),
           // Only the first row is coloured: "alarms on time" is the claim.
           h("td", { class: k === 0 && result.unguarded.late > 0 ? "is-bad" : "" }, off[k] ?? ""),
           h("td", null, on[k] ?? ""),
         ),
       ),
     );
-    abNote.textContent = `${result.load}, ${fmtInt(result.stress_s)} s. Deadline ${result.deadline_ms} ms. Fixed priorities: no adaptive partitioning on this image.`;
+    abNote.textContent = `Measured on the Pi with all four cores overloaded for ${fmtInt(result.stress_s)} s. Deadline: ${result.deadline_ms} ms.`;
+    abNote.title = `Load: ${result.load}.`;
   }
 
   /** "Simulated patrol position: Kiel Bight (54.45, 10.25)": the unit's own name and fix. */
@@ -931,6 +990,13 @@ export function renderPatrol(app: HTMLElement): void {
 
   killBtn.addEventListener("click", () => {
     void requestKill();
+  });
+
+  recordedBtn.addEventListener("click", () => {
+    const open = recordedPanel.hidden;
+    recordedPanel.hidden = !open;
+    recordedBtn.setAttribute("aria-expanded", String(open));
+    recordedBtn.textContent = open ? "Hide the recorded sighting" : "Show a recorded sighting";
   });
 
   async function requestStress(): Promise<void> {
