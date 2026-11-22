@@ -352,6 +352,29 @@
   outline-offset: 2px;
 }
 
+/* The two comparison-area labels: a pill in its box's colour, never taking a map click. */
+.hz-area-label {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-float);
+}
+
+.hz-area-label.is-treated {
+  border-color: var(--st-error);
+  color: var(--st-sanctioned);
+}
+
+.hz-area-label.is-control {
+  color: var(--text-3);
+}
+
 /* The gap line's arrowhead: drawn pointing along +x, then rotated by the drawing code. */
 .hz-map-arrow {
   display: block;

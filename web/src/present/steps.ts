@@ -82,8 +82,10 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "hormuz",
+        // Top-right keeps the caption off the two comparison boxes, which sit mid-map.
+        dock: "top-right",
         headline: "The chart shows the change since the war began on 28 Feb",
-        line: "Hormuz in red, the Gulf of Oman in grey. The shaded months after the war began are what the big number averages.",
+        line: "On the map: Hormuz in red, the Gulf of Oman next door in grey. The chart on the right compares them.",
       },
     ],
   },

@@ -30,6 +30,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from darkfleet.ingest.regions import region_geometry
+
 router = APIRouter(prefix="/api/hormuz", tags=["hormuz"])
 
 UNSEEN_FILE = "hormuz_unseen.json"
@@ -183,7 +185,9 @@ def get_trend() -> dict[str, Any]:
 
     The treated and control series pool their own daily counts at ``MIN_SEEN``;
     events and the overall regime come from the validation file unchanged, so
-    the chart and the headline cannot disagree about what was measured.
+    the chart and the headline cannot disagree about what was measured. The
+    ``areas`` come from the region registry, so the drawn boxes cannot diverge
+    from the analysis either.
     """
     treated = _snapshot(TREND_HORMUZ_FILE)
     control = _snapshot(TREND_CONTROL_FILE)
@@ -193,6 +197,18 @@ def get_trend() -> dict[str, Any]:
     events = [_event(row) for row in rows] if isinstance(rows, list) else []
     regime = validation.get("regime")
     return {
+        "areas": {
+            "treated": {
+                "id": "HORMUZ",
+                "label": "Hormuz (measured)",
+                "geometry": region_geometry("HORMUZ"),
+            },
+            "control": {
+                "id": "GULF_OF_OMAN_CONTROL",
+                "label": "Gulf of Oman (comparison)",
+                "geometry": region_geometry("GULF_OF_OMAN_CONTROL"),
+            },
+        },
         "treated": _weekly(treated.get("daily")),
         "control": _weekly(control.get("daily")),
         "events": [event for event in events if event is not None],

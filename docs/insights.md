@@ -62,11 +62,12 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     ship for our outage. Where receivers were up throughout, it found 55 of 55. Source: docs/validation-tracks.md,
     docs/recall-misses.md (seed 7; the recording grows between runs, so counts differ slightly).
 16. **The strait went darker than its neighbour, and lighter when the guns stopped.** Our own 2-year
-    radar series (Sentinel-1 via Global Fishing Watch, 475 days) puts the share of radar-seen vessels with no
-    matching broadcast in Hormuz at 32% through 2025 and 66% in Mar–Jun 2026, after the 28 Feb 2026 strikes and
-    the strait's closure. The open Gulf of Oman next door, through the same pipeline, went 26% → 46%: the
-    whole region darkened (wartime GPS jamming), but Hormuz rose 14.5 points more (95% CI +2 to +26). At the
-    8 Apr 2026 ceasefire Hormuz fell 63% → 46% while the control rose (DiD −35 points, CI −67 to −2). For 34
+    radar series (Sentinel-1 via Global Fishing Watch, 390 days with passes, Jan 2025 to Nov 2026) puts the share of
+    radar-seen vessels with no matching broadcast in Hormuz (54.0 to 57.6 E, strait and Gulf side) at 32% through 2025
+    and 68% in Mar–Jun 2026, after the 28 Feb 2026 strikes and the strait's closure. The open Gulf of Oman next door,
+    through the same pipeline, went 26% → 46%: the whole region darkened (wartime GPS jamming), but Hormuz rose
+    15.8 points more (95% CI +3 to +27). At the 8 Apr 2026 ceasefire Hormuz fell 66% → 46% while the control rose
+    (DiD −37 points, CI −69 to −7). For 34
     other dated events a 14-day window is too noisy to say anything, so we claim none of them. Why it matters:
     a "dark share" alone confounds jamming, traffic collapse and small boats; a control area is what turns
     a striking chart into evidence. Source: docs/hormuz-validation.md, data/research/hormuz_events.json.
@@ -94,3 +95,9 @@ Raw material for the DEV post and thought pieces. Each entry: what happened, evi
     the OpenSanctions maritime list by MMSI found 4 ships; 3 appear only in the Tokyo MOU port-state-control
     dataset with no risk tag. Only SEA 1 (shadow-fleet tag) is a real story. Why it matters: "on a list" is
     not "sanctioned"; a compliance product has to say which list and why. Source: #237, #239.
+21. **The "next door" control sat inside the box it was compared with.** The Hormuz box (54.0 to 60.5 E) contained
+    the Gulf of Oman control (57.6 to 59.8 E), so the validation compared a region with a part of itself. The control
+    was 5.8% of the box's radar detections (9,508 of 165,272). Bias direction: toward zero. Approximately, the old contrast is the
+    strait-only contrast times (1 - 0.058), so the earlier +14.5 points understated the gap.
+    Re-run on a strait-only treated area (54.0 to 57.6 E), same settings: +15.8 points (CI +3 to +27), Hormuz
+    31.9% → 67.5%. The direction held and the gap grew, as the bias predicted. Source: #266.
