@@ -17,8 +17,10 @@ import { h } from "../components/dom";
 import { guideLine } from "../components/GuideLine";
 import { fetchHormuz } from "../components/hormuz";
 import {
+  addStoryAnchors,
   addStoryLayers,
   clearStories,
+  clearStoryAnchors,
   leadCluster,
   leadListed,
   showCluster,
@@ -43,11 +45,50 @@ export interface HormuzScreen {
 const TREND_URL = "/api/hormuz/trend";
 const STORIES_URL = "/api/hormuz/stories";
 
-/** The frame the screen always opens on: the strait, zoomed in. */
+/** The strait box itself; the first view is widened to its union with the story places. */
 const STRAIT: [[number, number], [number, number]] = [
   [55.6, 25.6],
   [57.2, 27.1],
 ];
+
+/**
+ * Plain place names for the first view. The offline basemap has no text glyphs, so these are
+ * DOM markers; they are not story labels and never move or clear.
+ */
+const PLACES: { name: string; lon: number; lat: number }[] = [
+  { name: "Iran", lon: 56.0, lat: 27.7 },
+  { name: "Oman", lon: 57.0, lat: 25.0 },
+  { name: "United Arab Emirates", lon: 55.2, lat: 24.4 },
+  { name: "Strait of Hormuz", lon: 56.3, lat: 26.6 },
+  { name: "Gulf of Oman", lon: 56.9, lat: 25.7 },
+];
+
+/**
+ * The first view and "Back to strait" share this frame. The strait box alone cuts off both
+ * story places and the outer place names, so the frame is their union with padding room
+ * for the label pills.
+ */
+function firstViewBounds(stories: HormuzStories | null): [[number, number], [number, number]] {
+  const points: [number, number][] = [
+    STRAIT[0],
+    STRAIT[1],
+    ...PLACES.map((place): [number, number] => [place.lon, place.lat]),
+  ];
+  if (stories !== null) {
+    const listed = leadListed(stories);
+    if (listed !== null) points.push([listed.off.lon, listed.off.lat]);
+    const cluster = leadCluster(stories);
+    if (cluster !== null) points.push([cluster.centre.lon, cluster.centre.lat]);
+  }
+  const lons = points.map((point) => point[0]);
+  const lats = points.map((point) => point[1]);
+  return [
+    [Math.min(...lons), Math.min(...lats)],
+    [Math.max(...lons), Math.max(...lats)],
+  ];
+}
+
+const VIEW_PADDING = 56;
 
 function headlineBlock(trend: HormuzTrend): HTMLElement {
   const figures = trend.regime ? trendHeadline(trend.regime) : null;
@@ -84,7 +125,10 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   let stories: HormuzStories | null = null;
   /** The story card drawn on the map; null is the strait view. */
   let activeCard: HormuzCardKey | null = null;
+  let homeBounds = firstViewBounds(null);
+  let anchorsDrawn = false;
   const cardButtons: HTMLButtonElement[] = [];
+  const placeMarkers: maplibregl.Marker[] = [];
 
   const mapDiv = h("div", { class: "map hormuz-map" });
   // Returns to the strait view; shown only while a card is open.
@@ -126,16 +170,27 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   const map = new maplibregl.Map({
     container: mapDiv,
     style: offlineStyle(),
-    bounds: STRAIT,
-    fitBoundsOptions: { padding: 32 },
+    bounds: homeBounds,
+    fitBoundsOptions: { padding: VIEW_PADDING },
     attributionControl: false,
     interactive: true,
   });
+
+  // Place names sit on the map from the first paint, so the offline basemap never reads as blank.
+  function addPlaceLabels(): void {
+    for (const place of PLACES) {
+      const element = h("div", { class: "hz-place-label" }, place.name);
+      placeMarkers.push(
+        new maplibregl.Marker({ element, anchor: "center" }).setLngLat([place.lon, place.lat]).addTo(map),
+      );
+    }
+  }
 
   let mapReady = false;
   map.on("load", () => {
     if (destroyed) return;
     addStoryLayers(map);
+    addPlaceLabels();
     mapReady = true;
     drawCard();
   });
@@ -155,9 +210,14 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     backButton.hidden = activeCard === null;
     mapKey.hidden = activeCard !== "cluster";
     if (!mapReady) return;
+    // The fixed anchors arrive with the stories and stay for every card after that.
+    if (stories !== null && !anchorsDrawn) {
+      addStoryAnchors(map, stories, (key) => requestHormuzCard(activeCard === key ? null : key));
+      anchorsDrawn = true;
+    }
     if (activeCard === null || stories === null) {
       if (mapReady) clearStories(map);
-      if (activeCard === null) map.fitBounds(STRAIT, { padding: 32, duration: 600 });
+      if (activeCard === null) map.fitBounds(homeBounds, { padding: VIEW_PADDING, duration: 600 });
       return;
     }
     if (activeCard === "sea1") {
@@ -179,7 +239,9 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
   function storyBlock(data: HormuzStories): HTMLElement {
     const cards = storyCards(data, (key) => requestHormuzCard(activeCard === key ? null : key));
     for (const card of cards) {
-      if (card instanceof HTMLButtonElement) cardButtons.push(card);
+      // The button is the card itself; its wrapper also holds the separate "more" control.
+      const button = card.querySelector<HTMLButtonElement>(".hz-card");
+      if (button !== null) cardButtons.push(button);
     }
     return h(
       "section",
@@ -212,7 +274,8 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     .then(([trend, data]) => {
       if (destroyed || abort.signal.aborted) return;
       stories = data;
-      // Hero, then the chart, then the cards: the first two fit a 1280x720 rail whole.
+      homeBounds = firstViewBounds(data);
+      // Hero, chart, then the cards: tightened so the whole rail fits a 1280x720 window.
       const parts: HTMLElement[] = [headlineBlock(trend), chartBlock(trend)];
       if (data) parts.push(storyBlock(data));
       body.replaceChildren(...parts);
@@ -240,6 +303,8 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
       window.removeEventListener("keydown", onEscape);
       requestHormuzCard(null);
       abort.abort();
+      clearStoryAnchors();
+      for (const marker of placeMarkers) marker.remove();
       map.remove();
     },
   };

@@ -66,6 +66,58 @@ function clearLabels(): void {
   labels = [];
 }
 
+/**
+ * The two story anchors are fixed to their places, not to the open card: they are how the
+ * first view explains itself before anything is clicked, so they survive every card change.
+ * They live in their own list because clearLabels() only tears down card labels.
+ */
+let anchors: Marker[] = [];
+
+/** Remove the fixed story anchors; the screen calls this on exit. */
+export function clearStoryAnchors(): void {
+  for (const marker of anchors) marker.remove();
+  anchors = [];
+}
+
+/** A story anchor is a button: a click asks for its card, and a second click closes it. */
+function anchorLabel(
+  map: MapLibreMap,
+  text: string,
+  key: HormuzCardKey,
+  at: Point,
+  onPick: (key: HormuzCardKey) => void,
+): void {
+  const element = h("button", { class: "hz-anchor", type: "button" }, text);
+  element.addEventListener("click", () => onPick(key));
+  // The offset lifts the label off its dot. The corner anchor points the label inward from
+  // whichever half of the frame it sits in, so an edge label does not run off the map.
+  const anchor = at.lon >= map.getCenter().lng ? "bottom-right" : "bottom-left";
+  anchors.push(new Marker({ element, anchor, offset: [0, -8] }).setLngLat([at.lon, at.lat]).addTo(map));
+}
+
+/**
+ * Put the two story places on the map before any card is open: where the lead ship switched
+ * off, and where the cluster came back. Every number and date is read from the stories.
+ */
+export function addStoryAnchors(
+  map: MapLibreMap,
+  stories: HormuzStories,
+  onPick: (key: HormuzCardKey) => void,
+): void {
+  clearStoryAnchors();
+  const listed = leadListed(stories);
+  if (listed !== null) {
+    const name = listed.name ?? `MMSI ${listed.mmsi}`;
+    const text = `${name} switched off here, ${dayLabel(listed.start.slice(0, 10))}`;
+    anchorLabel(map, text, "sea1", listed.off, onPick);
+  }
+  const cluster = leadCluster(stories);
+  if (cluster !== null) {
+    const text = `${cluster.vessels} ships 'came back' here, ${dayLabel(cluster.day)}`;
+    anchorLabel(map, text, "cluster", cluster.centre, onPick);
+  }
+}
+
 /** Place an HTML label as a map marker; the vertical offset keeps it off the dot or circle edge. */
 function placeLabel(
   map: MapLibreMap,
@@ -292,18 +344,33 @@ export function daysAfterStrikes(startIso: string): number {
 }
 
 function storyCard(key: HormuzCardKey, text: string, onPick: (key: HormuzCardKey) => void): HTMLElement {
+  // The card stays the one button (data-card, aria-pressed, is-active); "more" is its sibling,
+  // because a button inside a button is neither valid nor clickable on its own.
+  const body = h("span", { class: "hz-card-text" }, text);
   const card = h(
     "button",
     { class: "hz-card", type: "button", "data-card": key, "aria-pressed": "false" },
-    h("span", { class: "hz-card-text" }, text),
+    body,
   );
   card.addEventListener("click", () => onPick(key));
-  return card;
+  const more = h(
+    "button",
+    { class: "hz-more", type: "button", "aria-expanded": "false" },
+    "more",
+  );
+  const wrap = h("div", { class: "hz-card-wrap" }, card, more);
+  more.addEventListener("click", () => {
+    const open = wrap.classList.toggle("is-open");
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+    more.textContent = open ? "less" : "more";
+  });
+  return wrap;
 }
 
 /**
  * The two story cards under the headline: the lead listed ship and the first cluster.
- * Each button carries its key; the screen decides what a click means (open or close).
+ * Each wrapper holds the clickable card (which carries its key) and the "more" control;
+ * the screen decides what a click means (open or close).
  */
 export function storyCards(stories: HormuzStories, onPick: (key: HormuzCardKey) => void): HTMLElement[] {
   const cards: HTMLElement[] = [];
