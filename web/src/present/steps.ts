@@ -28,6 +28,7 @@ export type PresentToken =
   | "hormuz_before"
   | "hormuz_after"
   | "did_pts"
+  | "sea1_kind"
   | "sea1_hours"
   | "sea1_days"
   | "sea1_km"
@@ -44,16 +45,24 @@ export interface PresentCaption {
 
 export interface PresentScene extends PresentCaption {
   route: PresentRouteName;
+  /**
+   * The token this scene cannot be told without. When the API answers and that
+   * token is absent (no such story in the data), the scene is skipped, not shown
+   * with a guess.
+   */
+  requires?: PresentToken;
   /** Focus the strongest current story on the watch screen (as the cold open does). */
   alert?: "strongest";
   /** Open this Hormuz story card; absent means the strait view. */
   card?: HormuzCardKey;
   /**
    * Where the caption sits, chosen so it covers no proof on this screen:
-   * "bottom" centre (default), "top-right" over the strait's empty sea, "left" beside
-   * the camera (the patrol panel and its Kill button stay clear).
+   * "bottom" centre (default, Hormuz), "top-right" over the strait's empty sea (Hormuz
+   * cards), "map-top-left" over the watch map's empty north-west (keeps the status bar,
+   * the reach circle and the figures panel clear), "camera-top-left" over the top-left
+   * corner of the patrol camera (the alarm, the figures and the Kill/Overload buttons stay clear).
    */
-  dock?: "bottom" | "top-right" | "left";
+  dock?: "bottom" | "top-right" | "map-top-left" | "camera-top-left";
   fallback?: Partial<PresentCaption>;
 }
 
@@ -83,11 +92,12 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
         route: "hormuz",
         card: "sea1",
         dock: "top-right",
-        headline: "A shadow-fleet ship switched off for {sea1_hours} hours",
-        line: "In the Gulf of Oman, {sea1_days} days after the strikes. It came back {sea1_km} km away.",
+        requires: "sea1_hours",
+        headline: "{sea1_kind} switched off for {sea1_hours} hours",
+        line: "{sea1_days} days after the strikes. It came back {sea1_km} km away.",
         fallback: {
-          headline: "A shadow-fleet ship switched off its transponder",
-          line: "It switched off its transponder in the Gulf of Oman, after the strikes.",
+          headline: "A ship switched off its transponder",
+          line: "It switched off its transponder after the strikes.",
         },
       },
       {
@@ -109,10 +119,11 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "watch",
         alert: "strongest",
+        dock: "map-top-left",
         headline: "Our own receivers caught a ship switching off",
         line: "Here is where it could have gone, and the {met} ships it could have met.",
         fallback: {
-          line: "Here is where it could have gone, and the ships it could have met.",
+          line: "Here is where it could have gone while its transponder was off.",
         },
       },
     ],
@@ -122,7 +133,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "patrol",
-        dock: "left",
+        dock: "camera-top-left",
         headline: "AI is a sensor, not a judge",
         line: "Kill the detector: the safety core stays up and recovers in {recovery}.",
         fallback: {
@@ -136,6 +147,7 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
     scenes: [
       {
         route: "watch",
+        dock: "map-top-left",
         headline: "Built for compliance teams and coast guards",
         line: "Physics says what's possible, lists say who matters, and the edge unit catches ships that switch off.",
       },

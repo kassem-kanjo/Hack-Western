@@ -49,6 +49,8 @@ const RECOVERY_HOLD_MS = 5000;
 const KILL_MIN_SHOW_MS = 1200;
 /** A decision older than this (unit clock) means no frames are arriving. */
 const STALE_FRAME_MS = 3000;
+/** The evidence log is re-hashed on the Pi per read: fetch it every 10 s, not per frame. */
+const SIGHTINGS_MS = 10000;
 /** A detector event younger than this means the supervisor is mid-restart. */
 const RESTART_WINDOW_MS = 5000;
 
@@ -120,13 +122,41 @@ function schedValue(sched: EdgeSchedule | null | undefined): string {
   return priority !== null ? String(Math.round(priority)) : "not reported";
 }
 
+/**
+ * A reliability row: the plain words, then the technical detail in small print.
+ * An unreported value shows "not reported" alone, never a plain claim beside it.
+ */
+function setDetailed(dd: HTMLElement, plain: string, detail: string): void {
+  const unreported = plain === "not reported" || detail === "not reported";
+  dd.replaceChildren(
+    unreported ? "not reported" : plain,
+    ...(unreported ? [] : [h("span", { class: "patrol-small" }, detail)]),
+  );
+}
+
 /** Sub-millisecond lateness is the point: 0.3 ms must not round to "0 ms". */
 function fmtMs(value: number): string {
   return value < 10 ? value.toFixed(1) : String(Math.round(value));
 }
 
+/**
+ * The safety loop in plain words: on time, or how many ticks were late in the
+ * last minute, and the worst lateness. The jargon (p99, tick counts) moves to
+ * `loopDetail`, the small print under it.
+ */
+function loopPlain(tick: EdgeStatus["safety_tick"]): string {
+  if (!tick) return "not reported";
+  const worst = finiteOrNull(tick.max_late_ms);
+  const late = finiteOrNull(tick.late_count_60s);
+  const worstText = worst === null ? null : `worst ${fmtMs(worst)} ms late`;
+  if (late === null) return worstText ?? "not reported";
+  if (late === 0) return worstText === null ? "on time" : `on time, ${worstText}`;
+  const lateText = `${fmtInt(late)} late in the last 60 s`;
+  return worstText === null ? lateText : `${lateText}, ${worstText}`;
+}
+
 /** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute. */
-function loopValue(tick: EdgeStatus["safety_tick"]): string {
+function loopDetail(tick: EdgeStatus["safety_tick"]): string {
   if (!tick) return "not reported";
   const parts: string[] = [];
   const hz = finiteOrNull(tick.hz);
@@ -164,7 +194,7 @@ function topBox(ai: EdgeAi | null | undefined): { label: string; score: number }
 /** "boat 82%": the one detection line a judge can read at 1 m. */
 function aiText(ai: EdgeAi | null | undefined): string {
   const box = topBox(ai);
-  if (box === null) return "nothing";
+  if (box === null) return "No vessel in view";
   const pct = box.score <= 1 ? Math.round(box.score * 100) : Math.round(box.score);
   return `${box.label} ${pct}%`;
 }
@@ -257,6 +287,9 @@ export function renderPatrol(app: HTMLElement): void {
   /** One poll at a time: a slow API must not queue a second one. */
   let pollInFlight = false;
   let pollTimer: number | null = null;
+  /** The evidence-log timer (SIGHTINGS_MS) and its one-request-at-a-time guard. */
+  let sightingsTimer: number | null = null;
+  let sightingsInFlight = false;
   let lastOkMs: number | null = null;
 
   /** Latest good payloads; the screen keeps the last decision while a fetch fails. */
@@ -394,9 +427,11 @@ export function renderPatrol(app: HTMLElement): void {
     return { row, value };
   }
 
-  function setStep(target: Step, tone: Tone, text: string): void {
+  /** `small` is the source or the technical detail, printed under the plain line. */
+  function setStep(target: Step, tone: Tone, text: string, small?: string): void {
     target.row.className = `patrol-step is-${tone}`;
-    target.value.textContent = text;
+    const detail = small === undefined || small === "" ? null : h("span", { class: "patrol-small" }, small);
+    target.value.replaceChildren(text, ...(detail === null ? [] : [detail]));
   }
 
   const cameraStep = step("Camera");
@@ -427,7 +462,8 @@ export function renderPatrol(app: HTMLElement): void {
     );
     return { box, value };
   }
-  const latencyMetric = metric("Alarm latency p99 / deadline");
+  const latencyMetric = metric("Alarm latency vs deadline");
+  latencyMetric.box.title = "p99 alarm latency against the deadline";
   const onTimeMetric = metric("Alarms on time");
   const blindMetric = metric("Blind raised on time");
   const metrics = h("div", { class: "patrol-metrics" }, latencyMetric.box, onTimeMetric.box, blindMetric.box);
@@ -495,12 +531,16 @@ export function renderPatrol(app: HTMLElement): void {
   const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
 
   const evidenceEl = h("p", { class: "patrol-evidence" }, "Evidence log: checking…");
+  // The two demo actions sit directly under the alarm state and its figures, so
+  // they are in view at 1280x720 without scrolling the rail.
   const side = h(
     "aside",
     { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
     verdictEl,
     verdictSub,
     metrics,
+    actions,
+    hint,
     positionEl,
     chain,
     evidenceEl,
@@ -508,8 +548,6 @@ export function renderPatrol(app: HTMLElement): void {
     fields,
     underLoad,
     abBox,
-    actions,
-    hint,
   );
 
   // ---- offline: one calm line instead of a half-live screen ----
@@ -596,9 +634,9 @@ export function renderPatrol(app: HTMLElement): void {
   function paintReliability(s: EdgeStatus): void {
     const now = Date.now();
     const priorities = s.priorities ?? {};
-    safetySched.dd.textContent = schedValue(priorities.safety_core);
-    aiSched.dd.textContent = schedValue(priorities.detector);
-    loop.dd.textContent = loopValue(s.safety_tick);
+    setDetailed(safetySched.dd, "highest priority", schedValue(priorities.safety_core));
+    setDetailed(aiSched.dd, "lower priority, treated as untrusted", schedValue(priorities.detector));
+    setDetailed(loop.dd, loopPlain(s.safety_tick), loopDetail(s.safety_tick));
     recovery.dd.textContent = fmtRecovery(s.last_recovery_ms);
     restarts.dd.textContent = fmtInt(s.detector_restarts ?? 0);
 
@@ -655,20 +693,18 @@ export function renderPatrol(app: HTMLElement): void {
   function paintChain(s: EdgeStatus, d: EdgeDecision | null): void {
     const detector = detectorState(s, Date.now());
 
-    // 1 Camera: the source and the rate the safety core processed frames at.
+    // 1 Camera: the frame rate the safety core processed frames at, the source in small print.
     const source = typeof d?.source === "string" ? d.source.trim() : "";
     const fps = finiteOrNull(s.frames_per_s);
-    const cameraParts: string[] = [];
-    if (source !== "") cameraParts.push(source);
-    if (fps !== null) cameraParts.push(`${fmtRate(fps)} fps`);
     if (cameraOffline) {
       setStep(cameraStep, "bad", "offline");
+    } else if (!s.frame_available) {
+      setStep(cameraStep, "warn", "waiting for frames");
+    } else if (fps !== null) {
+      const unit = fps === 1 ? "frame" : "frames";
+      setStep(cameraStep, "ok", `${fmtRate(fps)} ${unit} a second`, source);
     } else {
-      setStep(
-        cameraStep,
-        s.frame_available ? "ok" : "warn",
-        s.frame_available ? cameraParts.join(" \u00b7 ") || "no frames yet" : "waiting for frames",
-      );
+      setStep(cameraStep, "ok", "frames arriving", source);
     }
 
     // 2 AI: untrusted, and named as such; under stress its slower time is the point.
@@ -853,7 +889,6 @@ export function renderPatrol(app: HTMLElement): void {
         return;
       }
 
-      paintEvidence(await fetchSightings());
       const [decisionResult] = await Promise.allSettled([fetchEdgeDecision()]);
       if (disposed) return;
       // The A/B result changes only when someone runs it: look every 30 s, and only until found.
@@ -944,17 +979,40 @@ export function renderPatrol(app: HTMLElement): void {
 
   // ---- timer: visible tab only ----
 
+  /**
+   * The evidence log is re-hashed on the Pi for every read, so it has its own slow
+   * timer and is never awaited inside the frame/decision loop.
+   */
+  async function pollSightings(): Promise<void> {
+    if (disposed || sightingsInFlight) return;
+    sightingsInFlight = true;
+    try {
+      const payload = await fetchSightings();
+      if (!disposed) paintEvidence(payload);
+    } finally {
+      sightingsInFlight = false;
+    }
+  }
+
   function startTimer(): void {
     if (disposed || pollTimer !== null) return;
     pollTimer = window.setInterval(() => {
       void poll();
     }, POLL_MS);
+    sightingsTimer = window.setInterval(() => {
+      void pollSightings();
+    }, SIGHTINGS_MS);
+    void pollSightings();
   }
 
   function stopTimer(): void {
     if (pollTimer !== null) {
       window.clearInterval(pollTimer);
       pollTimer = null;
+    }
+    if (sightingsTimer !== null) {
+      window.clearInterval(sightingsTimer);
+      sightingsTimer = null;
     }
   }
 
