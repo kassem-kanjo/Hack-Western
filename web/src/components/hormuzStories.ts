@@ -118,12 +118,15 @@ export function addStoryAnchors(
   }
 }
 
-/** Place an HTML label as a map marker; the vertical offset keeps it off the dot or circle edge. */
+/**
+ * Place an HTML label as a map marker; the vertical offset keeps it off the dot or circle edge.
+ * A corner anchor makes the label grow inward from a frame edge, so it never runs off the map.
+ */
 function placeLabel(
   map: MapLibreMap,
   element: HTMLElement,
   at: Point,
-  anchor: "top" | "bottom",
+  anchor: "top" | "bottom" | "bottom-left" | "bottom-right",
   offsetY: number,
 ): void {
   labels.push(new Marker({ element, anchor, offset: [0, offsetY] }).setLngLat([at.lon, at.lat]).addTo(map));
@@ -327,6 +330,13 @@ export function showCluster(map: MapLibreMap, cluster: StoryCluster): void {
     ]),
     7,
   );
+  // Labels come after show(), which clears the previous card's labels: where the ships came back.
+  const text = `${cluster.vessels} ships 'came back' here, ${dayLabel(cluster.day)}`;
+  // Grow the label toward the middle of the framed ships, so an edge centre keeps the text on the map.
+  const lons = cluster.points.flatMap((p) => [p.off.lon, p.on.lon]);
+  const midLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+  const side = cluster.centre.lon >= midLon ? "bottom-right" : "bottom-left";
+  placeLabel(map, h("div", { class: "hz-map-label" }, text), cluster.centre, side, -9);
 }
 
 /** The cluster card's text: every number from the cluster, the physics that rules out real voyages. */
@@ -343,34 +353,52 @@ export function daysAfterStrikes(startIso: string): number {
   return Math.floor((Date.parse(startIso) - STRIKE_DAY) / DAY_MS);
 }
 
+/** Characters a card shows before it is cut; "more" opens the whole sentence. Sized for two lines in the rail. */
+const CARD_CHARS = 120;
+
+/**
+ * Cut text to at most `limit` characters at a word boundary, with an ellipsis. Cutting by
+ * characters (not by CSS line clamp) keeps the cut the same on every screen and never splits a word.
+ */
+export function truncateAtWord(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const space = text.lastIndexOf(" ", limit);
+  const head = space > 0 ? text.slice(0, space) : text.slice(0, limit);
+  return `${head.replace(/[\s,;:(]+$/, "")}…`;
+}
+
+/**
+ * One story card: a bordered box holding the clickable text (which carries the card key) and,
+ * when the text was cut, a "more" control inside the same box. The two are siblings, because a
+ * button inside a button is neither valid nor clickable on its own.
+ */
 function storyCard(key: HormuzCardKey, text: string, onPick: (key: HormuzCardKey) => void): HTMLElement {
-  // The card stays the one button (data-card, aria-pressed, is-active); "more" is its sibling,
-  // because a button inside a button is neither valid nor clickable on its own.
-  const body = h("span", { class: "hz-card-text" }, text);
-  const card = h(
+  const short = truncateAtWord(text, CARD_CHARS);
+  const body = h("span", { class: "hz-card-text" }, short);
+  const open = h(
     "button",
-    { class: "hz-card", type: "button", "data-card": key, "aria-pressed": "false" },
+    { class: "hz-card-open", type: "button", "data-card": key, "aria-pressed": "false" },
     body,
   );
-  card.addEventListener("click", () => onPick(key));
-  const more = h(
-    "button",
-    { class: "hz-more", type: "button", "aria-expanded": "false" },
-    "more",
-  );
-  const wrap = h("div", { class: "hz-card-wrap" }, card, more);
-  more.addEventListener("click", () => {
-    const open = wrap.classList.toggle("is-open");
-    more.setAttribute("aria-expanded", open ? "true" : "false");
-    more.textContent = open ? "less" : "more";
-  });
-  return wrap;
+  open.addEventListener("click", () => onPick(key));
+  const card = h("div", { class: "hz-card" }, open);
+  if (short !== text) {
+    const more = h("button", { class: "hz-more", type: "button", "aria-expanded": "false" }, "more");
+    more.addEventListener("click", () => {
+      const expanded = more.getAttribute("aria-expanded") !== "true";
+      more.setAttribute("aria-expanded", expanded ? "true" : "false");
+      more.textContent = expanded ? "less" : "more";
+      body.textContent = expanded ? text : short;
+    });
+    card.append(more);
+  }
+  return card;
 }
 
 /**
  * The two story cards under the headline: the lead listed ship and the first cluster.
- * Each wrapper holds the clickable card (which carries its key) and the "more" control;
- * the screen decides what a click means (open or close).
+ * Each card is a bordered box holding the clickable text (which carries its key) and the
+ * "more" control when needed; the screen decides what a click means (open or close).
  */
 export function storyCards(stories: HormuzStories, onPick: (key: HormuzCardKey) => void): HTMLElement[] {
   const cards: HTMLElement[] = [];

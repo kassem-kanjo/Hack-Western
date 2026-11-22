@@ -57,7 +57,7 @@ const STRAIT: [[number, number], [number, number]] = [
  */
 const PLACES: { name: string; lon: number; lat: number }[] = [
   { name: "Iran", lon: 56.0, lat: 27.7 },
-  { name: "Oman", lon: 57.0, lat: 25.0 },
+  { name: "Oman", lon: 57.9, lat: 23.6 },
   { name: "United Arab Emirates", lon: 55.2, lat: 24.4 },
   { name: "Strait of Hormuz", lon: 56.3, lat: 26.6 },
   { name: "Gulf of Oman", lon: 56.9, lat: 25.7 },
@@ -88,7 +88,11 @@ function firstViewBounds(stories: HormuzStories | null): [[number, number], [num
   ];
 }
 
-const VIEW_PADDING = 56;
+/**
+ * Frame padding. The top is wider so the strait's place name clears the guidance banner and
+ * the place pill; the other sides leave room for the outer place names and the attribution.
+ */
+const VIEW_PADDING = { top: 110, right: 56, bottom: 56, left: 56 };
 
 function headlineBlock(trend: HormuzTrend): HTMLElement {
   const figures = trend.regime ? trendHeadline(trend.regime) : null;
@@ -203,17 +207,23 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     const on = (button: HTMLButtonElement): void => {
       const key = button.dataset["card"] ?? "";
       const pressed = key === activeCard;
-      button.classList.toggle("is-active", pressed);
+      button.closest(".hz-card")?.classList.toggle("is-active", pressed);
       button.setAttribute("aria-pressed", pressed ? "true" : "false");
     };
     cardButtons.forEach(on);
     backButton.hidden = activeCard === null;
     mapKey.hidden = activeCard !== "cluster";
     if (!mapReady) return;
-    // The fixed anchors arrive with the stories and stay for every card after that.
-    if (stories !== null && !anchorsDrawn) {
-      addStoryAnchors(map, stories, (key) => requestHormuzCard(activeCard === key ? null : key));
-      anchorsDrawn = true;
+    // The two first-view markers show only in the strait view. While a card is open, only that
+    // card's labels are on the map, so the markers never collide with them.
+    if (stories !== null) {
+      if (activeCard === null && !anchorsDrawn) {
+        addStoryAnchors(map, stories, (key) => requestHormuzCard(activeCard === key ? null : key));
+        anchorsDrawn = true;
+      } else if (activeCard !== null && anchorsDrawn) {
+        clearStoryAnchors();
+        anchorsDrawn = false;
+      }
     }
     if (activeCard === null || stories === null) {
       if (mapReady) clearStories(map);
@@ -240,7 +250,7 @@ export function renderHormuz(app: HTMLElement): HormuzScreen {
     const cards = storyCards(data, (key) => requestHormuzCard(activeCard === key ? null : key));
     for (const card of cards) {
       // The button is the card itself; its wrapper also holds the separate "more" control.
-      const button = card.querySelector<HTMLButtonElement>(".hz-card");
+      const button = card.querySelector<HTMLButtonElement>(".hz-card-open");
       if (button !== null) cardButtons.push(button);
     }
     return h(
