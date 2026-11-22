@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from fastapi.testclient import TestClient
 
 from darkfleet.api.app import app, reset_cache
