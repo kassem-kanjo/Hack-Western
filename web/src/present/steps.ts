@@ -1,25 +1,19 @@
 /**
- * The six beats of the tour, as data.
+ * The five beats of the tour, as data (docs/demo-script.md, v3).
  *
- * `route` is a *name* from PRESENT_ROUTES, never a literal hash: if another
- * screen is renamed, the tour is fixed in one place at the top of this file.
- * `headline` and `line` are what the room reads; the line carries `{token}`
- * placeholders that present.ts fills once, from the live APIs, when the tour
- * starts. `fallback` is a complete sentence without the number, so a missing
- * endpoint never puts "undefined" or a stale figure on screen.
- *
- * Beat 2 is conditional: it exists only when /api/hormuz/trend reports
- * regime.verdict "moves with event". Without that proof the tour skips it
- * entirely rather than claim a number we have not tested.
+ * A beat is one idea; a beat with two scenes (the Hormuz cards) advances scene by
+ * scene before the next beat. `route` is a name from PRESENT_ROUTES, never a literal
+ * hash. Captions carry `{token}` placeholders that present.ts fills from the same
+ * endpoint the screen reads, using the screen's own rounding and wording. `fallback`
+ * is a complete sentence without the number, used until (or unless) that endpoint answers.
  */
 
-/** Every screen the tour can visit, by name. Renamed routes change here only. */
+import type { HormuzCardKey } from "./cardRequest";
+
 export const PRESENT_ROUTES = {
   hormuz: "#/hormuz",
   watch: "#/watch",
   patrol: "#/patrol",
-  /** There is no #/evidence route yet; the watch screen carries the evidence. */
-  evidence: "#/watch",
 } as const;
 
 export type PresentRouteName = keyof typeof PRESENT_ROUTES;
@@ -31,104 +25,120 @@ export function watchAlertRoute(alertId: string): string {
 
 /** Numbers present.ts can fill into a caption. */
 export type PresentToken =
-  | "hormuz_share_pct"
-  | "ships_now"
-  | "areas"
-  | "alerts"
-  | "spoof_ships"
-  | "offset_min"
-  | "offset_max"
-  | "recovery"
-  | "null_ratio"
   | "hormuz_before"
   | "hormuz_after"
-  | "did_pts";
+  | "did_pts"
+  | "sea1_hours"
+  | "sea1_days"
+  | "sea1_km"
+  | "cluster_ships"
+  | "cluster_hours"
+  | "cluster_kn"
+  | "met"
+  | "recovery";
 
-/** The two lines the overlay shows for one beat. */
 export interface PresentCaption {
   headline: string;
   line: string;
 }
 
-export interface PresentStep {
-  /** Stable key, used for markup ids and to keep the presenter on the same beat. */
-  id: string;
-  /** Which screen the beat shows, resolved through PRESENT_ROUTES. */
+export interface PresentScene extends PresentCaption {
   route: PresentRouteName;
+  /** Focus the strongest current story on the watch screen (as the cold open does). */
+  alert?: "strongest";
+  /** Open this Hormuz story card; absent means the strait view. */
+  card?: HormuzCardKey;
   /**
-   * Open one alert on the watch screen. The id is filled from the tour's one
-   * /api/watch fetch; when it is missing the beat stays on the world view.
+   * Where the caption sits, chosen so it covers no proof on this screen:
+   * "bottom" centre (default), "top-right" over the strait's empty sea, "left" beside
+   * the camera (the patrol panel and its Kill button stay clear).
    */
-  alert?: "spoof";
-  /**
-   * Show this beat only when a condition was proved at tour start. The lone
-   * condition is the Hormuz trend verdict; unproved means the beat is gone.
-   */
-  requires?: "hormuz_trend";
-  /** One sentence the room reads (<= 12 words). */
-  headline: string;
-  /** One supporting line under it (<= 18 words). */
-  line: string;
-  /** Replaces a field whose token has no live value; omit the fields with no token. */
+  dock?: "bottom" | "top-right" | "left";
   fallback?: Partial<PresentCaption>;
 }
 
-export const PRESENT_STEPS: readonly PresentStep[] = [
+export interface PresentBeat {
+  id: string;
+  scenes: readonly PresentScene[];
+}
+
+export const PRESENT_BEATS: readonly PresentBeat[] = [
   {
-    id: "radar",
-    route: "hormuz",
-    headline: "Radar sees ships the transponders don't",
-    line: "On a typical day {hormuz_share_pct}% of radar-seen vessels here aren't broadcasting.",
-    fallback: {
-      line: "On a typical day, many radar-seen vessels here aren't broadcasting.",
-    },
+    id: "finding",
+    scenes: [
+      {
+        route: "hormuz",
+        headline: "Satellite radar sees ships that aren't broadcasting",
+        line: "Since the war began, {hormuz_after}% of radar-seen ships here aren't broadcasting their position, up from {hormuz_before}% before 28 Feb.",
+        fallback: {
+          line: "Since the war began, more radar-seen ships here aren't broadcasting their position than before 28 Feb.",
+        },
+      },
+    ],
   },
   {
-    id: "trend",
-    route: "hormuz",
-    requires: "hormuz_trend",
-    headline: "Since the strait closed, dark ships doubled",
-    line: "Not broadcasting went from {hormuz_before}% to {hormuz_after}%: {did_pts} points beyond the Gulf of Oman control.",
-    fallback: {
-      line: "Not broadcasting rose after the strait closed, and the Gulf of Oman control did not move the same way.",
-    },
+    id: "cards",
+    scenes: [
+      {
+        route: "hormuz",
+        card: "sea1",
+        dock: "top-right",
+        headline: "A shadow-fleet ship switched off for {sea1_hours} hours",
+        line: "In the Gulf of Oman, {sea1_days} days after the strikes. It came back {sea1_km} km away.",
+        fallback: {
+          headline: "A shadow-fleet ship switched off its transponder",
+          line: "It switched off its transponder in the Gulf of Oman, after the strikes.",
+        },
+      },
+      {
+        route: "hormuz",
+        card: "cluster",
+        dock: "top-right",
+        headline: "{cluster_ships} ships switched off, then reappeared at one spot",
+        line: "The trip needs {cluster_kn} knots, which these ships can't sail. Their positions look faked, so we don't rank them.",
+        fallback: {
+          headline: "Several ships switched off, then reappeared at one spot",
+          line: "The trip is too fast for these ships. Their positions look faked, so we don't rank them.",
+        },
+      },
+    ],
   },
   {
     id: "live",
-    route: "watch",
-    headline: "Our own receivers, live",
-    line: "{ships_now} ships heard right now across {areas} areas; {alerts} alerts pass our physics checks.",
-    fallback: {
-      line: "Ships are being heard right now across our listening areas; every alert passed our physics checks.",
-    },
-  },
-  {
-    id: "spoof",
-    route: "watch",
-    alert: "spoof",
-    headline: "{spoof_ships} ships at one point on land",
-    line: "Ships can't jump {offset_min}-{offset_max} km and back. Their positions were faked.",
-    fallback: {
-      headline: "Several ships at one point on land",
-      line: "Ships can't jump across the sea and back in minutes. Their positions were faked.",
-    },
+    scenes: [
+      {
+        route: "watch",
+        alert: "strongest",
+        headline: "Our own receivers caught a ship switching off",
+        line: "Here is where it could have gone, and the {met} ships it could have met.",
+        fallback: {
+          line: "Here is where it could have gone, and the ships it could have met.",
+        },
+      },
+    ],
   },
   {
     id: "patrol",
-    route: "patrol",
-    headline: "AI is a sensor, not a judge",
-    line: "Kill the detector: the safety core stays up and recovers in {recovery}.",
-    fallback: {
-      line: "Kill the detector: the safety core stays up and keeps checking.",
-    },
+    scenes: [
+      {
+        route: "patrol",
+        dock: "left",
+        headline: "AI is a sensor, not a judge",
+        line: "Kill the detector: the safety core stays up and recovers in {recovery}.",
+        fallback: {
+          line: "Kill the detector: the safety core stays up and keeps checking.",
+        },
+      },
+    ],
   },
   {
     id: "close",
-    route: "evidence",
-    headline: "We tested ourselves",
-    line: "Radar near a dark ship was {null_ratio}x chance, so we never accuse on radar alone.",
-    fallback: {
-      line: "Radar near a dark ship was no better than chance, so we never accuse on radar alone.",
-    },
+    scenes: [
+      {
+        route: "watch",
+        headline: "Built for compliance teams and coast guards",
+        line: "Physics says what's possible, lists say who matters, and the edge unit catches ships that switch off.",
+      },
+    ],
   },
 ];
