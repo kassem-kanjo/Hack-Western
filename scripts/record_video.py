@@ -1,3 +1,4 @@
+# ruff: noqa: E501, E741, B905, F841  (one-off media capture script: embedded page JS/CSS, short loop names)
 """Capture the Dark Fleet demo v4: speech-timed captions, real clicks, numbers read off the screen.
 
 Captures only. Each caption is one phrase of docs/script-v4 (scratchpad copy). Its duration is the
@@ -31,7 +32,9 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 BASE = "http://127.0.0.1:8000/"
-WORK_DIR = Path("/private/tmp/claude-501/-Users-kassemkanjo--claude-spares-spare-uNpjIM/26a3a645-635a-422b-9ec0-3c65ba87508a/scratchpad/clips")
+WORK_DIR = Path(
+    "/private/tmp/claude-501/-Users-kassemkanjo--claude-spares-spare-uNpjIM/26a3a645-635a-422b-9ec0-3c65ba87508a/scratchpad/clips"
+)
 SAY_DIR = WORK_DIR / "say"
 REPO_CLIPS = Path(__file__).resolve().parents[1] / "media" / "video" / "public" / "clips"
 FFMPEG = "/Users/kassemkanjo/.cache/uv/archive-v0/RHoFjrEd9eng0E6Z/lib/python3.13/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v9.0"
@@ -134,6 +137,7 @@ def log(msg: str) -> None:
 
 # ---- speech -------------------------------------------------------------------------------
 
+
 def synth(text: str) -> tuple[Path, float]:
     """Synthesize one phrase with macOS say and return (file, measured duration in seconds)."""
     SAY_DIR.mkdir(parents=True, exist_ok=True)
@@ -150,6 +154,7 @@ def synth(text: str) -> tuple[Path, float]:
 
 
 # ---- the page -----------------------------------------------------------------------------
+
 
 class Clip:
     """One page session. Each method is one step a viewer can follow."""
@@ -253,8 +258,7 @@ def run_speech(c: Clip, items: list[dict]) -> tuple[float, list[dict]]:
         aiff, dur = synth(text)
         # Human pauses vary: each gap is its design value with a random 0.8-1.25 factor.
         gap = round(it["gap"] * random.uniform(0.8, 1.25), 2)
-        entry = {"text": text, "start": round(c.now(), 2), "dur": dur, "gap_after": gap,
-                 "audio": str(aiff)}
+        entry = {"text": text, "start": round(c.now(), 2), "dur": dur, "gap_after": gap, "audio": str(aiff)}
         if it.get("group"):
             entry["group"] = it["group"]
         lines.append(entry)
@@ -300,10 +304,18 @@ def record(p, key: str, url_hash: str, ready: str, items: list[dict], tail: floa
     dest = WORK_DIR / f"{key}.webm"
     shutil.move(str(video_path), dest)
     log(f"{key}: ready {ready_s:.2f}s, dur {dur:.1f}s, {len(lines)} phrases, {len(clip.focus)} zooms")
-    return {"key": key, "file": str(dest), "ready_s": ready_s, "dur": dur, "focus": clip.focus, "lines": lines}
+    return {
+        "key": key,
+        "file": str(dest),
+        "ready_s": ready_s,
+        "dur": dur,
+        "focus": clip.focus,
+        "lines": lines,
+    }
 
 
 # ---- numbers read off the screen (never typed in) ---------------------------------------
+
 
 def read_numbers(c: Clip, want: str) -> str:
     """Return a value from the live screen for a script bracket; raise if it is not there."""
@@ -315,8 +327,11 @@ def read_numbers(c: Clip, want: str) -> str:
         return m.group(1)
     if want == "reach":
         note = c.text_of("() => (document.querySelector('.watch-reach-note') || {}).textContent || ''")
-        m = re.search(r"(\d[\d,]*) ships were inside the circle; their own tracks rule out (\d[\d,]*)\. "
-                      r"Only (\d[\d,]*) could have been", note)
+        m = re.search(
+            r"(\d[\d,]*) ships were inside the circle; their own tracks rule out (\d[\d,]*)\. "
+            r"Only (\d[\d,]*) could have been",
+            note,
+        )
         if not m:
             raise RuntimeError("reach note not on screen")
         return "|".join(g.replace(",", "") for g in m.groups())
@@ -348,8 +363,10 @@ def read_numbers(c: Clip, want: str) -> str:
 
 # ---- the script ---------------------------------------------------------------------------
 
+
 def row_click(name: str, settle: float, after_zoom: tuple[str, float] | None = None):
     """Zoom out first, then the cursor moves, clicks the row, waits for the UI, then zooms in."""
+
     def act(c: Clip) -> None:
         c.zoom_out()
         c.wait(1.0)
@@ -357,6 +374,7 @@ def row_click(name: str, settle: float, after_zoom: tuple[str, float] | None = N
         c.wait(settle)
         if after_zoom:
             c.zoom_in(after_zoom[0], after_zoom[1])
+
     return act
 
 
@@ -371,7 +389,8 @@ def unzoom():
 def watch_items() -> list[dict]:
     r = {}  # numbers, read once the page shows them (the lambdas below read them in order)
 
-    def rate(c): return read_numbers(c, "rate")
+    def rate(c):
+        return read_numbers(c, "rate")
 
     def reach_lookup(c):
         r["reach"] = read_numbers(c, "reach")
@@ -390,15 +409,18 @@ def watch_items() -> list[dict]:
             reach_lookup(c)
         return f"{int(r['reach'].split('|')[2])} could have been in the same place, at the same time."
 
-    def start_text(c): return f"This one, GIVING, went quiet at {read_numbers(c, 'start')} UTC."
+    def start_text(c):
+        return f"This one, GIVING, went quiet at {read_numbers(c, 'start')} UTC."
 
     def imo_text(c):
         read_numbers(c, "imo")  # the sanctions line with the IMO must be on screen when this is said
         return "We match on the IMO number, because a name is easy to change."
 
-    def sat_text(c): return f"This pass was {read_numbers(c, 'sat')} hours before the switch-off, and the app says so."
+    def sat_text(c):
+        return f"This pass was {read_numbers(c, 'sat')} hours before the switch-off, and the app says so."
 
-    def rate_text(c): return f"About {rate(c)} position reports a minute, streaming into a Tiger Data hypertable."
+    def rate_text(c):
+        return f"About {rate(c)} position reports a minute, streaming into a Tiger Data hypertable."
 
     def open_listed(c):
         c.zoom_out()
@@ -423,31 +445,64 @@ def watch_items() -> list[dict]:
         {"group": "1 · Live", "text": "This is Dark Fleet, running live.", "gap": SENT, "action": None},
         {"text": "Every dot is a ship we're hearing in the Baltic right now.", "gap": SENT, "action": None},
         {"text": rate_text, "gap": BEAT, "action": zoom("text:Live ·", 1.4)},
-        {"group": "2 · A ship goes dark",
-         "text": "On the left: ships that just switched off their transponders, the radio that says where they are.",
-         "gap": SENT, "action": row_click(MAIN_SHIP, 2.0)},
+        {
+            "group": "2 · A ship goes dark",
+            "text": "On the left: ships that just switched off their transponders, the radio that says where they are.",
+            "gap": SENT,
+            "action": row_click(MAIN_SHIP, 2.0),
+        },
         {"text": start_text, "gap": BEAT, "action": zoom(".maplibregl-canvas", 1.6)},
-        {"group": "3 · The circle is physics", "text": "The circle isn't a guess.", "gap": SENT, "action": unzoom()},
-        {"text": "It's the top speed for its class, times the time it's been silent.", "gap": SENT, "action": None},
-        {"text": "And we only count it if our receivers were hearing that area at the time.", "gap": SENT, "action": None},
+        {
+            "group": "3 · The circle is physics",
+            "text": "The circle isn't a guess.",
+            "gap": SENT,
+            "action": unzoom(),
+        },
+        {
+            "text": "It's the top speed for its class, times the time it's been silent.",
+            "gap": SENT,
+            "action": None,
+        },
+        {
+            "text": "And we only count it if our receivers were hearing that area at the time.",
+            "gap": SENT,
+            "action": None,
+        },
         {"text": "Otherwise it's a coverage gap, not a ship hiding.", "gap": BEAT, "action": None},
-        {"group": "4 · Who it could have met", "text": "Then we check every other ship's own track.", "gap": SENT,
-         "action": zoom(".watch-reach-note", 1.5)},
+        {
+            "group": "4 · Who it could have met",
+            "text": "Then we check every other ship's own track.",
+            "gap": SENT,
+            "action": zoom(".watch-reach-note", 1.5),
+        },
         {"text": inside_text, "gap": SENT, "action": None},
         {"text": could_text, "gap": BEAT, "action": None},
-        {"group": "5 · The match", "text": "One of them is STILGAR. It's on a sanctions list.", "gap": SENT,
-         "action": open_listed},
+        {
+            "group": "5 · The match",
+            "text": "One of them is STILGAR. It's on a sanctions list.",
+            "gap": SENT,
+            "action": open_listed,
+        },
         {"text": imo_text, "gap": REVEAL, "action": None},
         {"text": "Two ships, out of sight, side by side.", "gap": SAME, "action": back_to_ship},
         {"text": "That's how sanctioned oil changes hands.", "gap": SENT, "action": None},
         {"text": "We can't prove they met. We show where to look.", "gap": BEAT, "action": None},
         {"group": "6 · From space", "text": "So we look from space.", "gap": SENT, "action": open_satellite},
-        {"text": "We pull the latest Sentinel-1 radar pass and run our own ship detector on it.", "gap": SENT,
-         "action": None},
-        {"text": "It flags anything brighter than the sea around it, then matches each blip to a broadcast.", "gap": SENT,
-         "action": None},
-        {"text": "Red means radar sees a ship that isn't broadcasting.", "gap": SENT,
-         "action": zoom(".satcheck-chips", 1.6)},
+        {
+            "text": "We pull the latest Sentinel-1 radar pass and run our own ship detector on it.",
+            "gap": SENT,
+            "action": None,
+        },
+        {
+            "text": "It flags anything brighter than the sea around it, then matches each blip to a broadcast.",
+            "gap": SENT,
+            "action": None,
+        },
+        {
+            "text": "Red means radar sees a ship that isn't broadcasting.",
+            "gap": SENT,
+            "action": zoom(".satcheck-chips", 1.6),
+        },
         {"text": sat_text, "gap": BEAT, "action": None},
     ]
 
@@ -487,17 +542,28 @@ def patrol_items() -> list[dict]:
         c.zoom_in(".patrol-overload-line", 1.6)
 
     return [
-        {"group": "7 · On the water", "text": "And on the water: a Raspberry Pi running QNX, with a camera.",
-         "gap": SAME, "action": open_patrol},
+        {
+            "group": "7 · On the water",
+            "text": "And on the water: a Raspberry Pi running QNX, with a camera.",
+            "gap": SAME,
+            "action": open_patrol,
+        },
         {"text": "It's on our table.", "gap": SENT, "action": None},
         {"text": "It sees a vessel, nothing nearby is broadcasting.", "gap": SAME, "action": open_recorded},
         {"text": "It's inside a 200 ms deadline.", "gap": SENT, "action": None},
-        {"text": "The safety loop runs at QNX's top fixed priority. The AI runs below it, untrusted.", "gap": BEAT,
-         "action": unzoom()},
+        {
+            "text": "The safety loop runs at QNX's top fixed priority. The AI runs below it, untrusted.",
+            "gap": BEAT,
+            "action": unzoom(),
+        },
         {"text": overload_text, "gap": SAME, "action": overload_zoom},
         {"text": before_text, "gap": BEAT, "action": None},
-        {"group": "8 · Close", "text": "Live tracking, physics, satellite radar and a real-time lookout, built in 36 hours at Hack Western 13.",
-         "gap": SENT, "action": unzoom()},
+        {
+            "group": "8 · Close",
+            "text": "Live tracking, physics, satellite radar and a real-time lookout, built in 36 hours at Hack Western 13.",
+            "gap": SENT,
+            "action": unzoom(),
+        },
         {"text": "That's Dark Fleet.", "gap": REVEAL, "action": None},
     ]
 
@@ -528,10 +594,13 @@ def pick_main_id() -> str:
     return next(a["id"] for a in alerts if a.get("name") == MAIN_SHIP and a.get("kind") == "dark")
 
 
-
 # ---- v5: the same actions, timed to the voice track -------------------------------------
 
-VOICE = json.loads(Path("/private/tmp/claude-501/-Users-kassemkanjo--claude-spares-spare-uNpjIM/26a3a645-635a-422b-9ec0-3c65ba87508a/scratchpad/vo/work/voice_lines.json").read_text())
+VOICE = json.loads(
+    Path(
+        "/private/tmp/claude-501/-Users-kassemkanjo--claude-spares-spare-uNpjIM/26a3a645-635a-422b-9ec0-3c65ba87508a/scratchpad/vo/work/voice_lines.json"
+    ).read_text()
+)
 WATCH_BASE = 2.6  # the watch clip starts when the voice does (title card is 0-2.6 s)
 
 
@@ -552,13 +621,19 @@ def run_slots(c: Clip, items: list[dict], starts: list[float], base: float, end:
     return out
 
 
-def record_slots(p, key: str, url_hash: str, ready: str, items: list[dict], starts: list[float], base: float, end: float) -> dict:
+def record_slots(
+    p, key: str, url_hash: str, ready: str, items: list[dict], starts: list[float], base: float, end: float
+) -> dict:
     raw_dir = WORK_DIR / key
     shutil.rmtree(raw_dir, ignore_errors=True)
     raw_dir.mkdir(parents=True, exist_ok=True)
     browser = p.chromium.launch(channel="chrome")
-    ctx = browser.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=1,
-                              record_video_dir=str(raw_dir), record_video_size={"width": 1920, "height": 1080})
+    ctx = browser.new_context(
+        viewport={"width": 1920, "height": 1080},
+        device_scale_factor=1,
+        record_video_dir=str(raw_dir),
+        record_video_size={"width": 1920, "height": 1080},
+    )
     ctx.add_init_script(INIT_JS)
     t_page = time.time()
     page = ctx.new_page()
@@ -577,7 +652,14 @@ def record_slots(p, key: str, url_hash: str, ready: str, items: list[dict], star
     dest = WORK_DIR / f"{key}-v5.webm"
     shutil.move(str(video_path), dest)
     log(f"{key}: ready {ready_s:.2f}s, dur {dur:.2f}s, {len(lines)} phrases, {len(clip.focus)} zooms")
-    return {"key": key, "file": str(dest), "ready_s": ready_s, "dur": dur, "focus": clip.focus, "lines": lines}
+    return {
+        "key": key,
+        "file": str(dest),
+        "ready_s": ready_s,
+        "dur": dur,
+        "focus": clip.focus,
+        "lines": lines,
+    }
 
 
 def main_v5() -> int:
@@ -587,15 +669,32 @@ def main_v5() -> int:
     starts = [l["start"] for l in vl]
     total = VOICE["total"]
     split = next(i for i, l in enumerate(vl) if l["old_cap_start"] >= 111.56)  # first patrol line
-    script = json.loads(Path(WORK_DIR / "v5-items.json").read_text()) if (WORK_DIR / "v5-items.json").exists() else None
+    script = (
+        json.loads(Path(WORK_DIR / "v5-items.json").read_text())
+        if (WORK_DIR / "v5-items.json").exists()
+        else None
+    )
     watch_its = watch_items()
     patrol_its = patrol_items()
-    assert len(watch_its) == split and len(patrol_its) == len(vl) - split, (len(watch_its), split, len(patrol_its))
+    assert len(watch_its) == split and len(patrol_its) == len(vl) - split, (
+        len(watch_its),
+        split,
+        len(patrol_its),
+    )
     with sync_playwright() as p:
-        w = record_slots(p, "watch", "#/watch/alert/" + pick_main_id(), ".maplibregl-canvas", watch_its,
-                         starts[:split], WATCH_BASE, starts[split])
-        q = record_slots(p, "patrol", "#/watch", ".maplibregl-canvas", patrol_its,
-                         starts[split:], starts[split], total)
+        w = record_slots(
+            p,
+            "watch",
+            "#/watch/alert/" + pick_main_id(),
+            ".maplibregl-canvas",
+            watch_its,
+            starts[:split],
+            WATCH_BASE,
+            starts[split],
+        )
+        q = record_slots(
+            p, "patrol", "#/watch", ".maplibregl-canvas", patrol_its, starts[split:], starts[split], total
+        )
     base_of = {"watch": WATCH_BASE, "patrol": starts[split]}
     timeline = {"title_s": 2.6, "end_s": 4.0, "voice_total": total, "clips": []}
     for m, key in ((w, "watch"), (q, "patrol")):
@@ -607,8 +706,15 @@ def main_v5() -> int:
             if l.get("group"):
                 entry["group"] = l["group"]
             lines_out.append(entry)
-        timeline["clips"].append({"key": key, "ready_s": m["ready_s"], "dur": round((total if key == "patrol" else starts[split]) - b, 2),
-                                  "focus": m["focus"], "lines": lines_out})
+        timeline["clips"].append(
+            {
+                "key": key,
+                "ready_s": m["ready_s"],
+                "dur": round((total if key == "patrol" else starts[split]) - b, 2),
+                "focus": m["focus"],
+                "lines": lines_out,
+            }
+        )
     (REPO_CLIPS / "timeline-v5.json").write_text(json.dumps(timeline, indent=2))
     log("timeline-v5 written")
     return 0
