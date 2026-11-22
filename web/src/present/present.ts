@@ -155,7 +155,8 @@ function tokensFromStories(stories: HormuzStories): TokenValues {
 
 /**
  * The alert the live beat focuses: a ship that switched off its transponder, because the
- * caption says so. Ongoing first, then the most ships it could have met, then the newest.
+ * caption says so. Most ships it could have met first (the stronger story), then ongoing,
+ * then the newest.
  * Null when the data has no switch-off; the beat is then skipped rather than shown over a
  * different kind of event.
  */
@@ -165,8 +166,8 @@ function strongestAlert(alerts: readonly WatchAlert[]): WatchAlert | null {
     .filter((alert) => alert.kind === "dark")
     .sort(
       (a, b) =>
-        Number(b.status === "ongoing") - Number(a.status === "ongoing") ||
         met(b) - met(a) ||
+        Number(b.status === "ongoing") - Number(a.status === "ongoing") ||
         Date.parse(b.t_start) - Date.parse(a.t_start),
     );
   return dark[0] ?? null;
