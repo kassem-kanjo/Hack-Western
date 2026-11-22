@@ -190,3 +190,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** corrected in cards and docs before merge; Chief reads every image before sending.
 - **Code share since audit 26:** builders/lanes ~85%; Chief: cherry-pick integration, fact-checking docs, device checks.
 - **Change for next 30 min:** a spike's numbers are hypotheses until the product pipeline reproduces them; say "about" and "to be confirmed" to Kassem until then.
+
+## Sat 21 Nov, 19:21 ET (audit 28, covers 18:53-19:21)
+- **Went well:** judge-eye QA found 10 issues with zero console errors; three lanes fixed them in ~45 min (#230 Patrol/Evidence copy, #232 Present follows demo v3 + Hormuz cards, #233 Watch). Evidence left the menu (#231). Feature freeze declared: only the three demo screens until submission. Receiver rate now comes from Tiger (444 on screen vs ~448 in the aggregate) instead of counting a capped stream (0 to 1,999 swings).
+- **Went wrong:** Kassem found the Evidence page confusing and our UI jargon ("listed ships") before any check did; I had decided to drop Evidence an hour earlier but left it in the menu. A merge script raced CI (no run registered yet) and silently skipped a merge.
+- **Fixes:** docs/copy-rules.md (plain-word table); merge scripts wait until the CI run exists; second QA pass + CP3 Opus review running in parallel.
+- **Code share since audit 27:** builders/lanes ~85%; Chief: rate fix, zoom fix, Evidence menu, integration.
+- **Change for next 30 min:** when a decision removes something from the story, remove it from the screen in the same turn; write UI copy for someone who has never seen the project.

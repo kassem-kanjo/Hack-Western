@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 18:26 ET · next: Hormuz story cards (#219), QNX lookout + evidence (#220), demo v3 script, then QA pass + CP3 review · Vultr parked by Kassem
+Updated: Sat 21 Nov, 19:21 ET · FEATURE FREEZE: Hormuz, Watch, Patrol unit only · next: QA pass 2 + CP3 review (running), Kassem reviews V3 ~20:30, then video, Devpost, rehearsal · Vultr parked
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.
@@ -22,6 +22,7 @@ Vultr sign-up (deploy + recorder off the laptop) · MLH codes (Entire, GoDaddy) 
 optional: free Copernicus account (own radar ship detection, #90).
 
 ## Done (merged)
+Sat 21 Nov, 19:21 ET: QNX v2 (#223: alarms on time 10/27 no guard vs 63/64 with guard on the Pi), evidence log on qnx6 (#224), Hormuz story cards (#225), demo v3 + Devpost (#226), Patrol sightings on Watch (#228), QA pass 1 fixes (#230, #232, #233), Evidence off the menu (#231). Copy rules in docs/copy-rules.md. Known, not fixed (freeze): live map stream caps 200 items/tick and sends no Malaysia/Black Sea positions.
 Sat 21 Nov, 18:26 ET: V3 merged in slices (#210 Watch, #211 Hormuz demo view, #212 4-week line + legend, #213 opens on the strongest story). Tiger is the live store (#216 sink + ais_minutely, #218 real-time + 10-min rate; 450k+ pings, Baltic ~390 msgs/min). Sentinel (#209) watches every data path every 5 min; health retries flaky tests (#214). Kassem approved: Hormuz story cards (#219: SEA 1 dark 13.1 h in the Gulf of Oman; 20-ship outage cluster) and Patrol 1-4 (#220: lookout deadline, BLIND fail-safe, sightings to Watch, power-safe evidence log).
 Sat 21 Nov, 17:40 ET: merged #199 (dossier, search, replay, area stats; per-file recording cache), #201 (own Sentinel-1 ship detection: 35 ships on the 21 Nov 02:06 UTC pass, 0 matched because our Hormuz recording started 6 h later), #202 (deploy kit), #204 (Hormuz trend API: 31.6% -> 66.0%, +14.5 pts beyond control), #205 (Patrol demo on the Pi: recovery 0.15 s, safety loop p99 1.5 ms under stress). Kassem approved the redesign mockups ('think of bloating'); builder running on #200 incl. trend panel + tour gate. Vultr: $100 credit applied; deploy blocked until Kassem links a payment method. Laptop died ~16:43: ~36 min recorder gap.
 Sat 21 Nov, 16:23 ET: Watch V3 (#192), IMO-only sanctions (#189), Evidence screen + blank case fix (#195), toasts + Present tour + validation tooling (#193), Hormuz validation (#194: Hormuz 32% → 66% dark, +14.5 pts beyond Gulf of Oman control, CI +2 to +26; ceasefire drop; insight #16). Running: designer (Opus) mockups, Pi builder, satellite builder, integration of dossier/search/replay/areas into V3. Next: Hormuz screen shows the validated 2-year trend; tour uses the regime result; QA pass; CP3 review.
