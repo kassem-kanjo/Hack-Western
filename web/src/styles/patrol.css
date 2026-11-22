@@ -64,7 +64,7 @@
   display: none;
 }
 
-/* Frame 1234 · 21 Nov 20:41:07Z · qnxcam:5 · AI 172 ms */
+/* Frame 1234 · 21 Nov 20:41:07Z · AI 172 ms */
 .patrol-caption {
   min-width: 0;
   padding: 7px 12px;
@@ -351,34 +351,14 @@
   color: var(--c-text-1);
 }
 
-.patrol-fields {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
+/* Two plain lines: the safety core's priority and lateness, then the restart count. */
+.patrol-reliability {
   margin: var(--sp-2) 0 0;
-  padding: 0;
-  border-bottom: 1px solid var(--c-line);
 }
 
-.patrol-fields dt,
-.patrol-fields dd {
-  min-width: 0;
+.patrol-rel-line {
   margin: 0;
-  padding: 6px 0;
-  border-top: 1px solid var(--c-line);
-}
-
-.patrol-fields dt:nth-of-type(1),
-.patrol-fields dd:nth-of-type(1) {
-  border-top: 0;
-}
-
-.patrol-fields dt {
-  padding-right: 8px;
-  font-size: 12px;
-  color: var(--c-text-3);
-}
-
-.patrol-fields dd {
+  padding: 4px 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.4;
