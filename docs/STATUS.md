@@ -2,6 +2,13 @@
 
 Updated: Sat 21 Nov, 23:00 ET · HANDOVER for a new chat: read 'Handover' below first · V3 passed the 5-second test; Kassem reviewing · launch work paused until his 'happy' (except video + voice-over, which he asked for)
 
+## Update (Sun 22 Nov, 00:10 ET) — latest
+- **Merged tonight:** #271 Hormuz re-measure (32% -> 68%, +15.8 pts), #277 Satellite check, #280 Patrol cut to essentials, #281/#283 Watch sanctions lines + legend, #285 "Follow one ship" story (case LAVENDER), #276 write-up/table script/voice-over.
+- **Live:** :8000 runs main except /api/story (needs a restart after the video capture; then the story is live). Pi redeployed with BLIND 0.8 s; ship-photo test passed.
+- **Devpost:** filled and saved as DRAFT (story, tags, GitHub, QNX + Tiger tracks, Western University, hacker ID keen-ibis-arrow). Kassem must tick terms + Submit before 9:00 (auto-mode blocked agreeing for the team). Reminders at 7:13 and 8:11.
+- **Video:** Remotion, 82 s, captions = voice-over lines for friends to read; final render running; files on the Desktop. Stills in media/stills/. Source still in the builder worktree (scripts/record_video.py, media/video/): commit after the render.
+- **OpenCode is off for the night** (Kassem): Claude Sonnet/Opus builders only.
+
 ## Update (Sun 22 Nov, 00:15 ET) — read before the handover below
 - **Judging is 12:00-1:00 PM** (not 10:00): 3 general judges x (3 min demo + 1 min Q), no slides; sponsor tracks judged separately. Devpost locks 9:00 AM. Full list: docs/submission.md.
 - **#266 landed** (#271): Hormuz 31.9% -> 67.5%, +15.8 pts vs Gulf of Oman (CI 3.4-27.0). Live server restarted on it.
