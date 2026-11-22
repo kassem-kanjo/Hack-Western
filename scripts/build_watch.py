@@ -311,6 +311,19 @@ def _load_regions(ais_dir: Path, hours: int | None) -> list[_Region]:
     return regions
 
 
+def _last_complete_minute(now: datetime) -> datetime:
+    """The minute before the recording's newest one, the last minute the recorder finished.
+
+    Why: ``now`` is the newest ping's minute, and that minute is still filling while the build
+    reads it. ``kinematics.covered`` needs 150 messages in every minute of a gap, so a half-filled
+    newest minute (66 messages against about 460 for a full minute) failed every open gap and
+    dropped every ongoing dark alert. The build then flipped between 17 and 10 alerts depending
+    on when in the minute it ran (issue #249). Judging coverage only to the last full minute
+    makes the result a function of the recording, not of the build's wall-clock phase.
+    """
+    return now - timedelta(minutes=1)
+
+
 def _scan(region: _Region, now: datetime, land: Any, watch_rows: list[dict[str, Any]]) -> _Scan:
     """Run build_live's detectors over one region and tag each finding with its alert shape.
 
@@ -327,7 +340,8 @@ def _scan(region: _Region, now: datetime, land: Any, watch_rows: list[dict[str, 
     activity = kinematics.build_activity_index(tracks)
 
     candidates: list[tuple[Event, str, str]] = [
-        (event, "dark", "ongoing") for event in open_silences(tracks, rows, now, activity=activity)
+        (event, "dark", "ongoing")
+        for event in open_silences(tracks, rows, _last_complete_minute(now), activity=activity)
     ]
     candidates.extend((event, "dark", "ended") for event in _run_silences(tracks, rows))
 
@@ -431,7 +445,8 @@ def _write_watch_json(path: Path, payload: dict[str, Any]) -> None:
     thousands of trail and cell coordinates, and the compact rows keep the file light.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    # A temp name per process: two writers must never share one half-written file (issue #249).
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(_dumps(payload) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 
@@ -1279,7 +1294,11 @@ def build(
     for mmsi in alert_ids:
         alert_ids[mmsi].sort()
 
-    hidden += sum(_routine_quiet(scan.tracks, scan.rows, now, alerted) for scan in scans if scan.tracks)
+    hidden += sum(
+        _routine_quiet(scan.tracks, scan.rows, _last_complete_minute(now), alerted)
+        for scan in scans
+        if scan.tracks
+    )
 
     ships = _ships(all_tracks, vessels, categories, alert_ids, now)
     payload = {
