@@ -250,3 +250,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** research first (Screen Studio look), clean 1920x1080 capture + Remotion composition with spring zooms, rounded window, title cards; old file moved off the Desktop; freeze rule needs could-meet >= 1; shadow-fleet label; OpenCode dropped for the night (Kassem's call).
 - **Code share since audit 35:** builders ~80%; Chief: Watch text fixes, conflict resolution, landings.
 - **Change for next 30 min:** check a frame from every deliverable before Kassem can see it; restart :8000 for /api/story only after the video capture ends.
+
+## Sun 22 Nov, 00:20 ET (audit 37, covers 23:50-00:20)
+- **Went well:** Remotion demo v1 delivered (1:21, framed window, script as captions) after frame-by-frame QA caught a cropped headline and an odd "(Cortex)" caption; stills merged (#287); recorder and CI green.
+- **Went wrong:** the launch-media skill already described the right method (Remotion on real footage, the recordVideo size bug, zooms toward clicks), but the first brief was written from memory and Kassem saw the broken take. His v1 notes: cut Hormuz, sell the stakes, zooms without a reason.
+- **Fixes:** v2 script written by Chief (stakes + honest limit, every claim checked; satellite line says where the pass was); motivated-zoom pattern; skill updated (read before briefing, stakes, motivated zoom, captions-as-script) and pushed.
+- **Code share since audit 36:** builders ~85%; Chief: script, QA, skill edits.
+- **Change for next 30 min:** open the relevant skill before every brief, not just "Loadout" in the text.
