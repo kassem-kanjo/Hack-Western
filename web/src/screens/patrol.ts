@@ -97,7 +97,7 @@ function finiteOrNull(value: number | null | undefined): number | null {
 /** Recovery is quoted in seconds once it is over a second ("2.8 s"). */
 function fmtRecovery(value: number | null | undefined): string {
   const ms = finiteOrNull(value);
-  if (ms === null) return "\u2014";
+  if (ms === null) return "none yet";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
@@ -108,7 +108,7 @@ function fmtRadius(km: number): string {
 
 /** "SCHED_FIFO 30" on QNX, "SCHED_OTHER 8" (or its nice value) elsewhere. */
 function schedValue(sched: EdgeSchedule | null | undefined): string {
-  if (!sched) return "\u2014";
+  if (!sched) return "not reported";
   const policy = (sched.policy ?? "").trim().toUpperCase();
   const priority = finiteOrNull(sched.priority);
   const nice = finiteOrNull(sched.nice);
@@ -117,7 +117,7 @@ function schedValue(sched: EdgeSchedule | null | undefined): string {
     if (nice !== null) return `${policy} nice ${nice >= 0 ? "+" : ""}${Math.round(nice)}`;
     return policy;
   }
-  return priority !== null ? String(Math.round(priority)) : "\u2014";
+  return priority !== null ? String(Math.round(priority)) : "not reported";
 }
 
 /** Sub-millisecond lateness is the point: 0.3 ms must not round to "0 ms". */
@@ -127,10 +127,11 @@ function fmtMs(value: number): string {
 
 /** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute. */
 function loopValue(tick: EdgeStatus["safety_tick"]): string {
-  if (!tick) return "\u2014";
+  if (!tick) return "not reported";
   const parts: string[] = [];
   const hz = finiteOrNull(tick.hz);
-  parts.push(`${hz === null ? "\u2014" : fmtRate(hz)} Hz`);
+  if (hz === null) parts.push("not reported");
+  else parts.push(`${fmtRate(hz)} Hz`);
   const p50 = finiteOrNull(tick.p50_late_ms);
   if (p50 !== null) parts.push(`median late ${fmtMs(p50)} ms`);
   const p99 = finiteOrNull(tick.p99_late_ms);
@@ -140,7 +141,7 @@ function loopValue(tick: EdgeStatus["safety_tick"]): string {
   const late = finiteOrNull(tick.late_count_60s);
   const ticks = finiteOrNull(tick.ticks_60s);
   const of = ticks === null ? "" : ` of ${fmtInt(ticks)}`;
-  parts.push(`${late === null ? "\u2014" : fmtInt(late)}${of} ticks >5 ms late (60 s)`);
+  parts.push(`${late === null ? "not reported" : fmtInt(late)}${of} ticks >5 ms late (60 s)`);
   return parts.join(" \u00b7 ");
 }
 
@@ -170,6 +171,16 @@ function aiText(ai: EdgeAi | null | undefined): string {
 
 type BannerLevel = EdgeVerdictLevel | "blind";
 
+/**
+ * The unit's own wording, translated to the screen's copy rules. AIS is an
+ * acronym for small print; the headline says what the ship is doing instead.
+ */
+function plainText(raw: string): string {
+  return raw
+    .replace(/VESSEL NOT ON AIS/gi, "Vessel not broadcasting its position")
+    .replace(/Matches AIS/gi, "Matches a ship broadcasting");
+}
+
 function verdictLevel(value: unknown): EdgeVerdictLevel {
   return value === "alert" || value === "ok" ? value : "idle";
 }
@@ -194,29 +205,32 @@ function banner(
     else if (alarm.trend === "steady") parts.push("steady");
     if (typeof alarm.ttc_s === "number") parts.push(`~${Math.round(alarm.ttc_s)} s at this rate`);
     if (typeof alarm.range_m === "number") parts.push(`range ~${fmtInt(alarm.range_m)} m (estimate)`);
-    const text = (alarm.text ?? "Vessel not on AIS \u2014 alert bridge").replace(/ \u00b7 closing$/, "");
+    const text = plainText(alarm.text ?? "Vessel not broadcasting its position \u2014 alert bridge").replace(
+      / \u00b7 closing$/,
+      "",
+    );
     return { level: "alert", text, sub: parts.join(" \u00b7 ") };
   }
   const matched = typeof decision.verdict?.text === "string" && decision.verdict.text.startsWith("Matches AIS");
   return {
     level: matched ? "ok" : "idle",
     text: "Watching",
-    sub: matched ? decision.verdict.text : "",
+    sub: matched ? plainText(decision.verdict.text) : "",
   };
 }
 
-/** The safety core step: what AIS knew when the verdict was made. */
+/** The safety core step: what the transponders said when the verdict was made. */
 function aisLine(decision: EdgeDecision | null): string {
   if (decision === null) return "waiting for a decision";
   const text = typeof decision.verdict?.text === "string" ? decision.verdict.text.trim() : "";
-  if (text.startsWith("Matches AIS")) return text;
+  if (text.startsWith("Matches AIS")) return plainText(text);
 
   const nearby = Array.isArray(decision.ais?.nearby) ? decision.ais.nearby : [];
   const noun = nearby.length === 1 ? "ship" : "ships";
   const radius = finiteOrNull(decision.ais?.radius_km);
   const tail = decision.ai?.down === true ? " \u00b7 still checking" : "";
-  if (radius === null) return `${fmtInt(nearby.length)} AIS ${noun} nearby${tail}`;
-  return `${fmtInt(nearby.length)} AIS ${noun} within ${fmtRadius(radius)} km${tail}`;
+  if (radius === null) return `${fmtInt(nearby.length)} ${noun} broadcasting nearby${tail}`;
+  return `${fmtInt(nearby.length)} ${noun} broadcasting within ${fmtRadius(radius)} km${tail}`;
 }
 
 function verdictText(decision: EdgeDecision | null): string {
@@ -360,7 +374,7 @@ export function renderPatrol(app: HTMLElement): void {
   // ---- right rail: the chain, the verdict, the numbers, the actions ----
 
   function step(name: string, note?: string): Step {
-    const value = h("span", { class: "patrol-step-value" }, "\u2014");
+    const value = h("span", { class: "patrol-step-value" }, "None yet");
     const row = h(
       "li",
       { class: "patrol-step is-idle" },
@@ -404,7 +418,7 @@ export function renderPatrol(app: HTMLElement): void {
   const verdictSub = h("p", { class: "patrol-alarm-sub", hidden: true });
 
   function metric(label: string): { box: HTMLElement; value: HTMLElement } {
-    const value = h("span", { class: "patrol-metric-value" }, "\u2014");
+    const value = h("span", { class: "patrol-metric-value is-empty" }, "No alarms yet");
     const box = h(
       "div",
       { class: "patrol-metric" },
@@ -432,11 +446,11 @@ export function renderPatrol(app: HTMLElement): void {
     ),
     abNote,
   );
-  const positionEl = h("p", { class: "patrol-position" }, "Patrol position: \u2014");
+  const positionEl = h("p", { class: "patrol-position" }, "Patrol position: none yet");
 
   function field(label: string): { dt: HTMLElement; dd: HTMLElement } {
     const dt = h("dt", null, label);
-    const dd = h("dd", null, "\u2014");
+    const dd = h("dd", null, "None yet");
     return { dt, dd };
   }
 
@@ -653,7 +667,7 @@ export function renderPatrol(app: HTMLElement): void {
       setStep(
         cameraStep,
         s.frame_available ? "ok" : "warn",
-        s.frame_available ? cameraParts.join(" \u00b7 ") || "\u2014" : "waiting for frames",
+        s.frame_available ? cameraParts.join(" \u00b7 ") || "no frames yet" : "waiting for frames",
       );
     }
 
@@ -703,18 +717,33 @@ export function renderPatrol(app: HTMLElement): void {
   /** The guarantee as three numbers: latency against the deadline, alarms on time, blind raised on time. */
   function paintMetrics(s: EdgeStatus): void {
     const a = s.alarm;
-    if (!a) {
-      latencyMetric.value.textContent = "\u2014";
-      onTimeMetric.value.textContent = "\u2014";
-      blindMetric.value.textContent = "\u2014";
+    // Before the first alarm the counters are all zero. "0/0" and a bare dash
+    // read as broken numbers; the screen says there is nothing to count yet.
+    if (!a || a.decisions === 0) {
+      latencyMetric.value.textContent = "No alarms yet";
+      onTimeMetric.value.textContent = "No alarms yet";
+      blindMetric.value.textContent = "No alarms yet";
+      for (const m of [latencyMetric, onTimeMetric, blindMetric]) {
+        m.value.classList.add("is-empty");
+        m.box.classList.remove("is-bad");
+      }
       return;
+    }
+    for (const m of [latencyMetric, onTimeMetric, blindMetric]) {
+      m.value.classList.remove("is-empty");
     }
     const p99 = finiteOrNull(a.p99_latency_ms);
     latencyMetric.value.textContent =
-      p99 === null ? `\u2014 / ${a.deadline_ms} ms` : `${Math.round(p99)} / ${a.deadline_ms} ms`;
+      p99 === null ? `none yet / ${a.deadline_ms} ms` : `${Math.round(p99)} / ${a.deadline_ms} ms`;
     latencyMetric.box.classList.toggle("is-bad", p99 !== null && p99 > a.deadline_ms);
     onTimeMetric.value.textContent = `${fmtInt(a.on_time)}/${fmtInt(a.decisions)}`;
     onTimeMetric.box.classList.toggle("is-bad", a.on_time < a.decisions);
+    if (a.blind_episodes === 0) {
+      blindMetric.value.textContent = "None yet";
+      blindMetric.value.classList.add("is-empty");
+      blindMetric.box.classList.remove("is-bad");
+      return;
+    }
     blindMetric.value.textContent = `${fmtInt(a.blind_on_time)}/${fmtInt(a.blind_episodes)}`;
     blindMetric.box.classList.toggle("is-bad", a.blind_on_time < a.blind_episodes);
   }
@@ -723,7 +752,7 @@ export function renderPatrol(app: HTMLElement): void {
     const worst = finiteOrNull(arm.worst_latency_ms);
     return [
       `${fmtInt(arm.on_time)}/${fmtInt(arm.alarm_frames)}`,
-      worst === null ? "\u2014" : `${Math.round(worst)} ms`,
+      worst === null ? "none yet" : `${Math.round(worst)} ms`,
       `${fmtMs(finiteOrNull(arm.worst_tick_late_ms) ?? 0)} ms`,
     ];
   }
@@ -759,7 +788,7 @@ export function renderPatrol(app: HTMLElement): void {
     const lon = finiteOrNull(d?.patrol?.lon);
     const coords = lat !== null && lon !== null ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : null;
     const body = [name, coords].filter((part): part is string => part !== null).join(" \u00b7 ");
-    positionEl.textContent = `Patrol position: ${body !== "" ? body : "\u2014"}`;
+    positionEl.textContent = `Patrol position: ${body !== "" ? body : "none yet"}`;
   }
 
   function paint(): void {

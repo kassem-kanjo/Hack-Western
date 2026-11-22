@@ -200,7 +200,7 @@
   color: var(--c-text-1);
 }
 
-/* The alarm banner leads the rail: big, one state at a time. Amber = blind, red = vessel not on AIS. */
+/* The alarm banner leads the rail: big, one state at a time. Amber = blind, red = vessel not broadcasting. */
 .patrol-verdict {
   margin-top: var(--sp-4);
   font-size: 22px;
@@ -248,6 +248,14 @@
   font-family: var(--font-mono);
   font-size: 15px;
   color: var(--c-text-1);
+}
+
+/* "No alarms yet" is a sentence, not a counter: keep it on the same baseline
+   at the body size so it does not wrap through the metric's three columns. */
+.patrol-metric-value.is-empty {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--c-text-2);
 }
 
 .patrol-metric.is-bad .patrol-metric-value {

@@ -1,5 +1,5 @@
 /**
- * Evidence screen: one question, "how do we know a dark ship is really suspicious?"
+ * Evidence screen: one question, "how do we know a ship that switched off its transponder is suspicious?"
  *
  * Left panel, top to bottom: the funnel (how 5,624 silences shrink to the ones we cannot
  * explain), how sure we are (validation numbers, read from /api/stats), then the case list.
@@ -18,6 +18,39 @@ import { funnelCounts } from "./overview";
 import "./evidence.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Country names from the two-letter codes the browser already knows. */
+const REGION_NAMES = new Intl.DisplayNames(["en"], { type: "region" });
+
+/**
+ * The snapshot's three-letter flag codes are ISO alpha-3, while Intl wants
+ * alpha-2. This is only the codes that appear in the data, not a full table.
+ */
+const ALPHA3_TO_ALPHA2: Record<string, string> = {
+  BRA: "BR",
+  CYP: "CY",
+  EST: "EE",
+  FIN: "FI",
+  IRN: "IR",
+  MHL: "MH",
+  OMN: "OM",
+  PAN: "PA",
+  SAU: "SA",
+  TWN: "TW",
+  TZA: "TZ",
+};
+
+/** "CYP" -> "Cyprus"; null when the value is not a country code we can name. */
+function countryName(flag: string): string | null {
+  const code = flag.trim().toUpperCase();
+  const alpha2 = code.length === 2 ? code : code.length === 3 ? ALPHA3_TO_ALPHA2[code] : undefined;
+  if (alpha2 === undefined) return null;
+  try {
+    return REGION_NAMES.of(alpha2) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** "2026-08-15" -> "15 Aug" (UTC, no locale surprises). */
 function shortDate(iso: string): string {
@@ -47,14 +80,14 @@ function readings(stats: StatsResponse): Reading[] {
   if (v && v.null_ratio !== null) {
     const ci = v.null_ci ? ` (CI ${f2(v.null_ci[0])}–${f2(v.null_ci[1])})` : "";
     out.push({
-      label: "Radar near a dark ship",
+      label: "Satellite radar near a ship that is not broadcasting",
       value: `${f2(v.null_ratio)}× chance${ci}`,
       note: "no better than chance, so we never accuse on radar alone",
     });
   }
   if (v && v.bridge_auc !== null) {
     out.push({
-      label: "Where-it-was model",
+      label: "Where-it-could-have-gone model",
       value: `AUC ${f2(v.bridge_auc)}`,
       note: "puts a ship's true position ahead of a decoy",
     });
@@ -69,7 +102,7 @@ function readings(stats: StatsResponse): Reading[] {
   }
   if (t?.silence_found_receivers_up !== undefined && t.silence_total_receivers_up !== undefined) {
     out.push({
-      label: "Silence detector",
+      label: "Transponder-off detector",
       value: `${fmtInt(t.silence_found_receivers_up)} of ${fmtInt(t.silence_total_receivers_up)}`,
       note: "found when our receivers were up",
     });
@@ -79,12 +112,20 @@ function readings(stats: StatsResponse): Reading[] {
 
 function caseRow(c: CaseSummary, onHover: (id: string | null) => void): HTMLElement {
   const unexplained = c.status === "candidate";
+  const rawFlag = c.vessel.flag?.trim() ?? "";
+  // The code stays visible; the country name is one hover away. A missing flag
+  // says what is missing instead of leaving a dash.
+  const flag = h(
+    "span",
+    { class: "ev-flag", title: rawFlag === "" ? null : countryName(rawFlag) },
+    rawFlag === "" ? "No flag broadcast" : rawFlag,
+  );
   const row = h(
     "a",
     { class: `ev-row${unexplained ? "" : " is-cleared"}`, href: `#/case/${encodeURIComponent(c.id)}` },
     h("span", { class: "ev-mark", "aria-hidden": "true" }),
     h("span", { class: "ev-name" }, vesselLabel(c.vessel)),
-    h("span", { class: "ev-flag" }, c.vessel.flag?.trim() || "--"),
+    flag,
     h("span", { class: "ev-num" }, fmtHours(c.hours)),
     h("span", { class: "ev-num" }, fmtInt(c.n_candidates)),
   );
@@ -109,8 +150,8 @@ export function renderEvidence(root: HTMLElement, data: CasesResponse): { destro
       h("span", { class: "ev-step-n" }, fmtInt(n)),
       h("span", { class: "ev-step-l" }, ...line),
     );
-  const step1 = step("", counts.gapsScanned, ["times a ship went silent at sea", dates], "all");
-  const step2 = step("", counts.withRadar, ["had a radar detection it could have reached"], "all");
+  const step1 = step("", counts.gapsScanned, ["times a ship switched off its transponder at sea", dates], "all");
+  const step2 = step("", counts.withRadar, ["seen by satellite radar where it could have gone"], "all");
   const step3 = step("is-hero", counts.unexplained, ["we still can't explain"], "unexplained");
   const step3b = step(
     "is-sub",
@@ -123,7 +164,7 @@ export function renderEvidence(root: HTMLElement, data: CasesResponse): { destro
   const funnelBlock = h(
     "section",
     { class: "ev-block", "aria-label": "How the cases narrow down" },
-    h("h2", null, "How a silence becomes a case"),
+    h("h2", null, "How a gap in position reports becomes a case"),
     step1,
     step2,
     h("div", { class: "ev-step-pair" }, step3, step3b),
@@ -170,12 +211,23 @@ export function renderEvidence(root: HTMLElement, data: CasesResponse): { destro
       "can't explain",
       h("span", { class: "ev-key-dot is-cleared" }),
       "cleared",
-      h("span", { class: "ev-key-hint" }, "dot = where the ship went dark · click to open"),
+      h("span", { class: "ev-key-hint" }, "dot = where the ship switched off its transponder · click to open"),
     ),
     attribution(),
   );
 
-  const panel = h("aside", { class: "ev-panel" }, h("div", { class: "ev-ask" }, "How do we know a dark ship is really suspicious?"), funnelBlock, sure, list);
+  const panel = h(
+    "aside",
+    { class: "ev-panel" },
+    h(
+      "div",
+      { class: "ev-ask" },
+      "How do we know a ship that switched off its transponder is really suspicious?",
+    ),
+    funnelBlock,
+    sure,
+    list,
+  );
 
   root.replaceChildren(
     topBar({ active: "overview", mode: "SNAPSHOT", generatedAt: data.generated_at }),
