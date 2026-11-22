@@ -28,7 +28,14 @@ from typing import Any
 from dotenv import load_dotenv
 
 from darkfleet.core.geo import distance_km
-from darkfleet.core.hormuz_stories import Gap, cluster_gaps, cluster_summary, reach_radius_km
+from darkfleet.core.hormuz_stories import (
+    Gap,
+    cluster_gaps,
+    cluster_summary,
+    imo_agrees,
+    is_risk_tagged,
+    reach_radius_km,
+)
 from darkfleet.core.speeds import max_speed_knots
 from darkfleet.core.tracks import Ping
 from darkfleet.core.watch import effective_cap_kn
@@ -46,7 +53,9 @@ MAX_GAP_HOURS = 30 * 24.0
 SOURCE = "Powered by Global Fishing Watch (public-global-gaps-events:latest)"
 CAVEATS = [
     "AIS gaps show a transponder went silent; they do not show why",
-    "Listed ships are matched on MMSI only, from the OpenSanctions maritime list (CC BY-NC 4.0)",
+    "Listed ships are matched on MMSI from the OpenSanctions maritime list (CC BY-NC 4.0), and "
+    "kept only when the list carries a risk tag (sanction, shadow fleet, person of interest, "
+    "regulatory warning); port-inspection records alone are left out",
     "Outage clusters are reception or jamming candidates and are not ranked as hiding",
 ]
 
@@ -112,6 +121,13 @@ def build_payload(
     for event in sorted(box_events, key=lambda e: e.start):
         match = listed.get(event.mmsi or "")
         if match is None:
+            continue
+        # Only risk-tagged listings are stories: a port-inspection record alone is not one.
+        if not is_risk_tagged(match.get("risk", [])):
+            continue
+        # GFW gap payloads carry no IMO today, so there is nothing to compare and the rule
+        # passes; it starts to bite as soon as the gap side is given an IMO.
+        if not imo_agrees(None, match.get("imo")):
             continue
         cap = _cap_kn(event)
         gap = to_gap(event)

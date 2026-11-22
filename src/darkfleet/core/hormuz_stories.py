@@ -24,6 +24,29 @@ CLUSTER_RADIUS_KM = 60.0
 CLUSTER_MIN_VESSELS = 8
 
 
+# A listing counts as a risk only when the list says something about the ship itself. Port
+# inspection records (e.g. the Tokyo MOU PSC dataset) tag a ship with no risk at all, so a
+# ship whose only evidence is one is not a story. ``mare.detained`` is a port-state outcome and
+# is not enough on its own either.
+RISK_TAGS = frozenset({"sanction", "mare.shadow", "poi", "reg.warn"})
+
+
+def is_risk_tagged(tags: Iterable[str]) -> bool:
+    """True when the list tags the ship with at least one risk tag (see ``RISK_TAGS``)."""
+    return any(tag in RISK_TAGS for tag in tags)
+
+
+def imo_agrees(gap_imo: str | None, listed_imo: str | None) -> bool:
+    """MMSI matched; now check the IMO number where both sides have one.
+
+    An MMSI can be reused by another hull, so two different IMO numbers mean a different ship.
+    A missing IMO on either side proves nothing and does not reject the match.
+    """
+    if not gap_imo or not listed_imo:
+        return True
+    return gap_imo.strip() == listed_imo.strip()
+
+
 @dataclass(frozen=True, slots=True)
 class Gap:
     """One AIS silence: where the ship went dark and where it came back."""

@@ -121,10 +121,16 @@ export function addStoryLayers(map: maplibregl.Map): void {
   });
 }
 
-/** The card the strait view leads with: the shadow-fleet ship, else the first listed ship. */
+/** Risk tags that make a listing a story; a port-inspection record alone is not one (mirrors core RISK_TAGS). */
+const RISK_TAGS = ["sanction", "mare.shadow", "poi", "reg.warn"];
+
+/**
+ * The card the strait view leads with: the shadow-fleet ship, else the first risk-tagged ship.
+ * Null when no listed ship carries a risk tag, so an untagged port record never leads a card.
+ */
 export function leadListed(stories: HormuzStories): StoryListed | null {
-  const listed = stories.listed ?? [];
-  return listed.find((s) => s.lists.includes("mare.shadow")) ?? listed[0] ?? null;
+  const tagged = (stories.listed ?? []).filter((s) => s.lists.some((tag) => RISK_TAGS.includes(tag)));
+  return tagged.find((s) => s.lists.includes("mare.shadow")) ?? tagged[0] ?? null;
 }
 
 /** The cluster card: the first cluster. */
