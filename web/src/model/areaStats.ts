@@ -87,3 +87,26 @@ export function sparkline(values: number[]): SVGSVGElement {
   svg.append(line);
   return svg;
 }
+
+/**
+ * Position reports a minute heard by our receivers, summed over the recorder's own regions
+ * ("listening" areas only: watched areas are boxes inside them and would double-count).
+ * Served from Tiger's per-minute aggregate, which matches the recorder files. The live map
+ * stream is capped per tick, so counting its items would understate or inflate the rate.
+ */
+export async function fetchListeningRate(signal?: AbortSignal): Promise<number | null> {
+  const init: RequestInit = { headers: { Accept: "application/json" } };
+  if (signal !== undefined) init.signal = signal;
+  const response = await fetch("/api/areas/stats", init);
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { areas?: unknown };
+  if (!Array.isArray(payload.areas)) return null;
+  let total = 0;
+  for (const raw of payload.areas) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const rate = row["msgs_per_min"];
+    if (row["kind"] === "listening" && isNumber(rate)) total += rate;
+  }
+  return Math.round(total);
+}

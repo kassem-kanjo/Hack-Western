@@ -493,10 +493,19 @@
 
 .watch-kind:hover { border-color: var(--line-3); color: var(--text-2); }
 
+/* QA #229 A5: shown means filled, so the active state reads at a glance. */
 .watch-kind[aria-pressed="true"] {
-  border: 1px solid var(--line-2);
-  background: var(--surface-sel);
-  color: var(--text-1);
+  border: 1px solid var(--text-1);
+  background: var(--text-1);
+  color: var(--surface-0);
+}
+
+.watch-kind[aria-pressed="true"] .watch-glyph {
+  color: var(--surface-0) !important;
+}
+
+.watch-kind[aria-pressed="true"] .watch-kind-count {
+  color: var(--surface-0);
 }
 
 .watch-kind-count {

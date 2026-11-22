@@ -581,7 +581,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     ["vessels", "Ships"],
     ["events", "Alerts"],
     ["areas", "Watched areas"],
-    ["reach", "Reach"],
+    ["reach", "Where it could have gone"],
   ] as [LayerKey, string][]) {
     const glyph = h("span", { class: "watch-layer-glyph", "aria-hidden": "true" });
     glyph.innerHTML = `<svg viewBox="0 0 14 14" width="14" height="14">${LEGEND_GLYPH[key]}</svg>`;
@@ -1405,7 +1405,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     }
     const bounds = boundsOf(points);
     if (bounds !== null) {
-      fitBox(bounds, 11);
+      // A stopped ship's 1 km check circle fills the screen at zoom 11 and shows open sea
+      // only; zoom 9 keeps the coast and nearby traffic in view.
+      fitBox(bounds, alert.kind === "sanctioned_stop" ? 9 : 11);
       return;
     }
     rememberCamera();
@@ -2161,7 +2163,7 @@ export function watchAttribution(gfw = false): HTMLElement {
           " \u00b7 ",
         )
       : null,
-    "Positions: our AIS recording \u00b7 Watchlist: ",
+    "Positions: our AIS recording \u00b7 Sanctions: ",
     h(
       "a",
       {
