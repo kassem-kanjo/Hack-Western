@@ -39,7 +39,8 @@ import {
 } from "../components/patrolSightings";
 import { topBar } from "../components/TopBar";
 import { closeDossier, openDossier, setDossierTrackRenderer } from "../components/VesselDossier";
-import { fmtUtc } from "../format";
+import { fmtInt, fmtUtc } from "../format";
+import { fetchListeningRate } from "../model/areaStats";
 import { timeAgo } from "../model/liveFacts";
 import { LIVE_REGIONS, openLiveFeed, type LiveFeed } from "../model/liveFeed";
 import {
@@ -475,7 +476,7 @@ function shipType(data: WatchResponse, alert: WatchAlert): string {
 function watchlistLabel(contact: WatchContact): string {
   if (contact.watchlist === "sanctioned") return "Sanctioned";
   if (contact.watchlist === "shadow_fleet") return "Shadow fleet";
-  return "Not on a sanctions list";
+  return "No";
 }
 
 /* ---- filters -------------------------------------------------------------- */
@@ -853,6 +854,20 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
   // ---- clock: freshness chip, status bar, live duration -----------------------
 
+  // Receivers' rate from Tiger (see fetchListeningRate); refreshed every 30 s.
+  let receiverRate: number | null = null;
+  const refreshRate = (): void => {
+    fetchListeningRate()
+      .then((rate) => {
+        receiverRate = rate;
+      })
+      .catch(() => {
+        receiverRate = null;
+      });
+  };
+  refreshRate();
+  const rateTimer = window.setInterval(refreshRate, 30_000);
+
   function paintChip(nowMs: number): void {
     if (data === null) {
       liveChip.textContent = "Live";
@@ -864,10 +879,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       h("span", { class: "watch-live-dot", "aria-hidden": "true" }),
       "Live",
     ];
-    if (feed !== null && feed.connected()) {
-      const rate = feed.perMinute();
-      parts.push(rate === null ? " \u00b7 warming up" : ` \u00b7 ${rate} position reports a minute`);
-    }
+    if (receiverRate !== null) parts.push(` \u00b7 ${fmtInt(receiverRate)} position reports a minute`);
     parts.push(` · updated ${timeAgo(data.generated_at, nowMs)}`);
     if (delayed) parts.push(" · Recording delayed");
     liveChip.replaceChildren(...parts);
@@ -881,12 +893,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     if (data !== null) {
       statusSnap.textContent = `${fmtUtcZ(data.generated_at).slice(7)} · ${data.counts.ships} ships`;
     }
-    if (feed === null || !feed.connected()) {
-      statusFeed.textContent = "waiting";
-    } else {
-      const rate = feed.perMinute();
-      statusFeed.textContent = rate === null ? "warming up" : `${rate} position reports a minute`;
-    }
+    statusFeed.textContent =
+      receiverRate === null ? "waiting" : `${fmtInt(receiverRate)} position reports a minute`;
   }
 
   function tick(): void {
@@ -1187,7 +1195,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           h("th", { scope: "col" }, "MMSI"),
           h("th", { scope: "col" }, "km"),
           h("th", { scope: "col" }, "Status"),
-          h("th", { scope: "col" }, "Sanctions"),
+          h("th", { scope: "col" }, "On a sanctions list"),
         ),
       ),
       body,
@@ -1938,6 +1946,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         window.clearInterval(sightingsTimer);
         sightingsTimer = null;
       }
+      window.clearInterval(rateTimer);
       stream?.close();
       stream = null;
       feed?.close();

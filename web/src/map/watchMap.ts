@@ -1405,7 +1405,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     }
     const bounds = boundsOf(points);
     if (bounds !== null) {
-      fitBox(bounds, 11);
+      // A stopped ship's 1 km check circle fills the screen at zoom 11 and shows open sea
+      // only; zoom 9 keeps the coast and nearby traffic in view.
+      fitBox(bounds, alert.kind === "sanctioned_stop" ? 9 : 11);
       return;
     }
     rememberCamera();
