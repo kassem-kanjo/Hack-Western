@@ -122,40 +122,23 @@ function schedValue(sched: EdgeSchedule | null | undefined): string {
   return priority !== null ? String(Math.round(priority)) : "not reported";
 }
 
-/**
- * A reliability row: the plain words, then the technical detail in small print.
- * An unreported value shows "not reported" alone, never a plain claim beside it.
- */
-function setDetailed(dd: HTMLElement, plain: string, detail: string): void {
-  const unreported = plain === "not reported" || detail === "not reported";
-  dd.replaceChildren(
-    unreported ? "not reported" : plain,
-    ...(unreported ? [] : [h("span", { class: "patrol-small" }, detail)]),
-  );
-}
-
 /** Sub-millisecond lateness is the point: 0.3 ms must not round to "0 ms". */
 function fmtMs(value: number): string {
   return value < 10 ? value.toFixed(1) : String(Math.round(value));
 }
 
 /**
- * The safety loop in plain words: on time, or how many ticks were late in the
- * last minute, and the worst lateness. The jargon (p99, tick counts) moves to
- * `loopDetail`, the small print under it.
+ * Reliability line 1 in plain words: the safety core's priority, and its worst
+ * lateness in the last 60 s. Missing values name what is missing.
  */
-function loopPlain(tick: EdgeStatus["safety_tick"]): string {
-  if (!tick) return "not reported";
-  const worst = finiteOrNull(tick.max_late_ms);
-  const late = finiteOrNull(tick.late_count_60s);
-  const worstText = worst === null ? null : `worst ${fmtMs(worst)} ms late`;
-  if (late === null) return worstText ?? "not reported";
-  if (late === 0) return worstText === null ? "on time" : `on time, ${worstText}`;
-  const lateText = `${fmtInt(late)} late in the last 60 s`;
-  return worstText === null ? lateText : `${lateText}, ${worstText}`;
+function safetyLine(s: EdgeStatus): string {
+  const priority = schedValue(s.priorities?.safety_core) === "not reported" ? "priority not reported" : "top priority";
+  const worst = finiteOrNull(s.safety_tick?.max_late_ms);
+  const late = worst === null ? "worst lateness not reported" : `worst ${fmtMs(worst)} ms late in the last 60 s`;
+  return `Safety core: ${priority} · ${late}`;
 }
 
-/** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute. */
+/** The safety core's own loop: 20 Hz, its lateness, and misses in the last minute (tooltip only). */
 function loopDetail(tick: EdgeStatus["safety_tick"]): string {
   if (!tick) return "not reported";
   const parts: string[] = [];
@@ -427,7 +410,7 @@ export function renderPatrol(app: HTMLElement): void {
     return { row, value };
   }
 
-  /** `small` is the source or the technical detail, printed under the plain line. */
+  /** `small` is the technical detail, printed under the plain line. */
   function setStep(target: Step, tone: Tone, text: string, small?: string): void {
     target.row.className = `patrol-step is-${tone}`;
     const detail = small === undefined || small === "" ? null : h("span", { class: "patrol-small" }, small);
@@ -452,15 +435,11 @@ export function renderPatrol(app: HTMLElement): void {
   );
   const verdictSub = h("p", { class: "patrol-alarm-sub", hidden: true });
 
-  function metric(label: string): { box: HTMLElement; value: HTMLElement } {
+  function metric(label: string): { box: HTMLElement; label: HTMLElement; value: HTMLElement } {
+    const labelEl = h("span", { class: "patrol-metric-label" }, label);
     const value = h("span", { class: "patrol-metric-value is-empty" }, "No alarms yet");
-    const box = h(
-      "div",
-      { class: "patrol-metric" },
-      h("span", { class: "patrol-metric-label" }, label),
-      value,
-    );
-    return { box, value };
+    const box = h("div", { class: "patrol-metric" }, labelEl, value);
+    return { box, label: labelEl, value };
   }
   const latencyMetric = metric("Alarm latency vs deadline");
   latencyMetric.box.title = "p99 alarm latency against the deadline";
@@ -482,7 +461,7 @@ export function renderPatrol(app: HTMLElement): void {
     ),
     abNote,
   );
-  const positionEl = h("p", { class: "patrol-position" }, "Patrol position: none yet");
+  const positionEl = h("p", { class: "patrol-position" }, "Simulated patrol position: none yet");
 
   function field(label: string): { dt: HTMLElement; dd: HTMLElement } {
     const dt = h("dt", null, label);
@@ -490,26 +469,11 @@ export function renderPatrol(app: HTMLElement): void {
     return { dt, dd };
   }
 
-  const safetySched = field("Safety core");
-  const aiSched = field("AI detector");
-  const loop = field("Safety loop lateness");
-  const recovery = field("Last recovery");
-  const restarts = field("Restarts");
-
-  const fields = h(
-    "dl",
-    { class: "patrol-fields" },
-    safetySched.dt,
-    safetySched.dd,
-    aiSched.dt,
-    aiSched.dd,
-    loop.dt,
-    loop.dd,
-    recovery.dt,
-    recovery.dd,
-    restarts.dt,
-    restarts.dd,
-  );
+  // Two plain lines. The scheduling policy and the loop's raw numbers live in the
+  // tooltip on the first line, so the rail reads as a sentence, not a register.
+  const safetyLineEl = h("p", { class: "patrol-rel-line" }, "Safety core: waiting for status");
+  const restartsLineEl = h("p", { class: "patrol-rel-line" }, "Restarts: none yet");
+  const reliability = h("div", { class: "patrol-reliability" }, safetyLineEl, restartsLineEl);
 
   const underLoad = h(
     "p",
@@ -533,21 +497,23 @@ export function renderPatrol(app: HTMLElement): void {
   const evidenceEl = h("p", { class: "patrol-evidence" }, "Evidence log: checking…");
   // The two demo actions sit directly under the alarm state and its figures, so
   // they are in view at 1280x720 without scrolling the rail.
+  // Order: the alarm state, its figures, the priority-guard A/B, then the two demo
+  // actions, so the A/B card and the buttons are in view at 1280x720.
   const side = h(
     "aside",
     { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
     verdictEl,
     verdictSub,
     metrics,
+    abBox,
     actions,
     hint,
     positionEl,
     chain,
     evidenceEl,
     h("h3", { class: "patrol-h" }, "Reliability"),
-    fields,
+    reliability,
     underLoad,
-    abBox,
   );
 
   // ---- offline: one calm line instead of a half-live screen ----
@@ -630,15 +596,17 @@ export function renderPatrol(app: HTMLElement): void {
     evidenceEl.textContent = `Evidence log: ${count} sightings · ${chain}`;
   }
 
-  /** Scheduling, loop lateness, recovery/restart counts, stress and controls. */
+  /** Two reliability lines, the scheduling detail on hover, then stress and controls. */
   function paintReliability(s: EdgeStatus): void {
     const now = Date.now();
     const priorities = s.priorities ?? {};
-    setDetailed(safetySched.dd, "highest priority", schedValue(priorities.safety_core));
-    setDetailed(aiSched.dd, "lower priority, treated as untrusted", schedValue(priorities.detector));
-    setDetailed(loop.dd, loopPlain(s.safety_tick), loopDetail(s.safety_tick));
-    recovery.dd.textContent = fmtRecovery(s.last_recovery_ms);
-    restarts.dd.textContent = fmtInt(s.detector_restarts ?? 0);
+    safetyLineEl.textContent = safetyLine(s);
+    safetyLineEl.title = [
+      `Safety core ${schedValue(priorities.safety_core)}`,
+      `AI detector ${schedValue(priorities.detector)}`,
+      loopDetail(s.safety_tick),
+    ].join(" · ");
+    restartsLineEl.textContent = `Restarts: ${fmtInt(s.detector_restarts ?? 0)}`;
 
     stressActive = s.stress?.active === true;
     underLoad.hidden = !stressActive;
@@ -682,8 +650,6 @@ export function renderPatrol(app: HTMLElement): void {
     const parts: string[] = [`Frame ${String(d.frame_id)}`];
     const at = wallMs(d.t);
     if (at !== null) parts.push(fmtWall(at));
-    const source = typeof d.source === "string" ? d.source.trim() : "";
-    if (source !== "") parts.push(source);
     const inference = finiteOrNull(d.ai?.inference_ms);
     if (inference !== null) parts.push(`AI ${Math.round(inference)} ms`);
     caption.textContent = parts.join(" \u00b7 ");
@@ -693,8 +659,7 @@ export function renderPatrol(app: HTMLElement): void {
   function paintChain(s: EdgeStatus, d: EdgeDecision | null): void {
     const detector = detectorState(s, Date.now());
 
-    // 1 Camera: the frame rate the safety core processed frames at, the source in small print.
-    const source = typeof d?.source === "string" ? d.source.trim() : "";
+    // 1 Camera: the frame rate the safety core processed frames at.
     const fps = finiteOrNull(s.frames_per_s);
     if (cameraOffline) {
       setStep(cameraStep, "bad", "offline");
@@ -702,9 +667,9 @@ export function renderPatrol(app: HTMLElement): void {
       setStep(cameraStep, "warn", "waiting for frames");
     } else if (fps !== null) {
       const unit = fps === 1 ? "frame" : "frames";
-      setStep(cameraStep, "ok", `${fmtRate(fps)} ${unit} a second`, source);
+      setStep(cameraStep, "ok", `${fmtRate(fps)} ${unit} a second`);
     } else {
-      setStep(cameraStep, "ok", "frames arriving", source);
+      setStep(cameraStep, "ok", "frames arriving");
     }
 
     // 2 AI: untrusted, and named as such; under stress its slower time is the point.
@@ -750,9 +715,44 @@ export function renderPatrol(app: HTMLElement): void {
     }
   }
 
-  /** The guarantee as three numbers: latency against the deadline, alarms on time, blind raised on time. */
-  function paintMetrics(s: EdgeStatus): void {
+  /**
+   * The guarantee as three numbers: latency against the deadline, alarms on time, blind raised on time.
+   * Before any live alarm the three slots show the recorded A/B run (the measured result), so the
+   * screen never reads "No alarms yet" three times; once a live alarm lands, the live figures take over.
+   */
+  function paintMetrics(s: EdgeStatus, result: EdgeAb | null): void {
     const a = s.alarm;
+    const liveSeen = !!a && a.decisions > 0;
+    if (!liveSeen && result !== null) {
+      const guarded = result.guarded;
+      const unguarded = result.unguarded;
+      const worst = finiteOrNull(guarded.worst_latency_ms);
+      latencyMetric.label.textContent = "Worst alarm latency, guarded";
+      latencyMetric.value.textContent = worst === null ? "none yet" : `${Math.round(worst)} ms`;
+      latencyMetric.value.classList.remove("is-empty");
+      latencyMetric.box.classList.remove("is-bad");
+      latencyMetric.box.title = `Under overload: deadline ${result.deadline_ms} ms`;
+
+      onTimeMetric.label.textContent = "Alarms on time under overload";
+      onTimeMetric.value.textContent = `${fmtInt(guarded.on_time)} of ${fmtInt(guarded.alarm_frames)}`;
+      onTimeMetric.value.classList.remove("is-empty");
+      onTimeMetric.box.classList.remove("is-bad");
+      onTimeMetric.box.title = "Measured by the A/B run, with the priority guard";
+
+      blindMetric.label.textContent = "Without the priority fix";
+      blindMetric.value.textContent = `${fmtInt(unguarded.on_time)} of ${fmtInt(unguarded.alarm_frames)}`;
+      blindMetric.value.classList.remove("is-empty");
+      blindMetric.box.classList.toggle("is-bad", unguarded.late > 0);
+      blindMetric.box.title = "Alarms on time under the same overload, without the priority guard";
+      return;
+    }
+
+    latencyMetric.label.textContent = "Alarm latency vs deadline";
+    onTimeMetric.label.textContent = "Alarms on time";
+    blindMetric.label.textContent = "Blind raised on time";
+    latencyMetric.box.title = "p99 alarm latency against the deadline";
+    onTimeMetric.box.title = "";
+    blindMetric.box.title = "";
     // Before the first alarm the counters are all zero. "0/0" and a bare dash
     // read as broken numbers; the screen says there is nothing to count yet.
     if (!a || a.decisions === 0) {
@@ -815,6 +815,7 @@ export function renderPatrol(app: HTMLElement): void {
     abNote.textContent = `${result.load}, ${fmtInt(result.stress_s)} s. Deadline ${result.deadline_ms} ms. Fixed priorities: no adaptive partitioning on this image.`;
   }
 
+  /** "Simulated patrol position: Kiel Bight (54.45, 10.25)": the unit's own name and fix. */
   function paintPosition(d: EdgeDecision | null): void {
     const name =
       typeof d?.patrol?.name === "string" && d.patrol.name.trim() !== ""
@@ -822,14 +823,14 @@ export function renderPatrol(app: HTMLElement): void {
         : null;
     const lat = finiteOrNull(d?.patrol?.lat);
     const lon = finiteOrNull(d?.patrol?.lon);
-    const coords = lat !== null && lon !== null ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : null;
-    const body = [name, coords].filter((part): part is string => part !== null).join(" \u00b7 ");
-    positionEl.textContent = `Patrol position: ${body !== "" ? body : "none yet"}`;
+    const coords = lat !== null && lon !== null ? `(${lat.toFixed(2)}, ${lon.toFixed(2)})` : null;
+    const body = [name, coords].filter((part): part is string => part !== null).join(" ");
+    positionEl.textContent = `Simulated patrol position: ${body !== "" ? body : "none yet"}`;
   }
 
   function paint(): void {
     if (status === null) return;
-    paintMetrics(status);
+    paintMetrics(status, ab);
     cameraOffline = isCameraOffline(status, decision);
     syncFrame();
     paintReliability(status);
