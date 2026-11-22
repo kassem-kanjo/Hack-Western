@@ -2,6 +2,10 @@
 
 Updated: Sat 21 Nov, 23:00 ET · HANDOVER for a new chat: read 'Handover' below first · V3 passed the 5-second test; Kassem reviewing · launch work paused until his 'happy' (except video + voice-over, which he asked for)
 
+## Update (Sun 22 Nov, 04:00 ET)
+- **Video live:** https://youtu.be/AwbrCT3uajE (on Devpost and the DEV post). Final files on the Desktop: v6 (Jessica AI voice) and v6B (friends' voice).
+- **Still Kassem's:** Devpost Submit (tick terms) before 9:00; tracks on the live site if a page appears.
+
 ## Update (Sun 22 Nov, 02:50 ET) — morning, read first
 - **Kassem, before 9:00:** (1) upload `Dark Fleet demo v5 (voiced).mp4` from the Desktop to YouTube (Unlisted) and send the link; (2) Devpost -> Dark Fleet -> Submit, tick terms, Submit project. Reminders fire 7:13 and 8:11.
 - **After the YouTube link:** add it to Devpost (Video demo link) and to the DEV post (published: https://dev.to/kassemkanjo/dark-fleet-we-spent-hack-western-chasing-ships-that-switch-off-their-transponders-2p9).
