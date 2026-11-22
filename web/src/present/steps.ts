@@ -36,8 +36,7 @@ export type PresentToken =
   | "cluster_hours"
   | "cluster_kn"
   | "met"
-  | "dark_alert"
-  | "recovery";
+  | "dark_alert";
 
 export interface PresentCaption {
   headline: string;
@@ -134,11 +133,9 @@ export const PRESENT_BEATS: readonly PresentBeat[] = [
       {
         route: "patrol",
         dock: "camera-top-left",
-        headline: "Kill the AI: the safety core keeps watching.",
-        line: "The detector is switched off on purpose; the safety core recovers in {recovery}.",
-        fallback: {
-          line: "The detector is switched off on purpose; the safety core keeps checking.",
-        },
+        // Only what the screen shows: the presenter presses Kill; nothing here claims it is off.
+        headline: "A camera lookout on a QNX Raspberry Pi.",
+        line: "Press Kill the AI: the safety core keeps watching and raises 'lookout blind' instead of going quiet.",
       },
     ],
   },

@@ -17,7 +17,7 @@
 import "./present.css";
 
 import type { WatchAlert } from "../api";
-import { fetchEdgeStatus, fetchWatch } from "../api";
+import { fetchWatch } from "../api";
 import { h } from "../components/dom";
 import { daysAfterStrikes, leadCluster, leadListed, type HormuzStories } from "../components/hormuzStories";
 import { requestHormuzCard } from "./cardRequest";
@@ -40,13 +40,14 @@ const PHONE_QUERY = "(max-width: 1000px)";
 const TOKEN = /\{([a-z_0-9]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
 
-/** Every scene, flattened, with the beat it belongs to (for the progress bar). */
-const ALL_SCENES: readonly { scene: PresentScene; beat: number }[] = PRESENT_BEATS.flatMap((beat, b) =>
-  beat.scenes.map((scene) => ({ scene, beat: b })),
-);
+/**
+ * Every caption, flattened in order. The counter and the progress bar count captions,
+ * not beats: a beat with two captions (the Hormuz cards) shows "2 / 6" then "3 / 6".
+ */
+const ALL_SCENES: readonly PresentScene[] = PRESENT_BEATS.flatMap((beat) => beat.scenes);
 
-/** The scenes this run shows: ALL_SCENES minus any the data cannot support (see applyAvailability). */
-let SCENES: readonly { scene: PresentScene; beat: number }[] = ALL_SCENES;
+/** The captions this run shows: ALL_SCENES minus any the data cannot support (see applyAvailability). */
+let SCENES: readonly PresentScene[] = ALL_SCENES;
 
 /** A missing key means "no number from the API"; the beat falls back to its sentence. */
 type TokenValues = Partial<Record<PresentToken, string>>;
@@ -70,6 +71,7 @@ let stepLabel: HTMLElement | null = null;
 let headline: HTMLElement | null = null;
 let line: HTMLElement | null = null;
 let progressFill: HTMLElement | null = null;
+let progressBar: HTMLElement | null = null;
 
 /** Hash navigation is the router's contract; never touch the screen directly. */
 function navigate(route: string): void {
@@ -182,11 +184,10 @@ async function loadTourValues(): Promise<{
   strongest: string | null;
   absent: readonly PresentToken[];
 }> {
-  const [watch, trend, stories, edge] = await Promise.allSettled([
+  const [watch, trend, stories] = await Promise.allSettled([
     fetchWatch(),
     getJson<HormuzTrendLite>(TREND_URL),
     getJson<HormuzStories>(STORIES_URL),
-    fetchEdgeStatus(),
   ]);
 
   const tokens: TokenValues = {};
@@ -212,11 +213,6 @@ async function loadTourValues(): Promise<{
     if (leadListed(stories.value) === null) absent.push("sea1_hours");
   }
 
-  if (edge.status === "fulfilled") {
-    const ms = finite(edge.value.last_recovery_ms);
-    if (ms !== null && ms >= 0) tokens.recovery = `${Math.round(ms)} ms`;
-  }
-
   return { tokens, strongest, absent };
 }
 
@@ -226,10 +222,10 @@ async function loadTourValues(): Promise<{
  */
 function applyAvailability(absent: readonly PresentToken[]): void {
   if (absent.length === 0) return;
-  const current = SCENES[index]?.scene;
+  const current = SCENES[index];
   const previous = index;
-  SCENES = ALL_SCENES.filter((entry) => entry.scene.requires === undefined || !absent.includes(entry.scene.requires));
-  const same = SCENES.findIndex((entry) => entry.scene === current);
+  SCENES = ALL_SCENES.filter((scene) => scene.requires === undefined || !absent.includes(scene.requires));
+  const same = SCENES.findIndex((scene) => scene === current);
   index = same >= 0 ? same : Math.min(previous, SCENES.length - 1);
 }
 
@@ -291,22 +287,23 @@ function routeFor(scene: PresentScene): string {
 
 /** Swap the caption to one scene and replay its 200 ms fade-in. */
 function show(at: number): void {
-  const entry = SCENES[at];
-  if (entry === undefined || root === null) return;
+  const scene = SCENES[at];
+  if (scene === undefined || root === null) return;
 
-  const { scene, beat } = entry;
   const text = captionFor(scene);
   index = at;
   clearEndTimer();
-  // No auto-exit: the presenter may still be speaking on the last beat; → or Esc leaves.
+  // No auto-exit: the presenter may still be speaking on the last caption; → or Esc leaves.
   navigate(routeFor(scene));
   requestHormuzCard(scene.card ?? null);
 
-  if (stepLabel !== null) stepLabel.textContent = `${beat + 1} / ${PRESENT_BEATS.length}`;
+  if (stepLabel !== null) stepLabel.textContent = `${at + 1} / ${SCENES.length}`;
   if (headline !== null) headline.textContent = text.headline;
   if (line !== null) line.textContent = text.line;
   if (caption !== null) caption.dataset["dock"] = scene.dock ?? "bottom";
-  if (progressFill !== null) progressFill.style.width = `${((beat + 1) / PRESENT_BEATS.length) * 100}%`;
+  if (progressFill !== null) progressFill.style.width = `${((at + 1) / SCENES.length) * 100}%`;
+  progressBar?.setAttribute("aria-valuemax", String(SCENES.length));
+  progressBar?.setAttribute("aria-valuenow", String(at + 1));
 
   // Removing and re-adding in the same frame restarts the CSS animation; the
   // read of offsetWidth flushes the style change between the two.
@@ -329,14 +326,14 @@ function clearEndTimer(): void {
 
 function buildOverlay(): HTMLElement {
   progressFill = h("i", { class: "present-progress-fill" });
-  const progress = h(
+  progressBar = h(
     "div",
     {
       class: "present-progress",
       role: "progressbar",
       "aria-label": "Presentation progress",
       "aria-valuemin": 1,
-      "aria-valuemax": PRESENT_BEATS.length,
+      "aria-valuemax": ALL_SCENES.length,
       "aria-valuenow": 1,
     },
     progressFill,
@@ -370,7 +367,7 @@ function buildOverlay(): HTMLElement {
   return h(
     "div",
     { class: "present-root", role: "region", "aria-label": "Presentation mode" },
-    progress,
+    progressBar,
     h("div", { class: "present-scrim" }),
     caption,
   );
@@ -417,6 +414,7 @@ export function exitPresent(): void {
   headline = null;
   line = null;
   progressFill = null;
+  progressBar = null;
   restore(startHash);
   startHash = "";
 }

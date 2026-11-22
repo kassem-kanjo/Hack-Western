@@ -1,5 +1,6 @@
 import { fmtUtcFull } from "../format";
 import { h } from "./dom";
+import { introWillShow } from "./Intro";
 import { mountSearchBox } from "./SearchBox";
 
 export type ConsoleMode = "SNAPSHOT" | "LIVE" | "ERROR";
@@ -21,11 +22,16 @@ function isFirstVisit(): boolean {
 /**
  * The page's hint window, fixed once per page load. Screens rebuild the bar on their first
  * render, so a per-call check would hide the hint on the render that is actually visible.
+ * The intro card is the first-visit greeting: when it shows, the hint stays off (the visit is
+ * still marked seen, so a later visit gets neither).
  */
 let tourHintEndsAt: number | null = null;
 
 function tourHintRemainingMs(): number {
-  if (tourHintEndsAt === null) tourHintEndsAt = isFirstVisit() ? Date.now() + TOUR_HINT_MS : 0;
+  if (tourHintEndsAt === null) {
+    const firstVisit = isFirstVisit();
+    tourHintEndsAt = firstVisit && !introWillShow() ? Date.now() + TOUR_HINT_MS : 0;
+  }
   return tourHintEndsAt - Date.now();
 }
 
