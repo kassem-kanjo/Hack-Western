@@ -27,7 +27,7 @@ const LINE_2 =
   "Dark Fleet checks every gap and every jump against what a ship can physically do, and says why each alert is an alert.";
 const LINE_3 = "Nothing here accuses a ship on radar alone.";
 
-const TOUR = "Take the 3-minute tour";
+const TOUR = "Take the 2-minute tour";
 const EXPLORE = "Explore on my own";
 
 let backdrop: HTMLElement | null = null;
@@ -207,6 +207,15 @@ function open(): void {
   window.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("focusin", onFocusIn, true);
   focusPrimary();
+}
+
+/**
+ * True when the card will show on this page load (fresh root visit, not seen yet). The top-bar
+ * hint asks this so a visitor never sees both the card and the hint. Storage-based, so it
+ * answers the same before and after the card is dismissed.
+ */
+export function introWillShow(): boolean {
+  return introAllowed() && !alreadySeen();
 }
 
 /** Show the card once, when this is a fresh root visit and storage has no key. */

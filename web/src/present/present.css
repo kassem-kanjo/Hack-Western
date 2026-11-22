@@ -169,7 +169,8 @@
 /* Patrol: the top-left corner of the camera stage, under the topbar. The alarm rail
    (right) and the camera's centre stay clear. */
 .present-caption[data-dock="camera-top-left"] {
-  top: 56px;
+  /* Below the top bar and the Patrol guide line (about 88 px), so the guide text stays readable. */
+  top: 96px;
   right: auto;
   bottom: auto;
   left: 16px;
