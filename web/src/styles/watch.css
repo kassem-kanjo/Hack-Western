@@ -775,10 +775,18 @@
   font-family: var(--font-sans);
   font-size: var(--fs-12);
   text-align: left;
+  text-decoration: none; /* the Hormuz row is a link, not an underlined one (#259) */
   cursor: pointer;
 }
 
 .watch-area-row:hover { background: var(--surface-2); color: var(--text-1); }
+
+/* One line per area: the Hormuz row's longer wording must not wrap into a fixed-height row (#259). */
+.watch-area-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .watch-area-row[aria-current="true"] {
   background: var(--surface-sel);

@@ -106,6 +106,13 @@ export function watchHref(alertId: string | null): string {
   return alertId === null ? "#/watch" : `#/watch/alert/${encodeURIComponent(alertId)}`;
 }
 
+/**
+ * The Hormuz area opens its own screen rather than the area panel here; the rail
+ * and the router share these two strings so the row cannot drift from the route (#259).
+ */
+const HORMUZ_AREA_ID = "HORMUZ_STRAIT";
+const HORMUZ_HREF = "#/hormuz";
+
 /* ---- wording (pure) ------------------------------------------------------- */
 
 /**
@@ -364,11 +371,11 @@ function openingBox(snapshot: WatchResponse): [number, number, number, number] |
 }
 
 /** One large figure with its plain label under it (the focus panel's top row). */
-function figure(value: string, label: string): HTMLElement {
+function figure(value: string, label: string, title?: string): HTMLElement {
   return h(
     "div",
     { class: "watch-fig" },
-    h("span", { class: "watch-fig-value" }, value),
+    h("span", { class: "watch-fig-value", title: title ?? null }, value),
     h("span", { class: "watch-fig-label" }, label),
   );
 }
@@ -391,8 +398,8 @@ function sortedContacts(contacts: WatchContact[]): WatchContact[] {
     const aM = a.could_meet === true ? 1 : 0;
     const bM = b.could_meet === true ? 1 : 0;
     if (aM !== bM) return bM - aM;
-    const aS = a.watchlist === "sanctioned" ? 1 : 0;
-    const bS = b.watchlist === "sanctioned" ? 1 : 0;
+    const aS = onSanctionsList(a) ? 1 : 0;
+    const bS = onSanctionsList(b) ? 1 : 0;
     if (aS !== bS) return bS - aS;
     return a.min_dist_km - b.min_dist_km;
   });
@@ -565,10 +572,17 @@ function shipType(data: WatchResponse, alert: WatchAlert): string {
   return cls.charAt(0).toUpperCase() + cls.slice(1);
 }
 
-function watchlistLabel(contact: WatchContact): string {
-  if (contact.watchlist === "sanctioned") return "Sanctioned";
-  if (contact.watchlist === "shadow_fleet") return "Shadow fleet";
-  return "No";
+/**
+ * The one test for "on a sanctions list". The count in the detail section and the
+ * table's Yes/No cell both read this, so they cannot disagree (issue #259).
+ */
+function onSanctionsList(contact: WatchContact): boolean {
+  return contact.watchlist === "sanctioned";
+}
+
+/** The cell under "On a sanctions list": the answer, nothing else. */
+function sanctionsListLabel(contact: WatchContact): string {
+  return onSanctionsList(contact) ? "Yes" : "No";
 }
 
 /* ---- filters -------------------------------------------------------------- */
@@ -673,7 +687,7 @@ function field(label: string, value: string | HTMLElement, extra?: HTMLElement |
 /** A UTC time with its quiet relative follow-up. */
 function timeValue(iso: string, nowMs: number): HTMLElement[] {
   return [
-    h("time", { class: "watch-mono", datetime: iso }, fmtUtcZ(iso)),
+    h("time", { class: "watch-mono", datetime: iso, title: "UTC (the Z means UTC time)" }, fmtUtcZ(iso)),
     h("span", { class: "watch-rel" }, timeAgo(iso, nowMs)),
   ];
 }
@@ -1085,7 +1099,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           )
         : h(
             "time",
-            { class: "watch-row-time", datetime: alert.t_start },
+            { class: "watch-row-time", datetime: alert.t_start, title: "UTC (the Z means UTC time)" },
             h("span", { class: "watch-row-utc" }, fmtUtcZ(alert.t_start)),
             h("span", { class: "watch-row-rel" }, timeAgo(alert.t_start, now)),
           ),
@@ -1157,6 +1171,18 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const line = h("li", { class: "watch-areas-line" });
     active.forEach(({ area, count }, index) => {
       if (index > 0) line.append(" · ");
+      // The map may be showing the Baltic while Hormuz has events, so the Hormuz
+      // row says where it goes instead of reading as a count for the current view (#259).
+      if (area.id === HORMUZ_AREA_ID) {
+        line.append(
+          h(
+            "a",
+            { class: "watch-area-row", href: HORMUZ_HREF },
+            h("span", { class: "watch-area-row-name" }, "Strait of Hormuz \u00b7 open the Hormuz screen \u2192"),
+          ),
+        );
+        return;
+      }
       const row = h(
         "button",
         {
@@ -1283,8 +1309,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "tr",
           null,
           h("th", { scope: "col" }, "Name"),
-          h("th", { scope: "col" }, "MMSI"),
-          h("th", { scope: "col" }, "km"),
+          h("th", { scope: "col", title: "The ship's radio ID (MMSI)" }, "MMSI"),
+          h("th", { scope: "col", title: "Distance from the ship that switched off" }, "km"),
           h("th", { scope: "col" }, "Status"),
           h("th", { scope: "col" }, "On a sanctions list"),
         ),
@@ -1293,7 +1319,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     );
 
     for (const contact of list) {
-      const sanctioned = contact.watchlist === "sanctioned";
+      const sanctioned = onSanctionsList(contact);
       const row = h(
         "tr",
         {
@@ -1303,10 +1329,14 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "aria-label": `${contactName(contact)}, ${fmtDec(contact.min_dist_km, 1)} km`,
         },
         h("td", { class: "watch-nearby-name" }, contactName(contact)),
-        h("td", { class: "watch-mono" }, String(contact.mmsi)),
-        h("td", { class: "watch-mono watch-num" }, fmtDec(contact.min_dist_km, 1)),
+        h("td", { class: "watch-mono", title: "The ship's radio ID (MMSI)" }, String(contact.mmsi)),
+        h(
+          "td",
+          { class: "watch-mono watch-num", title: "Distance from the ship that switched off" },
+          fmtDec(contact.min_dist_km, 1),
+        ),
         h("td", null, contact.stopped ? "Stopped" : "Moving"),
-        h("td", null, watchlistLabel(contact)),
+        h("td", null, sanctionsListLabel(contact)),
       );
       const ring = (): void => {
         if (map === null) return;
@@ -1385,7 +1415,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       alert.kind === "dark" ? "Where it could have gone" : alert.kind === "sanctioned_stop" ? "Distance checked" : null;
     let radiusEl: HTMLElement | null = null;
     if (radiusLabel !== null) {
-      radiusEl = h("span", { class: "watch-mono" }, `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`);
+      radiusEl = h(
+        "span",
+        { class: "watch-mono", title: "Distance from the ship that switched off" },
+        `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`,
+      );
     }
 
     // Four rows (issue #249): MMSI, IMO and type belong in the vessel dossier, not the event.
@@ -1413,7 +1447,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "div",
           { class: "watch-figs" },
           figure(fmtDuration(durationMs(alert, now)), "Switched off for"),
-          figure(`${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`, "Could have gone this far"),
+          figure(
+            `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`,
+            "Could have gone this far",
+            "Distance from the ship that switched off",
+          ),
           figure(fmtInt(met), "Ships it could have met"),
         ),
       );
@@ -1434,7 +1472,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const gap = overlappingGap(snapshot, alert, now);
     if (gap !== null) {
       parts.push(
-        h("div", { class: "watch-gapnote" }, `Receivers offline ${gap.from}–${gap.to}Z — not counted`),
+        h(
+          "div",
+          { class: "watch-gapnote" },
+          "Receivers offline ",
+          h("span", { title: "UTC (the Z means UTC time)" }, `${gap.from}\u2013${gap.to}Z`),
+          " \u2014 not counted",
+        ),
       );
     }
 
@@ -1458,10 +1502,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       const sorted = sortedContacts(alert.contacts);
       const met = sorted.filter((contact) => contact.could_meet === true);
       const rest = sorted.filter((contact) => contact.could_meet !== true);
+      // The same predicate as the table cell: the count is the rows that answer Yes,
+      // not every row in the table (issue #259).
+      const onList = met.filter(onSanctionsList).length;
       parts.push(
         section(
-          "Sanctioned",
-          met.length,
+          `On a sanctions list \u00b7 ${fmtInt(onList)}`,
+          null,
           met.length === 0
             ? h("div", { class: "watch-none" }, "No ship could have met it")
             : contactTable(snapshot, met),
@@ -1588,7 +1635,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   // pass). Kassem: the old per-day bars and replay here were noise; send people there.
   function showRadar(_alert: WatchAlert | null): void {
     disposeRadar();
-    window.location.hash = "#/hormuz";
+    window.location.hash = HORMUZ_HREF;
   }
 
   let radarMarkerHandler: ((kind: "encounter" | "hotspot", index: number) => void) | null = null;
@@ -1611,7 +1658,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
     const radarMode =
       (alert !== null && alert.kind === "radar_unmatched") ||
-      (alert === null && area !== null && area.id === "HORMUZ_STRAIT");
+      (alert === null && area !== null && area.id === HORMUZ_AREA_ID);
     const areaMode = alert === null && area !== null && !radarMode;
     const open = alert !== null || area !== null;
     if (alert === null || alert.kind !== "dark") dropReplay();

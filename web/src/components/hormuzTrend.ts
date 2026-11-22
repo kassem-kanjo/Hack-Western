@@ -9,7 +9,7 @@ import { h } from "./dom";
 const SVG_NS = "http://www.w3.org/2000/svg";
 // Drawn at the rail's real width (about 340 px) so the labels are 1:1, not scaled.
 const W = 340;
-const H = 150;
+const H = 126;
 // The right pad keeps room for the two direct labels, so neither sits on a line.
 const PAD = { left: 30, right: 76, top: 18, bottom: 20 };
 
@@ -102,7 +102,13 @@ export function trendHeadline(regime: TrendRegime): {
     return null;
   }
   const ci = regime.did_ci;
-  const ciText = ci ? ` (95% CI ${Math.round(ci[0] * 100)}–${Math.round(ci[1] * 100)})` : "";
+  // Plain words, not a data team's shorthand: a signed point difference is a comparison,
+  // and the interval is stated as our confidence in it.
+  const ciText = ci
+    ? ` (we're 95% sure it's between ${Math.round(ci[0] * 100)} and ${Math.round(ci[1] * 100)})`
+    : "";
+  const direction = regime.did < 0 ? "less" : "more";
+  const difference = `${Math.abs(regime.did * 100).toFixed(1)} percentage points ${direction} than next door${ciText}`;
   // The 66% is the average of a fixed window after the strikes, not "today": say which months.
   const during = windowLabel(regime.current);
   const baseYear = regime.baseline ? regime.baseline.start.slice(0, 4) : null;
@@ -113,7 +119,7 @@ export function trendHeadline(regime: TrendRegime): {
     big: `${now}%`,
     before: baseYear ? `was ${was}% in ${baseYear}` : `was ${was}% before`,
     control: `Next door in the Gulf of Oman it only rose from ${ctrlWas}% to ${ctrlNow}%.`,
-    difference: `Difference ${regime.did >= 0 ? "+" : ""}${(regime.did * 100).toFixed(1)} pts${ciText}`,
+    difference,
   };
 }
 
@@ -178,8 +184,8 @@ export function trendChart(trend: HormuzTrend): HTMLElement {
     const left = x(Math.max(ws, x0));
     const rightEdge = x(Math.min(we, x1));
     root.append(svg("rect", { x: left, y: PAD.top, width: rightEdge - left, height: plotH, class: "trend-shade" }));
-    // Along the bottom of the shade, where no line runs, so it never sits on a spike.
-    const note = svg("text", { x: rightEdge - 2, y: H - PAD.bottom - 5, class: "trend-note", "text-anchor": "end" });
+    // In the top padding, right-aligned to the shade: above the plot the lines never reach it.
+    const note = svg("text", { x: rightEdge - 2, y: PAD.top - 6, class: "trend-note", "text-anchor": "end" });
     note.textContent = `${windowLabel(win) ?? "After the strikes"}: ${now}% average`;
     root.append(note);
   }

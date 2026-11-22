@@ -55,7 +55,7 @@
 
 .hz-head,
 .hz-section {
-  padding: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--line-1);
 }
 
@@ -71,7 +71,7 @@
   display: flex;
   align-items: baseline;
   gap: var(--sp-3);
-  margin-top: var(--sp-3);
+  margin-top: var(--sp-2);
 }
 
 .hz-big {
@@ -90,14 +90,14 @@
 
 /* The control's plain sentence, read straight after the big figure. */
 .hz-next {
-  margin: var(--sp-2) 0 0;
+  margin: var(--sp-1) 0 0;
   font-size: var(--fs-13);
   line-height: var(--lh-ui);
   color: var(--text-2);
 }
 
 .hz-small {
-  margin: var(--sp-2) 0 0;
+  margin: var(--sp-1) 0 0;
   font-size: var(--fs-11);
   line-height: var(--lh-ui);
   color: var(--text-3);
@@ -109,7 +109,7 @@
 }
 
 .hz-label {
-  margin: 0 0 var(--sp-2);
+  margin: 0 0 var(--sp-1);
   font-size: var(--fs-12);
   font-weight: var(--fw-medium);
   color: var(--text-3);
@@ -196,13 +196,21 @@
 .hz-stories {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
+}
+
+/* The wrapper lets "more" sit under the card without nesting a button in a button. */
+.hz-card-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
 }
 
 .hz-card {
   display: block;
   width: 100%;
-  padding: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line-1);
   border-radius: var(--r-2);
   background: var(--surface-2);
@@ -212,6 +220,47 @@
   line-height: var(--lh-ui);
   text-align: left;
   cursor: pointer;
+}
+
+/* Two lines keep both cards inside a 1280x720 rail; the full sentence stays in the DOM. */
+.hz-card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.hz-card-wrap.is-open .hz-card-text {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.hz-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hz-more:hover,
+.hz-more:focus-visible {
+  color: var(--text-1);
+}
+
+/* The credit is a flex child too, so its own top margin would double the gap. */
+.hz-stories .hz-small {
+  margin: 0;
+}
+
+.hz-more:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .hz-card:hover {
@@ -272,6 +321,42 @@
   line-height: var(--lh-ui);
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* Place names on the first view: small muted caps that never take a map click. */
+.hz-place-label {
+  color: var(--text-3);
+  font-size: var(--fs-10);
+  letter-spacing: 0.14em;
+  line-height: var(--lh-ui);
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 0 4px var(--surface-0), 0 0 4px var(--surface-0);
+}
+
+/* The two fixed story anchors: buttons, so they read as clickable next to the plain names. */
+.hz-anchor {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-float);
+}
+
+.hz-anchor:hover {
+  border-color: var(--accent);
+}
+
+.hz-anchor:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* The gap line's arrowhead: drawn pointing along +x, then rotated by the drawing code. */
