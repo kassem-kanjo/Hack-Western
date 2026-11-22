@@ -316,11 +316,66 @@ def test_tiger_supplies_the_sparkline_and_rate(
     assert baltic["sparkline"][-1] == 7
     assert baltic["sparkline"][-3] == 3
 
-    # Empty in Tiger means zero traffic, not a silent fall back to the hour files.
-    assert rows["HORMUZ"]["source"] == "tiger"
-    assert rows["HORMUZ"]["msgs_per_min"] == 0.0
+    # No rows at all for a region in Tiger means the files answer for it (the sink may not
+    # have caught up on that region yet), never a zero-traffic reading.
+    assert rows["HORMUZ"]["source"] == "files"
     assert rows_again["BALTIC_WATCH"]["source"] == "tiger"
 
     # Readings are cached for 20 s, so the second request adds no queries.
     assert len(fake.queries) == first_queries
     assert "BALTIC_WATCH" in {region for region, _, _ in fake.queries}
+
+
+class _EmptyTiger:
+    """A reachable repo whose regions have no rows at all."""
+
+    def minutely(self, region: str, start: datetime, end: datetime) -> list[tuple[datetime, int]]:
+        return []
+
+    def close(self) -> None:
+        return None
+
+
+def test_tiger_with_no_rows_for_any_name_falls_back_to_files(
+    snapshot_dir: Path, ais_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_baltic_hour(ais_dir)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused@127.0.0.1:1/never")
+    monkeypatch.setattr(areas, "_tiger_repo", lambda: _EmptyTiger())
+
+    with TestClient(app) as client:
+        rows = _by_id(client.get("/api/areas/stats").json())
+
+    assert rows["BALTIC_WATCH"]["source"] == "files"
+    assert rows["BALTIC_WATCH"]["msgs_per_min"] == 0.8
+
+
+class _CountingFailingTimescale:
+    """Stands in for TimescaleRepo: every connect fails, and the attempts are counted."""
+
+    attempts: int = 0
+    kwargs: dict[str, object] = {}
+
+    def __init__(self, url: str, **kwargs: object) -> None:
+        type(self).attempts += 1
+        type(self).kwargs = dict(kwargs)
+        raise ConnectionError("connect timed out")
+
+
+def test_failed_tiger_connect_is_remembered_for_a_minute(
+    snapshot_dir: Path, ais_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused@127.0.0.1:1/never")
+    monkeypatch.setattr(areas, "TimescaleRepo", _CountingFailingTimescale)
+    _CountingFailingTimescale.attempts = 0
+
+    with TestClient(app) as client:
+        response = client.get("/api/areas/stats")
+        client.get("/api/areas/stats")
+
+    # One connect attempt for the whole strip, not one per area per request.
+    assert response.status_code == 200
+    assert {row["source"] for row in response.json()["areas"]} == {"files"}
+    assert _CountingFailingTimescale.attempts == 1
+    # The API never runs schema DDL on its connection.
+    assert _CountingFailingTimescale.kwargs.get("apply_schema") is False

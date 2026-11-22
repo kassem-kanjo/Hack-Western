@@ -200,3 +200,75 @@ def test_corrupt_offsets_resume_from_zero(tmp_path: Path) -> None:
     path.write_text("not json", encoding="utf-8")
 
     assert tiger_sink.load_offsets(path) == {}
+
+
+class _BrokenRepo:
+    """A connection whose writes always fail, like a database that restarted mid-run."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def add_region_pings(self, region: str, pings: Any) -> int:
+        raise ConnectionError("server closed the connection unexpectedly")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_backoff_doubles_from_five_seconds_and_caps_at_a_minute() -> None:
+    delays = [tiger_sink._retry_delay(n) for n in range(1, 8)]
+    assert delays == [5.0, 10.0, 20.0, 40.0, 60.0, 60.0, 60.0]
+
+
+def test_loop_survives_a_failed_pass_and_recovers_on_a_new_connection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "ais"
+    offsets_path = tmp_path / "offsets.json"
+    _write_hour(
+        root,
+        "BALTIC_WATCH",
+        "20261121T09",
+        [_position(111111111, T0), _position(222222222, T0 + timedelta(minutes=1))],
+    )
+    broken = _BrokenRepo()
+    healthy = FakeRepo()
+    made = iter([broken, healthy])
+    delays: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        delays.append(seconds)
+        if len(delays) == 2:
+            raise KeyboardInterrupt  # stop the otherwise endless loop once it has recovered
+
+    result = tiger_sink.main(
+        ["--ais", str(root), "--offsets", str(offsets_path), "--loop", "30"],
+        repo_factory=lambda: next(made),
+        sleep=sleep,
+    )
+
+    assert result == 0
+    # One failed pass waits the first backoff step, then the normal loop interval.
+    assert delays == [5.0, 30.0]
+    assert broken.closed
+    # The file was not marked as read by the failed pass, so the healthy connection gets its pings.
+    assert healthy.ping_count == 2
+    out = capsys.readouterr()
+    assert "pass failed (ConnectionError" in out.err
+    assert "sent 2 pings, 1 files" in out.out
+
+
+def test_single_pass_failure_exits_non_zero_with_one_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "ais"
+    _write_hour(root, "BALTIC_WATCH", "20261121T09", [_position(111111111, T0)])
+
+    result = tiger_sink.main(
+        ["--ais", str(root), "--offsets", str(tmp_path / "offsets.json"), "--loop", "0"],
+        repo=_BrokenRepo(),
+    )
+
+    assert result == 1
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1

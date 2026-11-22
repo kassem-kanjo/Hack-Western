@@ -165,8 +165,6 @@ WHERE region = %s AND minute >= %s AND minute < %s
 ORDER BY minute
 """
 
-_AIS_MINUTELY_REFRESH_RANGE = "CALL refresh_continuous_aggregate('ais_minutely', %s, %s)"
-
 _VESSEL_UPSERT = """
 INSERT INTO vessels_static (mmsi, imo, name, callsign, ship_type, length_m, destination, last_seen)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -272,7 +270,13 @@ class TimescaleRepo:
         *,
         schema: str | None = None,
         connect_timeout: int | float | None = None,
+        apply_schema: bool = True,
     ) -> None:
+        """Open the connection; ``apply_schema=False`` for read-only callers (the API).
+
+        The schema file is idempotent DDL, so the sink and the scripts run it on connect. The
+        API passes False: it must never take DDL locks or write to a database it only reads.
+        """
         connect_kwargs: dict[str, object] = {"autocommit": True}
         if connect_timeout is not None:
             connect_kwargs["connect_timeout"] = connect_timeout
@@ -280,8 +284,9 @@ class TimescaleRepo:
             # Keep public on the path: the Timescale functions (create_hypertable, time_bucket) live there.
             connect_kwargs["options"] = f"-c search_path={schema},public"
         self._conn = psycopg.connect(url, **connect_kwargs)
-        schema_sql = (files("darkfleet.store") / "schema.sql").read_text(encoding="utf-8")
-        self._conn.execute(schema_sql)
+        if apply_schema:
+            schema_sql = (files("darkfleet.store") / "schema.sql").read_text(encoding="utf-8")
+            self._conn.execute(schema_sql)
 
     def upsert_gaps(self, region: str, gaps: Sequence[GapEvent]) -> int:
         params = [
@@ -566,13 +571,12 @@ class TimescaleRepo:
     def minutely(self, region: str, start: datetime, end: datetime) -> list[tuple[datetime, int]]:
         """Per-region message counts for minutes in ``[start, end)``, ordered by minute.
 
-        Materialises the window first (the policy only covers the last three hours and a
-        demo may replay an older recording), then reads ``ais_minutely``. Only minutes with
-        at least one ping appear; callers fill the gaps with zero.
+        ``ais_minutely`` is real-time (``materialized_only = false``), so the read itself
+        includes the newest unmaterialized minutes; no refresh is needed on the read path.
+        Only minutes with at least one ping appear; callers fill the gaps with zero.
         """
         window_start = _as_utc(start)
         window_end = _as_utc(end)
-        self._conn.execute(_AIS_MINUTELY_REFRESH_RANGE, (window_start, window_end))
         rows = self._conn.execute(_AIS_MINUTELY_RANGE, (region, window_start, window_end)).fetchall()
         return [(_as_utc(row[0]), int(row[1])) for row in rows]
 
