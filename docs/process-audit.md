@@ -204,3 +204,9 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** live beat only shows real switch-offs; sink restarted under the loop; briefs will say "Chief commits" explicitly.
 - **Code share since audit 28:** builders ~85%; Chief: merges, Present honesty fix, final click-through.
 - **Change for next 30 min:** never pkill by a pattern that a supervisor loop also contains; kill by PID. Before showing Kassem, run the whole demo end to end myself, every time.
+
+## Sat 21 Nov, 20:22 ET (audit 30, covers 19:52-20:22)
+- **Went well:** demo recorder landed (#242): Present mode recorded at 1280x720 x1.5, long and short cuts, 0 console errors; a take exposed the live beat picking a 0-ships-met story, now ranked by ships met. Health green for the whole window; insights 17-20 logged with sources.
+- **Went wrong:** the first recording captured a person's face on the Pi's live camera; caught before anything was encoded or shared. Encoding blocked on ffmpeg (not installed). Kassem's V3 review and Pi ship-photo test still pending.
+- **Code share since audit 29:** builder ~80% (recorder); Chief: ranking fix, lint fixes, docs.
+- **Change for next 30 min:** nothing ships with live-camera frames until the Patrol beat is re-shot with the ship photo in view.
