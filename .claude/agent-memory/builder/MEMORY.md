@@ -2,3 +2,4 @@
 - [SAR / Planetary Computer facts](sar-planetary-computer.md) — PC access works, slow reads, detector tuning, AIS recorder gap
 - [QNX Pi facts](qnx-pi-facts.md) — no aps/ham, SLM present, ACT LED via gpio-aon-bcm, RR priority pitfalls, A/B harness gotchas
 - [Playwright QA without a server](qa-playwright-no-server.md) — route-intercept web/dist, proxy /api, 204 for SSE, console-error check
+- [Demo video zoom method](demo-video-zoom-method.md) — measure boxes on the on-screen frame; stable states via frame diff, cursor template-match, view edges
