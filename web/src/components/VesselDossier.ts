@@ -217,27 +217,29 @@ function watchlistBlock(data: VesselDossier): HTMLElement | null {
   if (entry === null) return null;
   const category = CATEGORY_LABEL[entry.category] ?? entry.category.replace(/_/g, " ");
 
-  const datasetNodes: (Node | string)[] = [];
-  entry.datasets.forEach((dataset, index) => {
-    if (index > 0) datasetNodes.push(" \u00b7 ");
-    datasetNodes.push(
+  // The list's name is the label a reader knows (issue #249); raw dataset ids such as
+  // ca_dfatd_sema_sanctions stay out of the text. Without a name, one plain link to the dataset.
+  const rows: Node[] = [h("div", { class: "vd-watch-cat" }, category)];
+  if (entry.list_name !== null) {
+    rows.push(h("div", { class: "vd-watch-list" }, entry.list_name));
+  } else if (entry.datasets.length > 0) {
+    const first = entry.datasets[0] as string;
+    rows.push(
       h(
-        "a",
-        {
-          class: "vd-watch-dataset",
-          href: `https://www.opensanctions.org/datasets/${encodeURIComponent(dataset)}/`,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        },
-        dataset,
+        "div",
+        { class: "vd-watch-datasets" },
+        h(
+          "a",
+          {
+            class: "vd-watch-dataset",
+            href: `https://www.opensanctions.org/datasets/${encodeURIComponent(first)}/`,
+            target: "_blank",
+            rel: "noopener noreferrer",
+          },
+          "OpenSanctions dataset",
+        ),
       ),
     );
-  });
-
-  const rows: Node[] = [h("div", { class: "vd-watch-cat" }, category)];
-  if (entry.list_name !== null) rows.push(h("div", { class: "vd-watch-list" }, entry.list_name));
-  if (datasetNodes.length > 0) {
-    rows.push(h("div", { class: "vd-watch-datasets" }, ...datasetNodes));
   }
   if (entry.url !== null) {
     rows.push(
