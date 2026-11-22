@@ -1,6 +1,6 @@
 # STATUS (live)
 
-Updated: Sat 21 Nov, 20:52 ET · Kassem reviewing V3 (walkthrough step 1, Hormuz) · launch material PAUSED until his sign-off · keep/fix/cut product audit running · Devpost draft v2 (we/our) in docs/devpost-v2-draft.md, not submitted
+Updated: Sat 21 Nov, 21:51 ET · V3 + audit-4 fixes live (#250-#257) · Kassem reviewing; launch paused until his sign-off · Pi redeploy (BLIND 0.8 s, #256) waits for his photo test · 5-second test running
 
 ## In flight (overnight build, plan v3 + decisions 0001/0002)
 - **Recorder:** one connection, six regions (Baltic, Hormuz, Malaysia EOPL, Laconia, Red Sea, Black Sea) since 03:54.

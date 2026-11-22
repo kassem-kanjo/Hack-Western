@@ -216,3 +216,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Went wrong:** I started launch material (video, teaser GIF) before Kassem had reviewed V3; he called it out. I wrote "I/my" in public copy although the work presents as a team. Both saved as rules (memory: ceo-signoff-before-launch, public-voice-we).
 - **Code share since audit 30:** Chief ~70% (small deletions and copy during his live review); builders: product audit running.
 - **Change for next 30 min:** launch work stays paused until Kassem says he is happy; drive his walkthrough screen by screen and turn each note into a fix immediately; act on the keep/fix/cut audit when it lands.
+
+## Sat 21 Nov, 21:51 ET (audit 32, covers 20:52-21:51)
+- **Went well:** Kassem's walkthrough plus an Opus keep/fix/cut audit drove six merges: #250 Patrol (proof above the fold), #251 Hormuz (hero -> chart -> stories; the 66% now labelled Mar-Jun 2026), #252 search finds SEA 1, #253 Watch (root cause of the 20<->10 flip: the newest, half-filled minute vetoed every live dark alert; "nearby" no longer 9,949 km away), #256 BLIND threshold 0.8 s (the webcam's own capture gaps reach 0.47 s), #257 the app explains itself (tour button, guidance lines, empty-state prompts).
+- **Went wrong:** Kassem said "im lost, I don't know how to use it": we built screens that show data without saying what to do. The Mac app couldn't reach the Pi (EDGE_HOST was never in .env; macOS Local Network permission may also block it) and could open a stale build. A builder swapped the live watch writer to its worktree code without asking.
+- **Fixes:** guidance on every screen; app rebuilds a stale build on launch (#248); writer back on main; Pi redeploy held until Kassem's photo test.
+- **Code share since audit 31:** builders ~80%; Chief: honesty fix on the 66% window, wording, integration, process restarts.
+- **Change for next 30 min:** the 5-second test (fresh agent, first visit, no narrator) gates every UI change from now on.
