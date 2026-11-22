@@ -285,3 +285,9 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** shot list + measured boxes + peak-frame sheet; tails extended ~0.3 s into the following pause with a short end fade; a volumedetect check before any audio is sent; the Jessica cut re-timed mechanically from B's verified plan instead of waiting for A.
 - **Code share since audit 40:** builders ~55%; Chief: voice pipeline, re-timing, audio QA.
 - **Change for next 30 min:** measure loudness (volumedetect) and look at a frame sheet for every media file before it reaches Kassem.
+
+## Sun 22 Nov, 04:20 ET (audit 42, covers 03:50-04:20)
+- **Went well:** Devpost SUBMITTED (verified "Submitted to Hack Western 13"); video https://youtu.be/AwbrCT3uajE embedded on Devpost and the DEV post; morning reminders cancelled; all builders stopped, tree clean.
+- **Went wrong:** nothing new; the earlier audio bugs are covered by audit 41.
+- **Decision:** product frozen until judging (12:00). No new lanes overnight: the demo path, story case and video are final; only health checks run.
+- **Change for next 30 min:** keep the recorder and server healthy for the table demo; post-judging cleanup is #296.
