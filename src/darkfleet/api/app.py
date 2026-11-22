@@ -24,6 +24,7 @@ from darkfleet.api.edge import router as edge_router
 from darkfleet.api.hormuz import router as hormuz_router
 from darkfleet.api.live import router as live_router
 from darkfleet.api.sar import router as sar_router
+from darkfleet.api.satcheck import router as satcheck_router
 from darkfleet.api.search import router as search_router
 from darkfleet.api.vessels import router as vessels_router
 from darkfleet.api.vessels import warm_cache as warm_vessel_cache
@@ -84,6 +85,7 @@ def _warm_vessel_cache() -> None:
 app.include_router(search_router)
 app.include_router(areas_router)
 app.include_router(sar_router)
+app.include_router(satcheck_router)
 
 
 def data_dir() -> Path:

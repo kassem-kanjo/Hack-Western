@@ -111,6 +111,14 @@ export interface FocusShip {
   sanctioned: boolean;
 }
 
+/** One detection from the satellite check: a radar echo under the alert. */
+export interface SatellitePoint {
+  lat: number;
+  lon: number;
+  /** False when our own AIS did not hear a ship at this spot. */
+  matched: boolean;
+}
+
 /** One radar view: what the Hormuz panel asks the map to draw. */
 export interface RadarMapView {
   /** Unmatched radar detections per 0.1 degree cell, aggregated over the whole period. */
@@ -152,6 +160,11 @@ export interface WatchMapHandle {
   showRegion(opts: { bounds: [number, number, number, number]; areaId: string | null; alertId: string | null }): void;
   /** Draw (or clear with null) the radar density, encounters and hotspots. */
   setRadar(view: RadarMapView | null): void;
+  /**
+   * Draw the satellite check's detections as fixed-size dots: red where our AIS
+   * did not hear a ship, grey where it did. null clears them.
+   */
+  showSatelliteCheck(points: SatellitePoint[] | null): void;
   /** 0..1 scale on the radar density, for the time-lapse. */
   setRadarIntensity(k: number): void;
   /** Glide dots to new fixes from the live feed and pulse the ones in view. */
@@ -527,6 +540,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   const focusLineLayer = svgEl("g", { class: "watch-focus-lines" });
   const contactLayer = svgEl("g", { class: "watch-contacts" });
+  const satelliteLayer = svgEl("g", { class: "watch-satcheck" });
   const alertLayer = svgEl("g", { class: "watch-alert-dots" });
   const fixLayer = svgEl("g", { class: "watch-fixes" });
   const pulseLayer = svgEl("g", { class: "watch-pulses" });
@@ -538,6 +552,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     areaMarkLayer,
     radarMarkLayer,
     contactLayer,
+    satelliteLayer,
     alertLayer,
     fixLayer,
   );
@@ -661,6 +676,10 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
   let contactLngLat: LngLat | null = null;
   /** Spoof: one line per ship, from where it is to the false point. */
   let spoofLines: { line: SVGLineElement; from: LngLat }[] = [];
+  /** Satellite check dots, positioned per frame like every other fixed-size mark. */
+  let satelliteDots: { lngLat: LngLat; circle: SVGCircleElement }[] = [];
+  /** Last drawn detections, so an unchanged refresh does not rebuild the dots. */
+  let satelliteSignature: string | null = null;
 
   let raf: number | null = null;
   let ticker: number | null = null;
@@ -1042,6 +1061,18 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       }
       dot.group.style.display = "";
       dot.group.setAttribute("transform", `translate(${point.x} ${point.y})`);
+    }
+
+    // Satellite check detections: a fixed 4 px dot, red or grey, no labels.
+    for (const mark of satelliteDots) {
+      const point = map.project(mark.lngLat);
+      if (!onScreen(point.x, point.y, 20)) {
+        mark.circle.style.display = "none";
+        continue;
+      }
+      mark.circle.style.display = "";
+      mark.circle.setAttribute("cx", String(point.x));
+      mark.circle.setAttribute("cy", String(point.y));
     }
 
     // Watched-area markers: only while the area itself is a speck; closer in the
@@ -1550,6 +1581,38 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       );
     }
     buildRadarMarks();
+    positionOverlays();
+  }
+
+  /**
+   * The satellite check's detections (issue #268). Red is a ship radar saw and
+   * our AIS did not hear; grey is one both saw. Coordinates are the only state:
+   * an unchanged list is not redrawn, so a snapshot refresh costs nothing.
+   */
+  function showSatelliteCheck(points: SatellitePoint[] | null): void {
+    if (destroyed) return;
+    const next = points ?? [];
+    const signature = next
+      .map((point) => `${point.lat},${point.lon},${point.matched ? 1 : 0}`)
+      .join(";");
+    if (signature === satelliteSignature) return;
+    satelliteSignature = signature;
+
+    satelliteLayer.replaceChildren();
+    satelliteDots = [];
+    for (const point of next) {
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) continue;
+      const circle = svgEl("circle", {
+        cx: 0,
+        cy: 0,
+        r: 4,
+        fill: point.matched ? colors.ais : colors.alert,
+        stroke: colors.sea,
+        "stroke-width": 1,
+      });
+      satelliteLayer.append(circle);
+      satelliteDots.push({ lngLat: [point.lon, point.lat], circle });
+    }
     positionOverlays();
   }
 
@@ -2154,6 +2217,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     },
     showRegion,
     setRadar,
+    showSatelliteCheck,
     applyLive,
     setRadarIntensity(k: number): void {
       radarIntensity = Math.max(0, Math.min(1.2, k));

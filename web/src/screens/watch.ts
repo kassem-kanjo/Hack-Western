@@ -29,6 +29,7 @@ import type { WatchArea, WatchRecording } from "../api";
 import { mountReplay, type ReplayView } from "../components/AlertReplay";
 import { h } from "../components/dom";
 import { guideLine } from "../components/GuideLine";
+import { mountSatelliteCheck, type SatelliteCheckHandle } from "../components/SatelliteCheck";
 import { onVesselFocus } from "../components/SearchBox";
 import {
   SIGHTINGS_POLL_MS,
@@ -968,6 +969,11 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   /** #185: the dark-period scrubber, kept across a same-alert refresh so the playhead stays put. */
   let replay: ReplayView | null = null;
   let replayAlertId: string | null = null;
+  /** #268: the satellite check for the open dark alert, and what its dots belong to. */
+  let satcheck: SatelliteCheckHandle | null = null;
+  let satcheckAlertId: string | null = null;
+  /** The check's own stamp: an unchanged refresh does not redraw the map dots. */
+  let satcheckAt: string | null = null;
   /** #183: unsubscribe for the top-bar search -> map bridge. */
   let searchFocusOff: (() => void) | null = null;
   let stream: WatchStream | null = null;
@@ -1488,6 +1494,23 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         replayAlertId = alert.id;
       }
       if (replay !== null) parts.push(replay.element);
+
+      // #268: the satellite radar result for this switch-off, right under the replay.
+      satcheck?.destroy();
+      satcheck = mountSatelliteCheck({
+        alertId: alert.id,
+        onPoints: (points, generatedAt) => {
+          if (points === null) {
+            satcheckAt = null;
+            map?.showSatelliteCheck(null);
+            return;
+          }
+          if (generatedAt !== null && generatedAt === satcheckAt) return;
+          satcheckAt = generatedAt;
+          map?.showSatelliteCheck(points);
+        },
+      });
+      parts.push(satcheck.element);
     }
 
     // The receivers were off for part of this window: say so, and say it was not counted.
@@ -1684,6 +1707,17 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const areaMode = alert === null && area !== null && !radarMode;
     const open = alert !== null || area !== null;
     if (alert === null || alert.kind !== "dark") dropReplay();
+
+    // #268: the satellite check belongs to one dark alert. A different selection,
+    // or none, clears its dots; the same alert keeps them through a refresh.
+    const satcheckFor = alert !== null && alert.kind === "dark" ? alert.id : null;
+    if (satcheckFor !== satcheckAlertId) {
+      satcheck?.destroy();
+      satcheck = null;
+      satcheckAt = null;
+      satcheckAlertId = satcheckFor;
+      map?.showSatelliteCheck(null);
+    }
 
     main.classList.toggle("is-focus", open);
     markRows();
@@ -1960,6 +1994,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       feed = null;
       abort.abort();
       dropReplay();
+      satcheck?.destroy();
+      satcheck = null;
       searchFocusOff?.();
       searchFocusOff = null;
       setDossierTrackRenderer(null);
