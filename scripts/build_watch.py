@@ -545,8 +545,13 @@ def _contact_rows(
     vessels: dict[int, VesselInfo],
     categories: dict[int, str],
     land: Any,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int, int]:
     """Join ``possible_contacts`` with the static identity and watchlist, sanctioned-first.
+
+    Returns ``(rows, inside, could_meet)``: the capped rows the alert carries, how many hulls
+    were inside the reach area at all, and how many of those could have met the dark ship.
+    The two counts are taken before any cut, because the rows are capped at ``MAX_CONTACTS``
+    and the screen must not present the cut list as the whole answer (issue #270).
 
     ``possible_contacts`` already caps its own list; asking for more than the contract's 20
     lets the watchlist reorder happen before the cut, so a sanctioned hull that sits a little
@@ -554,7 +559,7 @@ def _contact_rows(
     Identities that cannot be real MMSIs are dropped here too: an artefact is not a ship the
     screen may name as a possible meeting.
     """
-    contacts = possible_contacts(
+    everyone = possible_contacts(
         dark_mmsi,
         last,
         next_fix,
@@ -562,10 +567,15 @@ def _contact_rows(
         t_start,
         t_end,
         {mmsi: track for mmsi, track in tracks.items() if valid_mmsi(mmsi)},
-        max_contacts=MAX_CONTACTS * 5,
+        # Every hull in reach, not a cut: the counts below must be the true numbers.
+        max_contacts=len(tracks) + 1,
         land=land,
         min_offshore_km=OFFSHORE_KM,
     )
+    inside = len(everyone)
+    could_meet = sum(1 for contact in everyone if contact.could_meet)
+    # The same window as before the counts existed: the watchlist reorder sees the first 100.
+    contacts = everyone[: MAX_CONTACTS * 5]
     rows = [
         {
             "mmsi": contact.mmsi,
@@ -583,7 +593,7 @@ def _contact_rows(
     rows.sort(
         key=lambda row: (row["watchlist"] is None, not row["could_meet"], row["min_dist_km"], row["mmsi"])
     )
-    return rows[:MAX_CONTACTS]
+    return rows[:MAX_CONTACTS], inside, could_meet
 
 
 def _raise_severity(base: float, *, watched: bool, involved: bool) -> float:
@@ -664,6 +674,9 @@ def _alert_payload(
     # hold the contacts that were genuinely inside it. Other kinds keep the class cap.
     cap_kn = round(effective_cap_kn(class_cap_kn, track) if kind == "dark" else class_cap_kn, 3)
     contacts: list[dict[str, Any]] = []
+    # Dark alerts only: how many hulls were inside the reach, and how many could have met it.
+    inside_reach: int | None = None
+    could_meet_count: int | None = None
     next_fix: Fix | None = None
 
     last_fix = _last_ping(track, event.start)
@@ -674,7 +687,7 @@ def _alert_payload(
             if isinstance(next_lat, (int, float)) and isinstance(next_lon, (int, float)):
                 next_fix = Fix(lat=float(next_lat), lon=float(next_lon), t=event.end)
         fixed = last_fix or Fix(lat=event.lat, lon=event.lon, t=event.start)
-        contacts = _contact_rows(
+        contacts, inside_reach, could_meet_count = _contact_rows(
             mmsi,
             fixed,
             next_fix,
@@ -733,6 +746,8 @@ def _alert_payload(
         "next": {"lat": next_fix.lat, "lon": next_fix.lon, "t": _iso(next_fix.t)} if next_fix else None,
         "speed_cap_kn": cap_kn,
         "contacts": contacts,
+        "inside_reach": inside_reach,
+        "could_meet_count": could_meet_count,
         "trail": _trail(tracks.get(mmsi, []), event.start, event.end),
         "evidence": event.evidence,
     }

@@ -216,7 +216,7 @@ function metaLine(check: Check): string | null {
   return parts.length === 0 ? null : parts.join(" \u00b7 ");
 }
 
-function hook(chipUrl: string, alt: string): HTMLElement {
+function chipLink(chipUrl: string, alt: string): HTMLElement {
   return h(
     "a",
     { class: "satcheck-chip", href: chipUrl, target: "_blank", rel: "noopener" },
@@ -242,9 +242,10 @@ export function mountSatelliteCheck(opts: SatelliteCheckOptions): SatelliteCheck
     return h("p", { class: "satcheck-source" }, source ?? DEFAULT_SATELLITE_SOURCE);
   }
 
-  function renderLine(text: string, source?: string | null): void {
+  function renderLine(text: string, source?: string | null, withSource = true): void {
     if (destroyed) return;
-    body.replaceChildren(h("p", { class: "satcheck-line" }, text), attribution(source ?? null));
+    const line = h("p", { class: "satcheck-line" }, text);
+    body.replaceChildren(...(withSource ? [line, attribution(source ?? null)] : [line]));
   }
 
   function renderCheck(check: Check): void {
@@ -274,7 +275,7 @@ export function mountSatelliteCheck(opts: SatelliteCheckOptions): SatelliteCheck
         : `Radar chip of a ship not broadcasting at ${clock} UTC`;
     const chips: HTMLElement[] = [];
     for (const detection of check.detections) {
-      if (detection.chipUrl !== null) chips.push(hook(detection.chipUrl, alt));
+      if (detection.chipUrl !== null) chips.push(chipLink(detection.chipUrl, alt));
     }
     if (chips.length > 0) {
       children.push(
@@ -300,7 +301,7 @@ export function mountSatelliteCheck(opts: SatelliteCheckOptions): SatelliteCheck
       if (destroyed) return;
       if (response.status === 404) {
         opts.onPoints(null, null);
-        renderLine(NOT_COMPUTED_LINE);
+        renderLine(NOT_COMPUTED_LINE, null, false);
         return;
       }
       if (!response.ok) throw new Error(`GET /api/satcheck failed: HTTP ${response.status}`);

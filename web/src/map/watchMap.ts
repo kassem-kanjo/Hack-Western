@@ -625,6 +625,40 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     layerPanel.append(row);
   }
 
+  // The key says what the marks mean; the rows above switch the layers, this
+  // block only names the colours (#270).
+  layerPanel.append(
+    h(
+      "div",
+      { class: "watch-marks-key" },
+      h("h4", null, "Marks on the map"),
+      h(
+        "div",
+        { class: "watch-marks-row" },
+        h("span", { class: "watch-marks-swatch is-red-label" }),
+        "Red label: could have met, on a sanctions list",
+      ),
+      h(
+        "div",
+        { class: "watch-marks-row" },
+        h("span", { class: "watch-marks-swatch is-orange-label" }),
+        "Orange label: could have met",
+      ),
+      h(
+        "div",
+        { class: "watch-marks-row" },
+        h("span", { class: "watch-marks-swatch is-orange-dot" }),
+        "Orange dot: another ship that switched off",
+      ),
+      h(
+        "div",
+        { class: "watch-marks-row" },
+        h("span", { class: "watch-marks-swatch is-grey-dot" }),
+        "Grey or white dot: other ships, broadcasting normally",
+      ),
+    ),
+  );
+
   const cursorEl = h(
     "div",
     { class: "watch-cursor", "aria-hidden": "true" },
@@ -1063,7 +1097,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       dot.group.setAttribute("transform", `translate(${point.x} ${point.y})`);
     }
 
-    // Satellite check detections: a fixed 4 px dot, red or grey, no labels.
+    // Satellite check detections: a fixed 7 px dot, red or grey, no labels.
     for (const mark of satelliteDots) {
       const point = map.project(mark.lngLat);
       if (!onScreen(point.x, point.y, 20)) {
@@ -1586,8 +1620,9 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
 
   /**
    * The satellite check's detections (issue #268). Red is a ship radar saw and
-   * our AIS did not hear; grey is one both saw. Coordinates are the only state:
-   * an unchanged list is not redrawn, so a snapshot refresh costs nothing.
+   * our AIS did not hear; grey is one both saw. A 7 px dot each. Coordinates
+   * are the only state: an unchanged list is not redrawn, so a snapshot
+   * refresh costs nothing.
    */
   function showSatelliteCheck(points: SatellitePoint[] | null): void {
     if (destroyed) return;
@@ -1605,7 +1640,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
       const circle = svgEl("circle", {
         cx: 0,
         cy: 0,
-        r: 4,
+        r: 3.5,
         fill: point.matched ? colors.ais : colors.alert,
         stroke: colors.sea,
         "stroke-width": 1,
