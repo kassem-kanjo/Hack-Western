@@ -257,7 +257,6 @@ const KIND_ORDER: WatchAlertKind[] = [
   "spoof",
   "meeting",
   "jump",
-  "radar_unmatched",
 ];
 
 /** "2026-11-14" -> "14 Nov": the radar day, short enough for a row. */
@@ -320,23 +319,36 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
 let lensUsed = false;
 
 /**
- * The story a cold open selects, strongest first (QA #229 A4: always select one,
- * even when something is ongoing):
- *   1. ongoing dark alert with a sanctioned ship able to meet it,
- *   2. ongoing dark alert or sanctioned stop,
- *   3. the newest earlier dark alert that had a sanctioned ship able to meet it,
- *      then the newest sanctioned stop, then the newest spoof.
+ * The switch-off with the most ships it could have met, the same rule as Present's
+ * `strongestAlert` (issue #249; mirrored because that helper is private to present.ts):
+ * most could-meet contacts, then ongoing before ended, then the newest.
+ */
+function strongestSwitchOff(alerts: readonly WatchAlert[]): WatchAlert | null {
+  const met = (alert: WatchAlert): number => alert.contacts.filter((contact) => contact.could_meet === true).length;
+  const dark = alerts
+    .filter((alert) => alert.kind === "dark")
+    .sort(
+      (a, b) =>
+        met(b) - met(a) ||
+        Number(b.status === "ongoing") - Number(a.status === "ongoing") ||
+        Date.parse(b.t_start) - Date.parse(a.t_start),
+    );
+  return dark[0] ?? null;
+}
+
+/**
+ * The story a cold open selects (QA #229 A4: always select one, even when something is ongoing):
+ *   1. the switch-off with the most ships it could have met (issue #249),
+ *   2. the newest ongoing sanctioned stop,
+ *   3. the newest sanctioned stop, then the newest spoof, then the newest alert of any kind.
  * Null only when there are no alerts at all.
  */
 function pickLens(snapshot: WatchResponse): WatchAlert | null {
-  const meetsSanctioned = (alert: WatchAlert): boolean =>
-    alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned");
   const ongoing = sortedAlerts(snapshot.alerts).filter((alert) => alert.status === "ongoing");
   const earlier = sortedAlerts(snapshot.alerts);
   return (
-    ongoing.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
-    ongoing.find((alert) => alert.kind === "dark" || alert.kind === "sanctioned_stop") ??
-    earlier.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
+    strongestSwitchOff(snapshot.alerts) ??
+    ongoing.find((alert) => alert.kind === "sanctioned_stop") ??
     earlier.find((alert) => alert.kind === "sanctioned_stop") ??
     earlier.find((alert) => alert.kind === "spoof") ??
     earlier[0] ??
@@ -599,8 +611,9 @@ function scopedAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
 }
 
 function visibleAlerts(data: WatchResponse, state: FilterState): WatchAlert[] {
+  // The radar picture lives on the Hormuz screen, so its alert is no longer a list row (#249).
   return sortedAlerts(
-    scopedAlerts(data, state).filter((alert) => state.kinds.has(alert.kind)),
+    scopedAlerts(data, state).filter((alert) => alert.kind !== "radar_unmatched" && state.kinds.has(alert.kind)),
   );
 }
 
@@ -744,8 +757,17 @@ function overlappingGap(
   return null;
 }
 
-/** Hulls heard recently, nearest first with watchlisted ones ahead; the list for a stopped ship. */
-function nearbyShips(snapshot: WatchResponse, alert: WatchAlert, limit: number): WatchContact[] {
+/**
+ * Hulls heard recently, watchlisted ones ahead, then nearest; the list for a stopped ship.
+ * Only hulls inside the radius the event checked are listed (issue #249): the table used to show
+ * ships 9,949 km away under a "Distance checked 3 km" label. `within` is the count that passed.
+ */
+function nearbyShips(
+  snapshot: WatchResponse,
+  alert: WatchAlert,
+  limit: number,
+  radiusKm: number,
+): { shown: WatchContact[]; within: number } {
   const out: WatchContact[] = [];
   for (const ship of snapshot.ships) {
     if (ship.mmsi === alert.mmsi) continue;
@@ -768,8 +790,8 @@ function nearbyShips(snapshot: WatchResponse, alert: WatchAlert, limit: number):
     if (aW !== bW) return bW - aW;
     return a.min_dist_km - b.min_dist_km;
   });
-  // Sanctioned first, then the rest, but only those inside a radius a viewer can reason about.
-  return out.slice(0, limit);
+  const inside = out.filter((contact) => contact.min_dist_km <= radiusKm);
+  return { shown: inside.slice(0, limit), within: inside.length };
 }
 
 /** The hull names the rail's search matches against, in one place. */
@@ -869,9 +891,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         "OpenSanctions",
       ),
     ),
-    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Snapshot"), statusSnap),
-    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Transponder feed"), statusFeed),
-    h("span", { class: "watch-status-item is-keys" }, keyHint("J"), keyHint("K"), "move", keyHint("Esc"), "back", keyHint("/"), "find ship"),
+    // Issue #249: the bar carries sources and the UTC clock only.
     h("span", { class: "watch-status-item is-clock" }, h("span", { class: "watch-status-k" }, "UTC"), statusClock),
   );
 
@@ -1098,15 +1118,26 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   }
 
   /** The watched areas as rows: every area on the map can be opened from here too. */
+  /**
+   * One line of watched areas that have events in the window (issue #249). An area with nothing
+   * to show is left out, and the whole block is hidden when no area has an event.
+   */
   function renderAreas(snapshot: WatchResponse): void {
-    const watched = snapshot.areas.filter((area) => area.kind === "watched");
-    areasCount.textContent = String(watched.length);
-    areasList.replaceChildren();
     const now = snapshotNow(snapshot);
-    for (const area of watched) {
-      const count = snapshot.alerts.filter(
-        (alert) => alert.area_id === area.id && inWindow(alert, now, 12),
-      ).length;
+    const active = snapshot.areas
+      .filter((area) => area.kind === "watched")
+      .map((area) => ({
+        area,
+        count: snapshot.alerts.filter((alert) => alert.area_id === area.id && inWindow(alert, now, 12)).length,
+      }))
+      .filter((entry) => entry.count > 0);
+    areasCount.textContent = String(active.length);
+    areasEl.hidden = active.length === 0;
+    areasList.replaceChildren();
+    if (active.length === 0) return;
+    const line = h("li", { class: "watch-areas-line" });
+    active.forEach(({ area, count }, index) => {
+      if (index > 0) line.append(" · ");
       const row = h(
         "button",
         {
@@ -1116,13 +1147,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           "data-area-id": area.id,
         },
         h("span", { class: "watch-area-row-name" }, area.name),
-        h("span", { class: count > 0 ? "watch-mono watch-area-row-n is-hot" : "watch-mono watch-area-row-n" }, String(count)),
+        " ",
+        h("span", { class: "watch-mono watch-area-row-n is-hot" }, String(count)),
       );
       row.addEventListener("click", () => {
         location.hash = watchAreaHref(area.id);
       });
-      areasList.append(h("li", null, row));
-    }
+      line.append(row);
+    });
+    areasList.append(line);
   }
 
   /** One way to pick an area: filter the list and move the camera there (null = opening view). */
@@ -1185,52 +1218,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const areas = snapshot.areas
       .filter((area) => countIn(area.id) > 0)
       .sort((a, b) => countIn(b.id) - countIn(a.id));
+    // Issue #249: the region control and the list's own search are cut; the top-bar search and
+    // the map's area outlines do the same job. Only the kind filter stays in the list header.
     areaChips = [];
-    const seg = h("div", { class: "watch-seg", role: "group", "aria-label": "Area" });
-    const segment = (id: string, label: string, count: number, onPick: () => void): void => {
-      const button = h(
-        "button",
-        { class: "watch-seg-btn", type: "button", "aria-pressed": "false" },
-        h("span", null, label),
-        h("span", { class: "watch-mono" }, fmtInt(count)),
-      );
-      button.addEventListener("click", onPick);
-      seg.append(button);
-      areaChips.push({ id, chip: button });
-    };
-    segment("", "All", countIn(null), () => chooseArea(null));
-    for (const area of areas) {
-      segment(area.id, area.name, countIn(area.id), () =>
-        chooseArea(state.areaId === area.id ? null : area.id),
-      );
-    }
-
-    const search = h("input", {
-      class: "watch-search",
-      type: "search",
-      placeholder: "Find a ship by name or MMSI",
-      "aria-label": "Filter events by name or MMSI",
-      autocomplete: "off",
-      spellcheck: "false",
-    });
-    search.value = state.query;
-    search.addEventListener("input", () => {
-      state.query = search.value.trim().toLowerCase();
-      if (data !== null) {
-        syncFilters(data);
-        renderRows(data);
-      }
-    });
-    search.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        search.blur();
-      }
-    });
-    searchInput = search;
+    searchInput = null;
 
     filtersEl.classList.remove("is-loading");
-    filtersEl.replaceChildren(search, seg, kinds);
+    filtersEl.replaceChildren(kinds);
   }
 
   function renderEvents(snapshot: WatchResponse): void {
@@ -1340,72 +1334,28 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
   function mapAlertFor(snapshot: WatchResponse, alert: WatchAlert): WatchAlert {
     if (alert.kind === "spoof") return { ...alert, contacts: spoofContacts(snapshot, alert) };
     if (alert.kind !== "sanctioned_stop") return alert;
-    return { ...alert, contacts: nearbyShips(snapshot, alert, 15) };
+    const radiusKm = reachRadiusKm(alert, Date.now());
+    return { ...alert, contacts: nearbyShips(snapshot, alert, 15, radiusKm).shown };
   }
 
-  /** One row per ship that reported the false point, with its offset and the speed the jump implies. */
-  function spoofSection(snapshot: WatchResponse, alert: WatchAlert): HTMLElement {
+  /**
+   * The faked-position event as one sentence (issue #249): how many ships jumped to the one point
+   * and the speed range the jump needs. The map keeps each ship's line; the per-ship table went.
+   */
+  function spoofSection(_snapshot: WatchResponse, alert: WatchAlert): HTMLElement {
     const raw = alert.evidence["vessels"];
     const vessels = Array.isArray(raw)
       ? (raw as { mmsi: number; offset_km: number; jump_in_kn: number; jump_out_kn: number }[])
       : [];
-    const located = new Map(spoofContacts(snapshot, alert).map((contact) => [contact.mmsi, contact]));
-    const byMmsi = new Map(snapshot.ships.map((ship) => [ship.mmsi, ship]));
-    const body = h("tbody");
-    for (const vessel of vessels) {
-      const ship = byMmsi.get(vessel.mmsi);
-      const label = ship?.name?.trim() ? (ship.name as string) : `MMSI ${vessel.mmsi}`;
-      const row = h(
-        "tr",
-        { tabindex: "0", role: "button", title: label },
-        h("td", { class: "watch-nearby-name" }, label),
-        h("td", { class: "watch-mono watch-num" }, fmtDec(vessel.offset_km, 1)),
-        h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_in_kn)}`),
-        h("td", { class: "watch-mono watch-num" }, `${Math.round(vessel.jump_out_kn)}`),
-      );
-      const ring = (): void => {
-        const at = located.get(vessel.mmsi);
-        if (map === null || at === undefined) return;
-        map.focusContact({ mmsi: at.mmsi, name: at.name, lat: at.lat, lon: at.lon, sanctioned: false });
-        for (const current of document.querySelectorAll<HTMLTableRowElement>(".watch-spoof-table tbody tr")) {
-          current.removeAttribute("aria-current");
-        }
-        row.setAttribute("aria-current", "true");
-      };
-      row.addEventListener("click", () => {
-        ring();
-        openDossier(vessel.mmsi); // #182: a spoof-table row opens its dossier
-      });
-      row.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        ring();
-        openDossier(vessel.mmsi);
-      });
-      body.append(row);
+    if (vessels.length === 0) {
+      return section("Ships at the false point", 0, h("div", { class: "watch-none" }, "No ships nearby"));
     }
-    const table = h(
-      "table",
-      { class: "watch-nearby-table watch-spoof-table" },
-      h(
-        "thead",
-        null,
-        h(
-          "tr",
-          null,
-          h("th", { scope: "col" }, "Ship"),
-          h("th", { scope: "col" }, "Off (km)"),
-          h("th", { scope: "col" }, "In (kn)"),
-          h("th", { scope: "col" }, "Out (kn)"),
-        ),
-      ),
-      body,
-    );
-    return section(
-      "Ships at the false point",
-      vessels.length,
-      vessels.length === 0 ? h("div", { class: "watch-none" }, "No ships nearby") : table,
-    );
+    const speeds = vessels.flatMap((vessel) => [vessel.jump_in_kn, vessel.jump_out_kn]);
+    const low = Math.round(Math.min(...speeds));
+    const high = Math.round(Math.max(...speeds));
+    const noun = vessels.length === 1 ? "ship jumped" : "ships jumped";
+    const sentence = `${vessels.length} ${noun} to one point; reaching it needs ${low}–${high} knots`;
+    return section("Ships at the false point", vessels.length, h("p", { class: "watch-spoof-note" }, sentence));
   }
 
   function renderDetails(snapshot: WatchResponse, alert: WatchAlert): void {
@@ -1420,30 +1370,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       radiusEl = h("span", { class: "watch-mono" }, `${fmtInt(Math.round(reachRadiusKm(alert, atMs)))} km`);
     }
 
-    const imo = imoOf(alert);
+    // Four rows (issue #249): MMSI, IMO and type belong in the vessel dossier, not the event.
     const fields = h(
       "dl",
       { class: "watch-fields" },
       ...field("Vessel", h("span", { class: "watch-vessel" }, alertName(alert))),
-      ...field("MMSI", h("span", { class: "watch-mono" }, String(alert.mmsi))),
-      ...(imo !== null ? field("Permanent ID (IMO)", h("span", { class: "watch-mono" }, imo)) : []),
-      ...field("Type", shipType(snapshot, alert)),
       ...field("Flag", flagOf(alert.mmsi)),
-      ...field("Event", shortLabel(alert.label)),
-      ...field("Area", areaName(snapshot, alert.area_id)),
       ...field("Started", h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_start, now))),
-      ...field(
-        "Ended",
-        alert.t_end === null
-          ? h(
-              "span",
-              { class: "watch-ongoing" },
-              h("span", { class: "watch-row-live", "aria-hidden": "true" }),
-              "ongoing",
-            )
-          : h("span", { class: "watch-time-cell" }, ...timeValue(alert.t_end, now)),
-      ),
-      ...field("Duration", duration),
       ...field(
         "Last position",
         h("span", { class: "watch-mono" }, `${alert.last.lat.toFixed(4)}, ${alert.last.lon.toFixed(4)}`),
@@ -1491,12 +1424,15 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
 
     if (alert.kind === "sanctioned_stop") {
       // A stopped ship has no reach story to tell: show who is nearest to it.
-      const near = nearbyShips(snapshot, alert, 15);
+      const radiusKm = reachRadiusKm(alert, atMs);
+      const { shown, within } = nearbyShips(snapshot, alert, 15, radiusKm);
       parts.push(
         section(
           "Ships nearby",
-          near.length,
-          near.length === 0 ? h("div", { class: "watch-none" }, "No ships heard nearby") : contactTable(snapshot, near),
+          within,
+          within === 0
+            ? h("div", { class: "watch-none" }, `No other ship heard within ${fmtInt(Math.round(radiusKm))} km`)
+            : contactTable(snapshot, shown),
         ),
       );
     } else if (alert.kind === "spoof") {

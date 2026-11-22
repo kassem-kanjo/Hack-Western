@@ -680,3 +680,31 @@ def test_shorter_receiver_holes_are_not_reported(tmp_path: Path) -> None:
     )
 
     assert payload["recording"]["gaps"] == []
+
+
+def test_half_filled_newest_minute_does_not_drop_ongoing_dark_alerts(tmp_path: Path) -> None:
+    """Issue #249: the live build flipped between 17 and 10 alerts with the recorder's phase.
+
+    The newest minute of a recording is still filling while the build reads it. Ten messages in
+    minute 180 sit under the 150-per-minute coverage floor, and the old code let that partial
+    minute veto every ongoing dark alert. Coverage is now judged to the last complete minute.
+    """
+    ais = _write_ais(tmp_path)
+    _write_sanctions(tmp_path)
+    partial = [_position(HORMUZ_FILLER, _minute(180, index * 2.0), 26.70, 56.70, 0.0) for index in range(10)]
+    with gzip.open(ais / HORMUZ / "20261121T01.jsonl.gz", "wt", encoding="utf-8") as handle:
+        for line in partial:
+            handle.write(json.dumps(line) + "\n")
+
+    payload = _build(tmp_path)
+
+    assert [alert["mmsi"] for alert in payload["alerts"] if alert["kind"] == "dark"] == [DARK]
+
+
+def test_written_snapshot_leaves_no_temp_file_behind(tmp_path: Path) -> None:
+    _write_ais(tmp_path)
+    _write_sanctions(tmp_path)
+
+    _build(tmp_path)
+
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == ["watch.json"]
