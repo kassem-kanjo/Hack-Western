@@ -60,7 +60,7 @@ python, fastapi, typescript, vite, maplibre, deck.gl, timescaledb, tiger-data, p
 
 ## Prize tracks
 
-**QNX.** The Pi runs QNX 8 with a webcam and the AI module from oss.qnx.com (OpenCV DNN, YOLOX-nano). The safety loop runs at the highest fixed priority and owns the alert; the AI runs lower and is untrusted. Under a 4-core overload, 10 of 27 alerts met the 200 ms deadline without the priority fix and 63 of 64 with it, and the loop's worst delay dropped from 24 ms to 1.8 ms. If anything stalls for 500 ms it says "lookout blind". A standby AI takes over in 130–157 ms. Sightings go to a hash-chained log on the power-safe qnx6 partition. Adaptive partitioning isn't in this QNX image, so we used fixed priorities.
+**QNX.** The Pi runs QNX 8 with a webcam and the AI module from oss.qnx.com (OpenCV DNN, YOLOX-nano). The safety loop runs at the highest fixed priority and owns the alert; the AI runs lower and is untrusted. Under a 4-core overload, 10 of 27 alerts met the 200 ms deadline without the priority fix and 63 of 64 with it, and the loop's worst delay dropped from 24 ms to 1.8 ms. If anything stalls for 800 ms it says "lookout blind". A standby AI takes over in 130–157 ms. Sightings go to a hash-chained log on the power-safe qnx6 partition. Adaptive partitioning isn't in this QNX image, so we used fixed priorities.
 
 **Best use of Tiger Data.** Tiger is the live store. Every ping our recorder hears is streamed into a `positions` hypertable, and the live "position reports a minute" on screen comes from a per-minute continuous aggregate. It also holds 475 days of Hormuz radar, 25,836 radar cells and 566 encounter events.
 
