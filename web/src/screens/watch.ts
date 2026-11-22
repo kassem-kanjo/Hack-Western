@@ -134,19 +134,19 @@ function fmtUtcZ(iso: string): string {
 
 /** The noun under each type toggle. */
 const KIND_NAME: Record<WatchAlertKind, string> = {
-  dark: "Dark",
-  sanctioned_stop: "Sanctioned stop",
-  spoof: "Spoof",
+  dark: "Switched off",
+  sanctioned_stop: "Stopped at sea",
+  spoof: "Faked position",
   meeting: "Meeting",
   jump: "Jump",
-  radar_unmatched: "Radar",
+  radar_unmatched: "Seen by satellite radar",
 };
 
 /** Short filter-chip labels; the row tag keeps the full kind name. */
 const KIND_CHIP: Record<WatchAlertKind, string> = {
   dark: "Dark",
   sanctioned_stop: "Stopped",
-  spoof: "Spoof",
+  spoof: "Faked position",
   meeting: "Meeting",
   jump: "Jump",
   radar_unmatched: "Radar",
@@ -194,7 +194,7 @@ function alertName(alert: WatchAlert): string {
   // A radar alert is fleet-level: it names no hull, so the row says what it saw.
   if (alert.kind === "radar_unmatched") {
     const n = alert.evidence["unmatched"];
-    return typeof n === "number" ? `Radar \u00b7 ${n} not broadcasting` : shortLabel(alert.label);
+    return typeof n === "number" ? `Radar \u00b7 ${n} seen, not broadcasting` : shortLabel(alert.label);
   }
   const trimmed = alert.name?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : `Unnamed \u00b7 MMSI ${alert.mmsi}`;
@@ -207,7 +207,12 @@ function contactName(contact: WatchContact): string {
 
 /** Backend labels are already short; this makes the six-word rule structural. */
 function shortLabel(label: string): string {
-  const words = label.trim().split(/\s+/).filter(Boolean);
+  // Backend labels still say "Watchlisted" and "went dark"; the screen uses plain words (QA #229 copy).
+  const plain = label
+    .replace(/Watchlisted ship went dark/i, "Sanctioned or shadow-fleet ship switched off")
+    .replace(/went dark/i, "switched off")
+    .replace(/Watchlisted/i, "Sanctioned or shadow-fleet");
+  const words = plain.trim().split(/\s+/).filter(Boolean);
   return words.slice(0, 6).join(" ");
 }
 
@@ -235,22 +240,26 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
 let lensUsed = false;
 
 /**
- * The story a cold open shows when nothing is happening now, strongest first:
- * the newest earlier dark alert that had a sanctioned ship able to meet it, then
- * the newest sanctioned stop, then the newest spoof. Null when something is
- * ongoing (the list already leads with it).
+ * The story a cold open selects, strongest first (QA #229 A4: always select one,
+ * even when something is ongoing):
+ *   1. ongoing dark alert with a sanctioned ship able to meet it,
+ *   2. ongoing dark alert or sanctioned stop,
+ *   3. the newest earlier dark alert that had a sanctioned ship able to meet it,
+ *      then the newest sanctioned stop, then the newest spoof.
+ * Null only when there are no alerts at all.
  */
 function pickLens(snapshot: WatchResponse): WatchAlert | null {
-  if (snapshot.alerts.some((alert) => alert.status === "ongoing")) return null;
+  const meetsSanctioned = (alert: WatchAlert): boolean =>
+    alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned");
+  const ongoing = sortedAlerts(snapshot.alerts).filter((alert) => alert.status === "ongoing");
   const earlier = sortedAlerts(snapshot.alerts);
   return (
-    earlier.find(
-      (alert) =>
-        alert.kind === "dark" &&
-        alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned"),
-    ) ??
+    ongoing.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
+    ongoing.find((alert) => alert.kind === "dark" || alert.kind === "sanctioned_stop") ??
+    earlier.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
     earlier.find((alert) => alert.kind === "sanctioned_stop") ??
     earlier.find((alert) => alert.kind === "spoof") ??
+    earlier[0] ??
     null
   );
 }
@@ -441,11 +450,11 @@ const MID_COUNTRY: Record<number, string> = {
   760: "Peru",
 };
 
-/** MMSI -> flag state via its MID, or an em dash when the MID is not known. */
+/** MMSI -> flag state via its MID, or "No flag broadcast" when the MID is not known. */
 function flagOf(mmsi: number): string {
-  if (!Number.isFinite(mmsi)) return "\u2014";
+  if (!Number.isFinite(mmsi)) return "No flag broadcast";
   const mid = Math.floor(mmsi / 1_000_000);
-  return MID_COUNTRY[mid] ?? "\u2014";
+  return MID_COUNTRY[mid] ?? "No flag broadcast";
 }
 
 /** The alert's IMO number when the evidence carries one; otherwise omit the field. */
@@ -459,14 +468,14 @@ function imoOf(alert: WatchAlert): string | null {
 /** "tanker" -> "Tanker"; no record -> an honest dash. */
 function shipType(data: WatchResponse, alert: WatchAlert): string {
   const cls = data.ships.find((ship) => ship.mmsi === alert.mmsi)?.class;
-  if (cls === undefined || cls.trim().length === 0) return "\u2014";
+  if (cls === undefined || cls.trim().length === 0) return "Not recorded";
   return cls.charAt(0).toUpperCase() + cls.slice(1);
 }
 
 function watchlistLabel(contact: WatchContact): string {
   if (contact.watchlist === "sanctioned") return "Sanctioned";
   if (contact.watchlist === "shadow_fleet") return "Shadow fleet";
-  return "\u2014";
+  return "Not on a sanctions list";
 }
 
 /* ---- filters -------------------------------------------------------------- */
@@ -781,7 +790,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       ),
     ),
     h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Snapshot"), statusSnap),
-    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "AIS feed"), statusFeed),
+    h("span", { class: "watch-status-item" }, h("span", { class: "watch-status-k" }, "Transponder feed"), statusFeed),
     h("span", { class: "watch-status-item is-keys" }, keyHint("J"), keyHint("K"), "move", keyHint("Esc"), "back", keyHint("/"), "find ship"),
     h("span", { class: "watch-status-item is-clock" }, h("span", { class: "watch-status-k" }, "UTC"), statusClock),
   );
@@ -855,8 +864,9 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       h("span", { class: "watch-live-dot", "aria-hidden": "true" }),
       "Live",
     ];
-    if (feed !== null && feed.connected() && feed.perMinute() > 0) {
-      parts.push(` \u00b7 ${feed.perMinute()} msgs/min`);
+    if (feed !== null && feed.connected()) {
+      const rate = feed.perMinute();
+      parts.push(rate === null ? " \u00b7 warming up" : ` \u00b7 ${rate} position reports a minute`);
     }
     parts.push(` · updated ${timeAgo(data.generated_at, nowMs)}`);
     if (delayed) parts.push(" · Recording delayed");
@@ -871,8 +881,12 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     if (data !== null) {
       statusSnap.textContent = `${fmtUtcZ(data.generated_at).slice(7)} · ${data.counts.ships} ships`;
     }
-    statusFeed.textContent =
-      feed !== null && feed.connected() ? `${feed.perMinute()} msgs/min` : "waiting";
+    if (feed === null || !feed.connected()) {
+      statusFeed.textContent = "waiting";
+    } else {
+      const rate = feed.perMinute();
+      statusFeed.textContent = rate === null ? "warming up" : `${rate} position reports a minute`;
+    }
   }
 
   function tick(): void {
@@ -903,7 +917,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         panelParts.radius.textContent = `${Math.round(reachRadiusKm(current, atMs))} km`;
       }
       if (panelParts.other !== null) {
-        panelParts.other.textContent = `Other ships in reach: ${otherShipsInReach(data, current, reachTimeMs(current, now))}`;
+        panelParts.other.textContent = `Other ships where it could have gone: ${otherShipsInReach(data, current, reachTimeMs(current, now))}`;
       }
     }, 1000);
   }
@@ -1056,6 +1070,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         {
           class: `watch-kind is-${kind}`,
           type: "button",
+          title: `Show/hide ${KIND_NAME[kind].toLowerCase()} events`,
           "aria-pressed": state.kinds.has(kind) ? "true" : "false",
         },
         kindGlyph(kind),
@@ -1172,7 +1187,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
           h("th", { scope: "col" }, "MMSI"),
           h("th", { scope: "col" }, "km"),
           h("th", { scope: "col" }, "Status"),
-          h("th", { scope: "col" }, "List"),
+          h("th", { scope: "col" }, "Sanctions"),
         ),
       ),
       body,
@@ -1303,7 +1318,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     return section(
       "Ships at the false point",
       vessels.length,
-      vessels.length === 0 ? h("div", { class: "watch-none" }, "No ships listed") : table,
+      vessels.length === 0 ? h("div", { class: "watch-none" }, "No ships nearby") : table,
     );
   }
 
@@ -1313,7 +1328,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
     const duration = h("span", { class: "watch-mono" }, fmtDuration(durationMs(alert, now)));
 
     const radiusLabel =
-      alert.kind === "dark" ? "Reach radius" : alert.kind === "sanctioned_stop" ? "Distance checked" : null;
+      alert.kind === "dark" ? "Where it could have gone" : alert.kind === "sanctioned_stop" ? "Distance checked" : null;
     let radiusEl: HTMLElement | null = null;
     if (radiusLabel !== null) {
       radiusEl = h("span", { class: "watch-mono" }, `${Math.round(reachRadiusKm(alert, atMs))} km`);
@@ -1325,7 +1340,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       { class: "watch-fields" },
       ...field("Vessel", h("span", { class: "watch-vessel" }, alertName(alert))),
       ...field("MMSI", h("span", { class: "watch-mono" }, String(alert.mmsi))),
-      ...(imo !== null ? field("IMO", h("span", { class: "watch-mono" }, imo)) : []),
+      ...(imo !== null ? field("Permanent ID (IMO)", h("span", { class: "watch-mono" }, imo)) : []),
       ...field("Type", shipType(snapshot, alert)),
       ...field("Flag", flagOf(alert.mmsi)),
       ...field("Event", shortLabel(alert.label)),
@@ -1360,8 +1375,8 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         h(
           "div",
           { class: "watch-figs" },
-          figure(fmtDuration(durationMs(alert, now)), "Dark for"),
-          figure(`${Math.round(reachRadiusKm(alert, atMs))} km`, "Could be this far"),
+          figure(fmtDuration(durationMs(alert, now)), "Switched off for"),
+          figure(`${Math.round(reachRadiusKm(alert, atMs))} km`, "Could have gone this far"),
           figure(String(met), "Ships it could have met"),
         ),
       );
@@ -1439,7 +1454,7 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
         h(
           "details",
           { class: "watch-also" },
-          h("summary", null, `Also in reach: ${alsoCount}`),
+          h("summary", null, `Also where it could have gone: ${alsoCount}`),
           also.length === 0 ? h("div", { class: "watch-none" }, "None") : contactTable(snapshot, also),
         ),
       );
@@ -1448,13 +1463,13 @@ export function renderWatch(app: HTMLElement, route: WatchRoute): WatchScreen {
       otherEl = h(
         "div",
         { class: "watch-other" },
-        `Other ships in reach: ${otherShipsInReach(snapshot, alert, atMs)}`,
+        `Other ships where it could have gone: ${otherShipsInReach(snapshot, alert, atMs)}`,
       );
       parts.push(
         section(
           "Nearby vessels",
           contacts.length,
-          contacts.length === 0 ? h("div", { class: "watch-none" }, "No ships in reach") : contactTable(snapshot, contacts),
+          contacts.length === 0 ? h("div", { class: "watch-none" }, "No ships where it could have gone") : contactTable(snapshot, contacts),
         ),
         otherEl,
       );

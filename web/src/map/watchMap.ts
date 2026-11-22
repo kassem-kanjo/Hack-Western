@@ -581,7 +581,7 @@ export function mountWatchMap(opts: WatchMapOptions): WatchMapHandle {
     ["vessels", "Ships"],
     ["events", "Alerts"],
     ["areas", "Watched areas"],
-    ["reach", "Reach"],
+    ["reach", "Where it could have gone"],
   ] as [LayerKey, string][]) {
     const glyph = h("span", { class: "watch-layer-glyph", "aria-hidden": "true" });
     glyph.innerHTML = `<svg viewBox="0 0 14 14" width="14" height="14">${LEGEND_GLYPH[key]}</svg>`;
@@ -2161,7 +2161,7 @@ export function watchAttribution(gfw = false): HTMLElement {
           " \u00b7 ",
         )
       : null,
-    "Positions: our AIS recording \u00b7 Watchlist: ",
+    "Positions: our AIS recording \u00b7 Sanctions: ",
     h(
       "a",
       {

@@ -158,6 +158,16 @@ export function trailHead(fixes: TrailFix[], atMs: number): { lon: number; lat: 
   };
 }
 
+/** Plain words for a span: "5 h", "1 h 21 min", "21 min" (same shape as the detail panel). */
+export function spanLabel(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return `${rest} min`;
+  if (rest === 0) return `${hours} h`;
+  return `${hours} h ${rest} min`;
+}
+
 /**
  * Hours:minutes once the window is an hour or more, otherwise minutes:seconds.
  * The total carries the unit ("7:02 h"); the elapsed side is the same shape.
@@ -528,9 +538,27 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
   });
   const elapsedEl = h("span", { class: "replay-elapsed" }, "0:00");
   const totalEl = h("span", { class: "replay-total" }, `${fmtReplayClock(spanMs, long)}${long ? " h" : ""}`);
+
+  // QA #229 A2: the scrubber spans the track before the switch-off plus the dark
+  // period itself. Say both in words and mark where the dark period starts, so the
+  // span can be read against "dark for" without arithmetic.
+  const darkStartMs = startMs === null ? t0 : Math.min(Math.max(startMs, t0), t1);
+  const leadMs = darkStartMs - t0;
+  const darkMs = t1 - darkStartMs;
+  const darkFrac = (darkStartMs - t0) / spanMs;
+  const phaseLead = h("i", { class: "replay-phase is-lead", "aria-hidden": "true" });
+  const phaseDark = h("i", { class: "replay-phase is-dark", "aria-hidden": "true" });
+  phaseLead.style.width = `${(darkFrac * 100).toFixed(2)}%`;
+  phaseDark.style.left = `${(darkFrac * 100).toFixed(2)}%`;
+  phaseDark.style.width = `${((1 - darkFrac) * 100).toFixed(2)}%`;
+  const endNote = alert.t_end === null ? " (ongoing: the playhead ends at now)" : "";
+  const spanCaption =
+    leadMs >= 60_000
+      ? `Track ${spanLabel(leadMs)} before switch-off + ${spanLabel(darkMs)} with transponder off${endNote}`
+      : `${spanLabel(darkMs)} with transponder off${endNote}`;
   const radiusEl = h(
     "span",
-    { class: "replay-radius", title: "Reach radius at this moment" },
+    { class: "replay-radius", title: "How far it could have gone at this moment" },
     "0 km",
   );
   const slider = h("input", {
@@ -561,6 +589,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
     "section",
     { class: "replay", "aria-label": "Alert replay" },
     h("div", { class: "replay-head" }, h("h3", null, "Replay"), countEl),
+    h("p", { class: "replay-span" }, spanCaption),
     h(
       "div",
       { class: "replay-body" },
@@ -577,7 +606,7 @@ export function mountReplay(alert: ReplayAlert, handle: WatchMapHandle): ReplayV
         ),
         radiusEl,
       ),
-      h("div", { class: "replay-track" }, slider, ticksEl),
+      h("div", { class: "replay-track" }, phaseLead, phaseDark, slider, ticksEl),
     ),
   );
 

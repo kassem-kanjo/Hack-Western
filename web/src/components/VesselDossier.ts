@@ -31,12 +31,12 @@ export interface SpeedSample {
 
 /** Short names for the alert kinds the ids start with (watch contract). */
 const KIND_LABEL: Record<string, string> = {
-  dark: "Dark",
-  sanctioned_stop: "Sanctioned stop",
-  spoof: "Spoof",
+  dark: "Switched off",
+  sanctioned_stop: "Stopped at sea",
+  spoof: "Faked position",
   meeting: "Meeting",
   jump: "Jump",
-  radar_unmatched: "Radar",
+  radar_unmatched: "Seen by satellite radar",
 };
 
 /** Watchlist categories in the words the panel header uses. */
@@ -70,9 +70,9 @@ function msZ(ms: number): string {
   return fmtZ(new Date(ms).toISOString());
 }
 
-function dash(value: string | null | undefined): string {
+function dash(value: string | null | undefined, empty = "Not recorded"): string {
   const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : "\u2014";
+  return trimmed && trimmed.length > 0 ? trimmed : empty;
 }
 
 function alertLabel(id: string): string {
@@ -249,11 +249,11 @@ function watchlistBlock(data: VesselDossier): HTMLElement | null {
           target: "_blank",
           rel: "noopener noreferrer",
         },
-        "List entry \u2197",
+        "Source entry \u2197",
       ),
     );
   }
-  return section("Watchlist", 1, h("div", { class: "vd-watch is-listed" }, ...rows));
+  return section("Sanctions and shadow fleet", 1, h("div", { class: "vd-watch is-listed" }, ...rows));
 }
 
 function alertList(data: VesselDossier): HTMLElement {
@@ -337,11 +337,11 @@ function render(data: VesselDossier): void {
     { class: "vd-fields" },
     ...field("Vessel", h("span", { class: "vd-name" }, dash(data.name))),
     ...field("MMSI", String(data.mmsi), true),
-    ...field("IMO", data.imo === null ? "\u2014" : String(data.imo), true),
+    ...field("Permanent ID number (IMO)", data.imo === null ? "Not recorded" : String(data.imo), true),
     ...field("Callsign", dash(data.callsign), true),
     ...field("Type", dash(data.type ?? data.class)),
-    ...field("Flag", dash(data.flag)),
-    ...field("Length", data.length_m === null ? "\u2014" : `${Math.round(data.length_m)} m`, true),
+    ...field("Flag", dash(data.flag, "No flag broadcast")),
+    ...field("Length", data.length_m === null ? "Not recorded" : `${Math.round(data.length_m)} m`, true),
     ...field("Destination", dash(data.destination)),
     ...field("Last seen", seenValue(data.last.t)),
     ...field(

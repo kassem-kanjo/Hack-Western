@@ -137,6 +137,8 @@
 /* The native range keeps drag, touch and the keyboard; only its looks change.
    --at is the played fraction, a hard stop rather than a gradient. */
 .replay-range {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 18px;
   margin: 0;
@@ -145,6 +147,37 @@
   -webkit-appearance: none;
   background: transparent;
   cursor: ew-resize;
+}
+
+/* QA #229 A2: the track before the switch-off (quiet) and the dark period (marked),
+   so the span can be read against "dark for" at a glance. */
+.replay-phase {
+  position: absolute;
+  top: 7px;
+  height: 4px;
+  pointer-events: none;
+}
+
+.replay-phase.is-lead {
+  left: 0;
+  background: var(--c-line-strong);
+  opacity: 0.6;
+}
+
+.replay-phase.is-dark {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--c-risk-high) 0 3px,
+    transparent 3px 6px
+  );
+  opacity: 0.8;
+}
+
+.replay-span {
+  margin: 0;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--c-text-2);
 }
 
 .replay-range::-webkit-slider-runnable-track {

@@ -17,8 +17,12 @@ export interface LivePosition {
 }
 
 export interface LiveFeed {
-  /** Messages per minute, measured over the last 60 s (scaled while warming up). */
-  perMinute(): number;
+  /**
+   * Position reports in the last 60 s, a true trailing count. Null until the feed
+   * has been open for a full 60 s: a shorter window extrapolated to a minute
+   * overstated the rate (QA #229 A1), so the UI shows "warming up" instead.
+   */
+  perMinute(): number | null;
   /** True once any frame (heartbeat or positions) has arrived recently. */
   connected(): boolean;
   close(): void;
@@ -63,13 +67,11 @@ export function openLiveFeed(
   }
 
   return {
-    perMinute(): number {
+    perMinute(): number | null {
       const now = Date.now();
+      if (now - startedAt < WINDOW_MS) return null;
       arrivals = arrivals.filter(([at]) => now - at <= WINDOW_MS);
-      const total = arrivals.reduce((sum, [, n]) => sum + n, 0);
-      // Until a full minute has passed, scale up so the counter is not a ramp from 0.
-      const span = Math.min(WINDOW_MS, Math.max(5_000, now - startedAt));
-      return Math.round((total * WINDOW_MS) / span);
+      return arrivals.reduce((sum, [, n]) => sum + n, 0);
     },
     connected(): boolean {
       return Date.now() - lastFrame < 15_000;
