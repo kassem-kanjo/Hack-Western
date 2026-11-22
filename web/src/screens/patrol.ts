@@ -271,6 +271,21 @@ function aisLine(decision: EdgeDecision | null): string {
   return `${fmtInt(nearby.length)} ${noun} broadcasting within ${fmtRadius(radius)} km${tail}`;
 }
 
+/** The why-line under the verdict: one plain sentence the judge can read at 2 m. */
+function whyLine(level: BannerLevel, d: EdgeDecision | null, recorded: boolean): string {
+  if (recorded) {
+    return `The camera sees a ${RECORDED_SIGHTING.label}, and no ship is broadcasting within 2 km.`;
+  }
+  if (level === "blind") return "The camera is sending no frames, so the lookout cannot see the water.";
+  if (level === "alert") {
+    const radius = finiteOrNull(d?.ais?.radius_km) ?? 2;
+    return `The camera sees a vessel and no ship is broadcasting within ${fmtRadius(radius)} km.`;
+  }
+  if (level === "ok") return "The camera sees a vessel, and a ship is broadcasting its position.";
+  if (d === null) return "Waiting for the first decision from the camera.";
+  return "The camera sees no vessel, so there is no ship to check against.";
+}
+
 function verdictText(decision: EdgeDecision | null): string {
   if (decision === null) return "Waiting for a decision";
   const text = typeof decision.verdict?.text === "string" ? decision.verdict.text.trim() : "";
@@ -496,6 +511,9 @@ export function renderPatrol(app: HTMLElement): void {
     "Waiting for a decision",
   );
   const verdictSub = h("p", { class: "patrol-alarm-sub", hidden: true });
+  const whyEl = h("p", { class: "patrol-why" }, "");
+  const bigNumber = h("p", { class: "patrol-big-number" }, "—");
+  const overloadLine = h("p", { class: "patrol-overload-line", hidden: true }, "");
 
   function metric(label: string): { box: HTMLElement; label: HTMLElement; value: HTMLElement } {
     const labelEl = h("span", { class: "patrol-metric-label" }, label);
@@ -554,7 +572,7 @@ export function renderPatrol(app: HTMLElement): void {
   const killBtn = h(
     "button",
     { class: "btn patrol-kill", type: "button", hidden: true },
-    "Kill the AI detector",
+    "Kill the AI",
   );
   const stressBtn = h(
     "button",
@@ -568,28 +586,37 @@ export function renderPatrol(app: HTMLElement): void {
     { class: "btn patrol-recorded-btn", type: "button", "aria-expanded": "false" },
     "Show a recorded sighting",
   );
-  const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn, recordedBtn);
-
+  const actions = h("div", { class: "patrol-actions" }, killBtn, stressBtn);
   const evidenceEl = h("p", { class: "patrol-evidence" }, "Evidence log: checking…");
-  // The two demo actions sit directly under the alarm state and its figures, so
-  // they are in view at 1280x720 without scrolling the rail.
-  // Order: the alarm state, its figures, the priority-guard A/B, then the two demo
-  // actions, so the A/B card and the buttons are in view at 1280x720.
+  const details = h(
+    "details",
+    { class: "patrol-details" },
+    h("summary", { class: "patrol-details-summary" }, "Details"),
+    h(
+      "div",
+      { class: "patrol-details-body" },
+      verdictSub,
+      metrics,
+      abBox,
+      positionEl,
+      chain,
+      evidenceEl,
+      h("h3", { class: "patrol-h" }, "Reliability"),
+      reliability,
+      underLoad,
+    ),
+  );
   const side = h(
     "aside",
     { class: "patrol-side", "aria-label": "What the patrol unit sees and decides" },
     verdictEl,
-    verdictSub,
-    metrics,
-    abBox,
+    whyEl,
+    bigNumber,
     actions,
+    overloadLine,
+    h("div", { class: "patrol-recorded-row" }, recordedBtn),
     hint,
-    positionEl,
-    chain,
-    evidenceEl,
-    h("h3", { class: "patrol-h" }, "Reliability"),
-    reliability,
-    underLoad,
+    details,
   );
 
   // ---- offline: one calm line instead of a half-live screen ----
@@ -603,7 +630,7 @@ export function renderPatrol(app: HTMLElement): void {
     bar,
     guideLine(
       "patrol",
-      "A camera lookout on a QNX Raspberry Pi. Hold a ship photo to the camera, or show a recorded sighting, then try Kill or Overload.",
+      "A camera lookout on a QNX Raspberry Pi. Hold up a ship photo, then try Kill the AI.",
     ),
     main,
   );
@@ -658,7 +685,7 @@ export function renderPatrol(app: HTMLElement): void {
     }
 
     killBtn.disabled = false;
-    killBtn.textContent = "Kill the AI detector";
+    killBtn.textContent = "Kill the AI";
   }
 
   function paintStress(): void {
@@ -666,6 +693,30 @@ export function renderPatrol(app: HTMLElement): void {
     if (!controls) return;
     stressBtn.disabled = stressing || stressActive;
     stressBtn.textContent = stressing ? "Overloading the Pi\u2026" : "Overload the Pi (10 s)";
+  }
+
+  /** The one number: the live alarm latency against the deadline, or a dash until a live alarm lands. */
+  function paintBigNumber(s: EdgeStatus): void {
+    const a = s.alarm;
+    const p99 = finiteOrNull(a?.p99_latency_ms);
+    if (!a || a.decisions === 0 || p99 === null) {
+      bigNumber.textContent = "—";
+      bigNumber.classList.remove("is-bad");
+      return;
+    }
+    bigNumber.textContent = `Alarm in ${Math.round(p99)} ms · deadline ${a.deadline_ms} ms`;
+    bigNumber.classList.toggle("is-bad", p99 > a.deadline_ms);
+  }
+
+  /** The one overload line: the same two arms the A/B table shows, read from the same result. */
+  function paintOverloadLine(result: EdgeAb | null): void {
+    overloadLine.hidden = result === null;
+    if (result === null) return;
+    const g = result.guarded;
+    const u = result.unguarded;
+    overloadLine.textContent =
+      `Under overload: ${fmtInt(g.on_time)} of ${fmtInt(g.alarm_frames)} alarms on time with our fix, ` +
+      `${fmtInt(u.on_time)} of ${fmtInt(u.alarm_frames)} without.`;
   }
 
   /** "Evidence log: N sightings · chain verified", from the hash-chained log (#220). */
@@ -795,11 +846,12 @@ export function renderPatrol(app: HTMLElement): void {
     // While the recorded example is open the banner speaks for it too, so the screen never
     // says "alert" on the left and "no vessel in view" on the right.
     const b = recordedShown()
-      ? { level: "alert", text: "Vessel not broadcasting its position", sub: "recorded example · not live" }
+      ? { level: "alert" as const, text: "Vessel not broadcasting its position", sub: "recorded example · not live" }
       : banner(status, d);
     const key = `${b.level}|${b.text}`;
     verdictSub.textContent = b.sub;
     verdictSub.hidden = b.sub === "";
+    whyEl.textContent = whyLine(b.level, d, recordedShown());
     if (key === lastVerdictKey) return;
 
     const first = lastVerdictKey === null;
@@ -900,6 +952,8 @@ export function renderPatrol(app: HTMLElement): void {
     cameraOffline = isCameraOffline(status, decision);
     syncFrame();
     paintReliability(status);
+    paintBigNumber(status);
+    paintOverloadLine(ab);
     paintCaption(decision);
     paintChain(status, decision);
     paintVerdict(decision);
