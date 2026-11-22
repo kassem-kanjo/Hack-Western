@@ -147,6 +147,9 @@ class Supervisor:
         self._stress_procs: list[subprocess.Popen] = []
         self._stress_until: float | None = None  # wall clock
         os.makedirs(config.state_dir, exist_ok=True)
+        # A marker left by a killed run names a pid that may now belong to anything, and would
+        # make _standby_ready lie about a standby that is still loading. Sweep them at start.
+        self._sweep_standby_markers()
 
     # --- public -------------------------------------------------------------
 
@@ -283,10 +286,7 @@ class Supervisor:
             self.standby.proc = None
             return False
         proc.send_signal(signal.SIGUSR1)
-        try:
-            os.unlink(os.path.join(self.config.state_dir, f"standby_{proc.pid}.ready"))
-        except OSError:
-            pass
+        self._remove_standby_marker(proc.pid)
         self.detector.proc = proc
         self.detector.started_wall = time.time()
         self.standby.proc = None
@@ -308,6 +308,29 @@ class Supervisor:
             cmd, preexec_fn=_low_priority_preexec(self.config.detector_nice)
         )
         self._event("indicator started", pid=self.indicator.proc.pid)
+
+    def _standby_marker(self, pid: int) -> str:
+        return os.path.join(self.config.state_dir, f"standby_{pid}.ready")
+
+    def _remove_standby_marker(self, pid: int) -> None:
+        """Delete one standby's ready marker; a missing file is already the goal."""
+        try:
+            os.unlink(self._standby_marker(pid))
+        except OSError:
+            pass
+
+    def _sweep_standby_markers(self) -> None:
+        """Delete every standby ready marker in the state directory (run at start-up)."""
+        try:
+            names = os.listdir(self.config.state_dir)
+        except OSError:
+            return
+        for name in names:
+            if name.startswith("standby_") and name.endswith(".ready"):
+                try:
+                    os.unlink(os.path.join(self.config.state_dir, name))
+                except OSError:
+                    pass
 
     def _standby_ready(self) -> bool:
         """True once the standby has loaded and warmed the model (it writes a marker file)."""
@@ -410,6 +433,7 @@ class Supervisor:
 
         if self.standby.proc is not None and self.standby.proc.poll() is not None:
             self._event("standby exited", code=self.standby.proc.returncode)
+            self._remove_standby_marker(self.standby.proc.pid)
             self.standby.proc = None
 
         if self.detector.proc is None:

@@ -1,4 +1,4 @@
-"""Tamper-evident sightings log: every "vessel not on AIS" alert, hash-chained, on the Pi.
+"""Hash-chained sightings log: every "vessel not on AIS" alert, recorded on the Pi.
 
 One JSON line per sighting::
 
@@ -6,8 +6,10 @@ One JSON line per sighting::
      "alarm": {...}, "prev": "<hash of seq 6>", "hash": "<sha256 of this record without 'hash'>"}
 
 Each record carries the hash of the one before it (the first carries 64 zeros), so editing,
-deleting or reordering any line breaks every hash after it. ``frame_sha256`` is the digest of the
-raw camera frame the AI looked at, so the picture can be matched to the record later.
+deleting or reordering any record is detected unless the whole log is rewritten (a rewrite
+recomputes every hash, and only an outside copy of the last hash would catch that).
+``frame_sha256`` is the digest of the raw camera frame the AI looked at, so the picture can be
+matched to the record later.
 
 Appends happen on a side thread with fsync, never in the safety core's 20 Hz loop. The deployed
 Pi keeps the file on ``/data``, a QNX6 filesystem (copy-on-write with a power-safe design); even

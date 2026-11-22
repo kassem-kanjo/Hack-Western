@@ -34,6 +34,16 @@ for ((i = 0; i < ${#ARGS[@]}; i++)); do
     esac
 done
 [ -n "$LAT" ] && [ -n "$LON" ] || { echo "pass --lat and --lon as for the deploy" >&2; exit 2; }
+# They are pasted into a remote shell command, so only plain decimal numbers pass.
+NUMBER_RE='^-?[0-9]+(\.[0-9]+)?$'
+if ! [[ "$LAT" =~ $NUMBER_RE ]]; then
+    echo "--lat must be a plain decimal number, got '$LAT'" >&2
+    exit 2
+fi
+if ! [[ "$LON" =~ $NUMBER_RE ]]; then
+    echo "--lon must be a plain decimal number, got '$LON'" >&2
+    exit 2
+fi
 
 echo "stopping the unit"
 ssh "${SSH_OPTS[@]}" "$TARGET" 'cd darkfleet 2>/dev/null && { kill $(cat supervisor.pid) $(cat status_http.pid) 2>/dev/null || true; sleep 4; }'

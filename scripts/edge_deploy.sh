@@ -143,6 +143,15 @@ if [ -z "$TARGET" ] || [ "${TARGET#*@}" = "$TARGET" ]; then
     exit 2
 fi
 
+# The status server is always started and serves frames and sightings over the network, so
+# refuse before copying anything: a half-deployed unit with an open status port is worse.
+if [ -z "${EDGE_STATUS_TOKEN:-}" ]; then
+    echo "EDGE_STATUS_TOKEN is not set; refusing to start the status server without it." >&2
+    echo "         export EDGE_STATUS_TOKEN=<a long random string>, then deploy again." >&2
+    echo "         The API needs the same value in its environment." >&2
+    exit 2
+fi
+
 if ! ssh "${SSH_OPTS[@]}" "$TARGET" true; then
     echo "cannot log in to $TARGET with an SSH key." >&2
     echo "This script never handles passwords; run this once, then retry:" >&2
