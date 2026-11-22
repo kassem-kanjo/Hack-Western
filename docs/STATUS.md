@@ -2,6 +2,13 @@
 
 Updated: Sat 21 Nov, 23:00 ET · HANDOVER for a new chat: read 'Handover' below first · V3 passed the 5-second test; Kassem reviewing · launch work paused until his 'happy' (except video + voice-over, which he asked for)
 
+## Update (Sun 22 Nov, 02:50 ET) — morning, read first
+- **Kassem, before 9:00:** (1) upload `Dark Fleet demo v5 (voiced).mp4` from the Desktop to YouTube (Unlisted) and send the link; (2) Devpost -> Dark Fleet -> Submit, tick terms, Submit project. Reminders fire 7:13 and 8:11.
+- **After the YouTube link:** add it to Devpost (Video demo link) and to the DEV post (published: https://dev.to/kassemkanjo/dark-fleet-we-spent-hack-western-chasing-ships-that-switch-off-their-transponders-2p9).
+- **Video:** v5 = friends' voice-over (Whisper-aligned, gaps tightened, 2:01) with footage re-cut to the voice in Remotion (media/video, composition DarkFleetV5, plan public/clips/v5plan_built.json). Old cuts are in ~/Desktop/Dark Fleet video - old versions.
+- **Judging 12:00-1:00:** table script docs/demo-script.md; show the kill-the-AI moment live at the QNX table (not in the video). Re-run `scripts/freeze_case.py` just before judging if the story case should be fresh.
+- **After judging:** public repo cleanup, issue #296.
+
 ## Update (Sun 22 Nov, 00:10 ET) — latest
 - **Merged tonight:** #271 Hormuz re-measure (32% -> 68%, +15.8 pts), #277 Satellite check, #280 Patrol cut to essentials, #281/#283 Watch sanctions lines + legend, #285 "Follow one ship" story (case LAVENDER), #276 write-up/table script/voice-over.
 - **Live:** :8000 runs main except /api/story (needs a restart after the video capture; then the story is live). Pi redeployed with BLIND 0.8 s; ship-photo test passed.
