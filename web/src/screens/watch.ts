@@ -320,23 +320,36 @@ function sortedAlerts(alerts: WatchAlert[]): WatchAlert[] {
 let lensUsed = false;
 
 /**
- * The story a cold open selects, strongest first (QA #229 A4: always select one,
- * even when something is ongoing):
- *   1. ongoing dark alert with a sanctioned ship able to meet it,
- *   2. ongoing dark alert or sanctioned stop,
- *   3. the newest earlier dark alert that had a sanctioned ship able to meet it,
- *      then the newest sanctioned stop, then the newest spoof.
+ * The switch-off with the most ships it could have met, the same rule as Present's
+ * `strongestAlert` (issue #249; mirrored because that helper is private to present.ts):
+ * most could-meet contacts, then ongoing before ended, then the newest.
+ */
+function strongestSwitchOff(alerts: readonly WatchAlert[]): WatchAlert | null {
+  const met = (alert: WatchAlert): number => alert.contacts.filter((contact) => contact.could_meet === true).length;
+  const dark = alerts
+    .filter((alert) => alert.kind === "dark")
+    .sort(
+      (a, b) =>
+        met(b) - met(a) ||
+        Number(b.status === "ongoing") - Number(a.status === "ongoing") ||
+        Date.parse(b.t_start) - Date.parse(a.t_start),
+    );
+  return dark[0] ?? null;
+}
+
+/**
+ * The story a cold open selects (QA #229 A4: always select one, even when something is ongoing):
+ *   1. the switch-off with the most ships it could have met (issue #249),
+ *   2. the newest ongoing sanctioned stop,
+ *   3. the newest sanctioned stop, then the newest spoof, then the newest alert of any kind.
  * Null only when there are no alerts at all.
  */
 function pickLens(snapshot: WatchResponse): WatchAlert | null {
-  const meetsSanctioned = (alert: WatchAlert): boolean =>
-    alert.contacts.some((contact) => contact.could_meet === true && contact.watchlist === "sanctioned");
   const ongoing = sortedAlerts(snapshot.alerts).filter((alert) => alert.status === "ongoing");
   const earlier = sortedAlerts(snapshot.alerts);
   return (
-    ongoing.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
-    ongoing.find((alert) => alert.kind === "dark" || alert.kind === "sanctioned_stop") ??
-    earlier.find((alert) => alert.kind === "dark" && meetsSanctioned(alert)) ??
+    strongestSwitchOff(snapshot.alerts) ??
+    ongoing.find((alert) => alert.kind === "sanctioned_stop") ??
     earlier.find((alert) => alert.kind === "sanctioned_stop") ??
     earlier.find((alert) => alert.kind === "spoof") ??
     earlier[0] ??
