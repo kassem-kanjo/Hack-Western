@@ -716,36 +716,14 @@ export function renderPatrol(app: HTMLElement): void {
   }
 
   /**
-   * The guarantee as three numbers: latency against the deadline, alarms on time, blind raised on time.
-   * Before any live alarm the three slots show the recorded A/B run (the measured result), so the
-   * screen never reads "No alarms yet" three times; once a live alarm lands, the live figures take over.
+   * Live guarantee figures: latency against the deadline, alarms on time, blind raised on time.
+   * Hidden until a live alarm lands; before that the A/B card right below carries the measured
+   * proof, and repeating its numbers here would say the same thing twice.
    */
-  function paintMetrics(s: EdgeStatus, result: EdgeAb | null): void {
+  function paintMetrics(s: EdgeStatus, _result: EdgeAb | null): void {
     const a = s.alarm;
-    const liveSeen = !!a && a.decisions > 0;
-    if (!liveSeen && result !== null) {
-      const guarded = result.guarded;
-      const unguarded = result.unguarded;
-      const worst = finiteOrNull(guarded.worst_latency_ms);
-      latencyMetric.label.textContent = "Worst alarm latency, guarded";
-      latencyMetric.value.textContent = worst === null ? "none yet" : `${Math.round(worst)} ms`;
-      latencyMetric.value.classList.remove("is-empty");
-      latencyMetric.box.classList.remove("is-bad");
-      latencyMetric.box.title = `Under overload: deadline ${result.deadline_ms} ms`;
-
-      onTimeMetric.label.textContent = "Alarms on time under overload";
-      onTimeMetric.value.textContent = `${fmtInt(guarded.on_time)} of ${fmtInt(guarded.alarm_frames)}`;
-      onTimeMetric.value.classList.remove("is-empty");
-      onTimeMetric.box.classList.remove("is-bad");
-      onTimeMetric.box.title = "Measured by the A/B run, with the priority guard";
-
-      blindMetric.label.textContent = "Without the priority fix";
-      blindMetric.value.textContent = `${fmtInt(unguarded.on_time)} of ${fmtInt(unguarded.alarm_frames)}`;
-      blindMetric.value.classList.remove("is-empty");
-      blindMetric.box.classList.toggle("is-bad", unguarded.late > 0);
-      blindMetric.box.title = "Alarms on time under the same overload, without the priority guard";
-      return;
-    }
+    metrics.hidden = !a || a.decisions === 0;
+    if (!a || a.decisions === 0) return;
 
     latencyMetric.label.textContent = "Alarm latency vs deadline";
     onTimeMetric.label.textContent = "Alarms on time";
@@ -753,18 +731,6 @@ export function renderPatrol(app: HTMLElement): void {
     latencyMetric.box.title = "p99 alarm latency against the deadline";
     onTimeMetric.box.title = "";
     blindMetric.box.title = "";
-    // Before the first alarm the counters are all zero. "0/0" and a bare dash
-    // read as broken numbers; the screen says there is nothing to count yet.
-    if (!a || a.decisions === 0) {
-      latencyMetric.value.textContent = "No alarms yet";
-      onTimeMetric.value.textContent = "No alarms yet";
-      blindMetric.value.textContent = "No alarms yet";
-      for (const m of [latencyMetric, onTimeMetric, blindMetric]) {
-        m.value.classList.add("is-empty");
-        m.box.classList.remove("is-bad");
-      }
-      return;
-    }
     for (const m of [latencyMetric, onTimeMetric, blindMetric]) {
       m.value.classList.remove("is-empty");
     }
