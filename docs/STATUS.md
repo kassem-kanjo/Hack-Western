@@ -2,6 +2,13 @@
 
 Updated: Sat 21 Nov, 23:00 ET · HANDOVER for a new chat: read 'Handover' below first · V3 passed the 5-second test; Kassem reviewing · launch work paused until his 'happy' (except video + voice-over, which he asked for)
 
+## Update (Sun 22 Nov, 00:15 ET) — read before the handover below
+- **Judging is 12:00-1:00 PM** (not 10:00): 3 general judges x (3 min demo + 1 min Q), no slides; sponsor tracks judged separately. Devpost locks 9:00 AM. Full list: docs/submission.md.
+- **#266 landed** (#271): Hormuz 31.9% -> 67.5%, +15.8 pts vs Gulf of Oman (CI 3.4-27.0). Live server restarted on it.
+- **Kassem approved "follow one ship"** (#274): replaces the caption tour; it IS the table demo and the video. Builder running in a worktree (own route #/story, frozen real case, presenter-paced, offline-safe).
+- **Kassem asked us to do the write-up and everything else**: Comms is writing docs/devpost-final.md, docs/demo-script.md, docs/voiceover.md. Kassem only: add himself as team member, upload the video, pick tracks (QNX, MLH Tiger Data, Most Adventurous) on BOTH Devpost and the live site, press Submit by 8:30.
+- Order: land #268 (Satellite check) -> #270 (sanctions line on Watch) -> #274 story -> 5-second test -> video from the story's autoplay -> screenshots -> Devpost final.
+
 ## Handover (Sat 21 Nov, 23:00 ET) — start here in a new chat
 
 **Running when this was written (two builders, local worktrees, not pushed yet):**
