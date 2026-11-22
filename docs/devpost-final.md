@@ -79,4 +79,4 @@ python, fastapi, typescript, vite, maplibre, deck.gl, timescaledb, tiger-data, p
 
 - GitHub: https://github.com/kassem-kanjo/Hack-Western
 - DEV post: https://dev.to/kassemkanjo/dark-fleet-we-spent-hack-western-chasing-ships-that-switch-off-their-transponders-2p9
-- Video: (after YouTube upload)
+- Video: https://youtu.be/AwbrCT3uajE
