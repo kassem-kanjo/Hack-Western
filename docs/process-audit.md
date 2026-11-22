@@ -264,3 +264,10 @@ Format: went well · went wrong · DeepSeek vs Claude code share · rule breaks 
 - **Fixes:** v4 script is a tech-forward real demo with speech-timed captions (guide voice from `say`), live Kill-the-AI beat; DEV post rebuilt from the actual MLH x DEV winners; new memory: adjust part way, keep substance.
 - **Code share since audit 37:** builders ~70%; Chief: scripts, post rewrites, Devpost/dev.to form work, QA.
 - **Change for next 30 min:** when told to emulate references, read the references in full first, then write.
+
+## Sun 22 Nov, 02:20 ET (audit 39, covers 01:20-02:20)
+- **Went well:** DEV post published (modelled on MLH x DEV winners); Devpost story given a human-voice pass and saved (#297); friends' voice-over transcribed locally with Whisper (word timestamps), every line matched and placed, sync verified by re-transcribing the result; public cleanup tracked (#296).
+- **Went wrong:** the voiced v4 felt choppy: we forced natural speech onto a timeline built for a robot voice; the v4.1 render overwrote v4 before the rename (my "rename after" instruction); long static holds (8-12 s) read as glitches.
+- **Fixes:** the voice is now the master: gaps removed, 0.42 s between sentences, 1.25 s between sections (1:57); v5 recomposes the footage to the voice, cutting holds to ~1 s, playbackRate 0.85-1.6, zooms re-keyed to spoken words, crossfades at section joins.
+- **Code share since audit 38:** builders ~60%; Chief: Whisper alignment and mixing pipeline, Devpost/DEV text.
+- **Change for next 30 min:** never let a render write to a path a user may be holding; new name first, always.
