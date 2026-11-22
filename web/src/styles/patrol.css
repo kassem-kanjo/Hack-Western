@@ -332,7 +332,7 @@
 }
 
 .patrol-position {
-  margin: var(--sp-2) 0 0;
+  margin: var(--sp-3) 0 var(--sp-4);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.4;
@@ -383,6 +383,17 @@
   font-size: 12px;
   line-height: 1.4;
   color: var(--c-text-1);
+  overflow-wrap: anywhere;
+}
+
+/* Technical detail under a plain line: the source, the policy and priority, the raw numbers. */
+.patrol-small {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--c-text-3);
   overflow-wrap: anywhere;
 }
 

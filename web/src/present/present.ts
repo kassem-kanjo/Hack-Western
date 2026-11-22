@@ -35,13 +35,19 @@ const STORIES_URL = "/api/hormuz/stories";
 /** Matches the CSS breakpoint: the tour is desktop-only. */
 const PHONE_QUERY = "(max-width: 1000px)";
 
+/** After the last beat the tour leaves on its own, so a finished demo never sits on a caption. */
+const END_HOLD_MS = 12000;
+
 const TOKEN = /\{([a-z_0-9]+)\}/g;
 const INTEGER = new Intl.NumberFormat("en-US");
 
 /** Every scene, flattened, with the beat it belongs to (for the progress bar). */
-const SCENES: readonly { scene: PresentScene; beat: number }[] = PRESENT_BEATS.flatMap((beat, b) =>
+const ALL_SCENES: readonly { scene: PresentScene; beat: number }[] = PRESENT_BEATS.flatMap((beat, b) =>
   beat.scenes.map((scene) => ({ scene, beat: b })),
 );
+
+/** The scenes this run shows: ALL_SCENES minus any the data cannot support (see applyAvailability). */
+let SCENES: readonly { scene: PresentScene; beat: number }[] = ALL_SCENES;
 
 /** A missing key means "no number from the API"; the beat falls back to its sentence. */
 type TokenValues = Partial<Record<PresentToken, string>>;
@@ -52,6 +58,8 @@ let strongestId: string | null = null;
 
 let active = false;
 let index = 0;
+/** Leaves the tour END_HOLD_MS after the last beat appears; cleared by any other beat. */
+let endTimer: number | null = null;
 /** Bumped on start/exit so a fetch from an earlier run cannot repaint this one. */
 let run = 0;
 /** The hash that was on screen before presentation started; restored on exit. */
@@ -127,6 +135,12 @@ function tokensFromStories(stories: HormuzStories): TokenValues {
   const tokens: TokenValues = {};
   const story = leadListed(stories);
   if (story !== null) {
+    // Only a ship the data tags as shadow fleet may be called one; the rest are "on a list" or unnamed.
+    tokens.sea1_kind = story.lists.includes("mare.shadow")
+      ? "A shadow-fleet ship"
+      : story.lists.length > 0
+        ? "A ship on a sanctions list"
+        : "A ship";
     tokens.sea1_hours = story.hours.toFixed(1);
     tokens.sea1_days = String(daysAfterStrikes(story.start));
     if (story.moved_km !== null) tokens.sea1_km = String(Math.round(story.moved_km));
@@ -170,7 +184,11 @@ function strongestAlert(alerts: readonly WatchAlert[]): WatchAlert | null {
  * Fetch every number the captions may print, once per run. The calls are
  * independent (`allSettled`), so one dead endpoint only removes its own numbers.
  */
-async function loadTourValues(): Promise<{ tokens: TokenValues; strongest: string | null }> {
+async function loadTourValues(): Promise<{
+  tokens: TokenValues;
+  strongest: string | null;
+  absent: readonly PresentToken[];
+}> {
   const [watch, trend, stories, edge] = await Promise.allSettled([
     fetchWatch(),
     getJson<HormuzTrendLite>(TREND_URL),
@@ -191,14 +209,32 @@ async function loadTourValues(): Promise<{ tokens: TokenValues; strongest: strin
   }
 
   if (trend.status === "fulfilled") Object.assign(tokens, tokensFromTrend(trend.value));
-  if (stories.status === "fulfilled") Object.assign(tokens, tokensFromStories(stories.value));
+  // A stories answer with no listed ship means the SEA 1 scene has nothing to tell.
+  const absent: PresentToken[] = [];
+  if (stories.status === "fulfilled") {
+    Object.assign(tokens, tokensFromStories(stories.value));
+    if (leadListed(stories.value) === null) absent.push("sea1_hours");
+  }
 
   if (edge.status === "fulfilled") {
     const ms = finite(edge.value.last_recovery_ms);
     if (ms !== null && ms >= 0) tokens.recovery = `${Math.round(ms)} ms`;
   }
 
-  return { tokens, strongest };
+  return { tokens, strongest, absent };
+}
+
+/**
+ * Drop the scenes whose required token the API said is absent, and keep the viewer
+ * on the same scene (or the one that took its place) so the tour does not jump.
+ */
+function applyAvailability(absent: readonly PresentToken[]): void {
+  if (absent.length === 0) return;
+  const current = SCENES[index]?.scene;
+  const previous = index;
+  SCENES = ALL_SCENES.filter((entry) => entry.scene.requires === undefined || !absent.includes(entry.scene.requires));
+  const same = SCENES.findIndex((entry) => entry.scene === current);
+  index = same >= 0 ? same : Math.min(previous, SCENES.length - 1);
 }
 
 function ensureTourValues(myRun: number): void {
@@ -207,6 +243,7 @@ function ensureTourValues(myRun: number): void {
       if (myRun !== run) return;
       tokenValues = loaded.tokens;
       strongestId = loaded.strongest;
+      applyAvailability(loaded.absent);
       // Re-show the same scene: its route may now name the strongest alert.
       show(index);
     })
@@ -264,6 +301,8 @@ function show(at: number): void {
   const { scene, beat } = entry;
   const text = captionFor(scene);
   index = at;
+  clearEndTimer();
+  if (at === SCENES.length - 1) endTimer = window.setTimeout(exitPresent, END_HOLD_MS);
   navigate(routeFor(scene));
   requestHormuzCard(scene.card ?? null);
 
@@ -286,6 +325,12 @@ function hint(key: string, label: string): HTMLElement {
   return h("span", { class: "present-hint" }, h("kbd", { class: "present-kbd" }, key), ` ${label}`);
 }
 
+function clearEndTimer(): void {
+  if (endTimer === null) return;
+  window.clearTimeout(endTimer);
+  endTimer = null;
+}
+
 function buildOverlay(): HTMLElement {
   progressFill = h("i", { class: "present-progress-fill" });
   const progress = h(
@@ -304,14 +349,9 @@ function buildOverlay(): HTMLElement {
   stepLabel = h("span", { class: "present-step" });
   headline = h("h1", { class: "present-headline" });
   line = h("p", { class: "present-line" });
-  caption = h(
-    "div",
-    { class: "present-caption", role: "status", "aria-live": "polite" },
-    h("div", { class: "present-meta" }, stepLabel),
-    headline,
-    line,
-  );
 
+  // The keyboard hints live inside the caption so they move with it: a docked
+  // caption must not leave them over the status bar.
   const hints = h(
     "div",
     { class: "present-hints" },
@@ -322,13 +362,21 @@ function buildOverlay(): HTMLElement {
     hint("Esc", "exit"),
   );
 
+  caption = h(
+    "div",
+    { class: "present-caption", role: "status", "aria-live": "polite" },
+    h("div", { class: "present-meta" }, stepLabel),
+    headline,
+    line,
+    hints,
+  );
+
   return h(
     "div",
     { class: "present-root", role: "region", "aria-label": "Presentation mode" },
     progress,
     h("div", { class: "present-scrim" }),
     caption,
-    hints,
   );
 }
 
@@ -347,6 +395,8 @@ export function startPresent(): void {
     run += 1;
     tokenValues = null;
     strongestId = null;
+    SCENES = ALL_SCENES;
+    index = 0;
     root = buildOverlay();
     document.body.append(root);
     document.body.classList.add("is-presenting");
@@ -361,6 +411,7 @@ export function exitPresent(): void {
   if (!active) return;
   active = false;
   run += 1; // invalidate a fetch that is still in flight
+  clearEndTimer();
   requestHormuzCard(null);
   document.body.classList.remove("is-presenting");
   root?.remove();
@@ -401,7 +452,9 @@ function onKeyDown(event: KeyboardEvent): void {
   if (event.key === "ArrowRight" || event.key === " " || event.code === "Space") {
     event.preventDefault();
     if (event.repeat) return;
-    show(Math.min(index + 1, SCENES.length - 1));
+    // Next after the last beat leaves the tour, back to the app.
+    if (index >= SCENES.length - 1) exitPresent();
+    else show(index + 1);
     return;
   }
 
