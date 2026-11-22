@@ -4,7 +4,7 @@
  * The cards claim no cargo and no meetings.
  */
 
-import type * as maplibregl from "maplibre-gl";
+import { Marker, type GeoJSONSource, type Map as MapLibreMap } from "maplibre-gl";
 
 import type { HormuzCardKey } from "../present/cardRequest";
 import { fmtInt } from "../format";
@@ -55,6 +55,51 @@ export interface HormuzStories {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/**
+ * The offline basemap has no text glyphs, so every label is a DOM marker. They sit outside
+ * the GeoJSON source and must be torn down by hand whenever the drawn card changes.
+ */
+let labels: Marker[] = [];
+
+function clearLabels(): void {
+  for (const marker of labels) marker.remove();
+  labels = [];
+}
+
+/** Place an HTML label as a map marker; the vertical offset keeps it off the dot or circle edge. */
+function placeLabel(
+  map: MapLibreMap,
+  element: HTMLElement,
+  at: Point,
+  anchor: "top" | "bottom",
+  offsetY: number,
+): void {
+  labels.push(new Marker({ element, anchor, offset: [0, offsetY] }).setLngLat([at.lon, at.lat]).addTo(map));
+}
+
+/** An arrowhead at the gap line's midpoint, pointing from off to on. */
+function addArrow(map: MapLibreMap, off: Point, on: Point): void {
+  // Measure the angle in Mercator, so it matches the straight line the map draws at any zoom.
+  const mercatorY = (lat: number): number => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+  const angle = (Math.atan2(-(mercatorY(on.lat) - mercatorY(off.lat)), on.lon - off.lon) * 180) / Math.PI;
+  const head = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  head.setAttribute("class", "hz-map-arrow");
+  head.setAttribute("width", "10");
+  head.setAttribute("height", "10");
+  head.setAttribute("viewBox", "0 0 10 10");
+  head.setAttribute("aria-hidden", "true");
+  head.style.transform = `rotate(${angle.toFixed(1)}deg)`;
+  const tip = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  tip.setAttribute("d", "M2 1.5 L9 5 L2 8.5 Z");
+  head.append(tip);
+  // The SVG lives in a wrapper because Marker wants an HTMLElement to position.
+  labels.push(
+    new Marker({ element: h("div", null, head), anchor: "center" })
+      .setLngLat([(off.lon + on.lon) / 2, (off.lat + on.lat) / 2])
+      .addTo(map),
+  );
+}
+
 function dayLabel(iso: string): string {
   const [, month, day] = iso.split("-").map(Number);
   return `${day} ${MONTHS[(month ?? 1) - 1]}`;
@@ -77,7 +122,7 @@ function point(role: "off" | "on" | "reported", at: Point): GeoJSON.Feature {
 }
 
 /** Add the story source and its three layers. Call once the map has loaded. */
-export function addStoryLayers(map: maplibregl.Map): void {
+export function addStoryLayers(map: MapLibreMap): void {
   map.addSource(SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({
     id: "stories-reach",
@@ -139,8 +184,9 @@ export function leadCluster(stories: HormuzStories): StoryCluster | null {
 }
 
 /** Empty the story layers: the strait view with no card drawn. */
-export function clearStories(map: maplibregl.Map): void {
-  map.getSource<maplibregl.GeoJSONSource>(SOURCE)?.setData({ type: "FeatureCollection", features: [] });
+export function clearStories(map: MapLibreMap): void {
+  clearLabels();
+  map.getSource<GeoJSONSource>(SOURCE)?.setData({ type: "FeatureCollection", features: [] });
 }
 
 /**
@@ -148,8 +194,10 @@ export function clearStories(map: maplibregl.Map): void {
  * (the 1,334 km cluster tracks need the whole box); the zoom cap stops a short
  * track from filling the screen.
  */
-function show(map: maplibregl.Map, features: GeoJSON.Feature[], bounds: [number, number][], maxZoom: number): void {
-  const source = map.getSource<maplibregl.GeoJSONSource>(SOURCE);
+function show(map: MapLibreMap, features: GeoJSON.Feature[], bounds: [number, number][], maxZoom: number): void {
+  // Every card clears the previous card's labels, so nothing stacks up across switches.
+  clearLabels();
+  const source = map.getSource<GeoJSONSource>(SOURCE);
   source?.setData({ type: "FeatureCollection", features });
   if (bounds.length > 0) {
     const lons = bounds.map((p) => p[0]);
@@ -165,7 +213,7 @@ function show(map: maplibregl.Map, features: GeoJSON.Feature[], bounds: [number,
 }
 
 /** Card 1: the off and on points, the dashed gap between them, and the reach circle. */
-export function showListed(map: maplibregl.Map, story: StoryListed): void {
+export function showListed(map: MapLibreMap, story: StoryListed): void {
   const features: GeoJSON.Feature[] = [
     {
       type: "Feature",
@@ -188,10 +236,20 @@ export function showListed(map: maplibregl.Map, story: StoryListed): void {
   ];
   // Frame the reach circle, not just the two points, so the reach boundary is on screen.
   show(map, features, circle(story.off, story.reach_km) as [number, number][], 9);
+  // Labels come after show(), which clears the previous card's labels.
+  // story.start carries a time, so dayLabel gets the date half only.
+  const when = `${dayLabel(story.start.slice(0, 10))} ${story.start.slice(11, 16)} UTC`;
+  placeLabel(map, h("div", { class: "hz-map-label" }, `Switched off ${when}`), story.off, "top", 9);
+  placeLabel(map, h("div", { class: "hz-map-label" }, "Came back"), story.on, "bottom", -9);
+  // The circle's northern vertex: this radius formula is the same one circle() uses.
+  const north = { lat: story.off.lat + story.reach_km / 111.2, lon: story.off.lon };
+  const reachText = `Where it could have gone in ${story.hours.toFixed(1)} h`;
+  placeLabel(map, h("div", { class: "hz-map-label" }, reachText), north, "bottom", -8);
+  addArrow(map, story.off, story.on);
 }
 
 /** Card 2: every ship in the cluster, off and on, so the shared reappearance spot is visible. */
-export function showCluster(map: maplibregl.Map, cluster: StoryCluster): void {
+export function showCluster(map: MapLibreMap, cluster: StoryCluster): void {
   // Each member: a grey track from its reported departure (hollow) to the spot it came back to.
   const features: GeoJSON.Feature[] = cluster.points.flatMap((p) => [
     {

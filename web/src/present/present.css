@@ -144,6 +144,17 @@
   transform: none;
 }
 
+/* Hormuz cards: bottom-left of the map, clear of the reach circle and the strait's
+   label at the top; lifted above the cluster's map key. */
+.present-caption[data-dock="bottom-left"] {
+  top: auto;
+  right: auto;
+  bottom: 72px;
+  left: 16px;
+  width: min(480px, calc(100vw - 452px - 16px));
+  transform: none;
+}
+
 /* Watch map: the north-west of the map, under the Live chip, clear of the figures
    panel (380 px, right) and the status bar (bottom). */
 .present-caption[data-dock="map-top-left"] {
@@ -167,6 +178,7 @@
 }
 
 .present-caption[data-dock="top-right"],
+.present-caption[data-dock="bottom-left"],
 .present-caption[data-dock="map-top-left"],
 .present-caption[data-dock="camera-top-left"] {
   padding: var(--sp-4);
@@ -176,8 +188,14 @@
 }
 
 .present-root:has(.present-caption[data-dock="top-right"]) .present-scrim,
+.present-root:has(.present-caption[data-dock="bottom-left"]) .present-scrim,
 .present-root:has(.present-caption[data-dock="map-top-left"]) .present-scrim,
 .present-root:has(.present-caption[data-dock="camera-top-left"]) .present-scrim {
+  display: none;
+}
+
+/* The tour owns the screen: live alert toasts stay off while it runs. */
+body.is-presenting .toasts {
   display: none;
 }
 

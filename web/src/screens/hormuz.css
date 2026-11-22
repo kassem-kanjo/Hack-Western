@@ -1,4 +1,4 @@
-/* Hormuz view (#200 V3): headline, one chart, today's satellite pass. Tokens only. */
+/* Hormuz view (#200 V3): headline, one chart, the story cards. Tokens only. */
 
 .hormuz-main {
   grid-template-columns: minmax(0, 1fr) 380px;
@@ -81,11 +81,24 @@
   color: var(--text-2);
 }
 
+/* The control's plain sentence, read straight after the big figure. */
+.hz-next {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-ui);
+  color: var(--text-2);
+}
+
 .hz-small {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-11);
   line-height: var(--lh-ui);
   color: var(--text-3);
+}
+
+.hz-small a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .hz-label {
@@ -122,118 +135,34 @@
   stroke-width: 1.25;
 }
 
-.trend-treated-week {
-  stroke: var(--st-sanctioned);
-  stroke-width: 1;
-  opacity: 0.28;
+/* The period since the strikes. */
+.trend-shade {
+  fill: var(--st-sanctioned);
+  fill-opacity: 0.08;
 }
 
-.trend-control-week {
-  stroke: var(--text-3);
-  stroke-width: 1;
-  opacity: 0.28;
+.trend-note {
+  font-size: var(--fs-11);
+  fill: var(--text-2);
 }
 
-.trend-tick {
-  stroke: var(--text-4);
-  stroke-width: 1;
+/* Direct labels at each line's right end: the name only, in the line's colour. */
+.trend-label {
+  font-size: var(--fs-11);
+}
+
+.trend-label.is-treated {
+  fill: var(--st-sanctioned);
+}
+
+.trend-label.is-control {
+  fill: var(--text-3);
 }
 
 .trend-marker {
   stroke: var(--text-1);
   stroke-width: 1;
   stroke-dasharray: 3 3;
-}
-
-.trend-marker-label {
-  font-size: var(--fs-11);
-  fill: var(--text-1);
-}
-
-.hz-legend {
-  display: flex;
-  gap: var(--sp-4);
-  margin: var(--sp-2) 0 0;
-  font-size: var(--fs-11);
-  color: var(--text-3);
-}
-
-.hz-key::before {
-  content: "";
-  display: inline-block;
-  width: 14px;
-  height: 2px;
-  margin-right: var(--sp-1);
-  vertical-align: middle;
-  background: currentColor;
-}
-
-.hz-key.is-treated {
-  color: var(--st-sanctioned);
-}
-
-.hz-key.is-control {
-  color: var(--text-3);
-}
-
-.hz-figure-line {
-  margin: 0 0 var(--sp-3);
-  font-family: var(--font-mono);
-  font-size: var(--fs-12);
-  color: var(--text-1);
-}
-
-.hz-chips {
-  display: flex;
-  gap: var(--sp-1);
-  overflow-x: auto;
-  padding-bottom: var(--sp-2);
-}
-
-.hz-chip {
-  flex: none;
-  width: 64px;
-  height: 64px;
-  padding: 0;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
-  background: var(--surface-0);
-  cursor: pointer;
-}
-
-.hz-chip img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.hz-chip[aria-pressed="true"] {
-  border-color: var(--accent);
-}
-
-.hz-sar-detail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-  margin-top: var(--sp-3);
-}
-
-.hz-sar-detail figure {
-  margin: 0;
-  width: 100%;
-}
-
-.hz-sar-detail img {
-  display: block;
-  width: 100%;
-  max-width: 220px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
-}
-
-.hz-sar-detail figcaption {
-  margin-top: var(--sp-1);
 }
 
 /* Map key for the cluster's hollow dots (#219). */
@@ -323,4 +252,25 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 40vh minmax(0, 1fr);
   }
+}
+
+/* Story map labels: the offline basemap has no glyphs, so these are DOM markers, not symbols. */
+.hz-map-label {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: var(--fs-11);
+  line-height: var(--lh-ui);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The gap line's arrowhead: drawn pointing along +x, then rotated by the drawing code. */
+.hz-map-arrow {
+  display: block;
+  fill: var(--text-1);
+  transform-origin: 50% 50%;
+  pointer-events: none;
 }

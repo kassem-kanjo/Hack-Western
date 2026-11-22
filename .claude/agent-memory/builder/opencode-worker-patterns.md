@@ -31,3 +31,10 @@ Delegating to `opencode-go/deepseek-v4.1-flash` via `delegate.sh` worked for bot
 - deepseek-v4.1-flash did a pure-stats module + 16 tests (133 s) and a report renderer (~5 min) cleanly, both check exit 0. Give the second piece a scratch file and paste it in when the target file has a single writer.
 - `multiprocessing` fork Pool hung silently on macOS (a worker died on a GEOS TopologyException; pool.map waits forever). Use spawn + initializer, and wrap core prism calls in try/except GEOSException with a different `step_minutes`.
 - GFW 4Wings SAR `group-by=VESSEL_ID/MMSI` returned 404 "temporarily unavailable" on 2026-11-20; no detection-to-vessel attribution.
+
+## Audit 4 lane H (issue #249, 2026-11-21)
+- Two deepseek-v4.1-flash lanes in parallel on disjoint files: 168 s and 274 s, both model_exit 0, in-scope diffs, no quota hit. Apply both with `git apply --check` then `git apply`; overlapping hunks in one CSS file applied cleanly.
+- **A worker check can false-green.** The worktree had no `web/node_modules`, so `npx tsc` ran a stub and the summary still said check_exit 0 (the SEA 1 check.log was empty). Before dispatch, run `npm ci` in the real checkout, and point the check at its node_modules via a symlink. Re-run tsc yourself after applying.
+- Worker reports say "npm ci in the worktree" is fine, but then they delete node_modules; keep the symlink line in the check.
+- Direct chart labels collided (two line ends about 7 px apart). Workers do not check label collisions; check the crop yourself and push labels apart in code.
+- Builder should not `git commit` when the brief says so and CLAUDE.md says Chief commits (non-negotiable 3): leave the diff in the worktree and say so.
