@@ -1,3 +1,4 @@
+# ruff: noqa: E501  (embedded page JS/CSS strings are kept on one line)
 """Capture the Dark Fleet demo clips (v2): real clicks, zooms motivated by what changed.
 
 Captures only. Captions, zooms and the end card are composed in media/video (Remotion) from
@@ -374,7 +375,7 @@ def record_climax() -> int:
     lines = watch["lines"]
 
     def line_start(prefix: str) -> float:
-        return next(l["start"] for l in lines if l["text"].startswith(prefix))
+        return next(ln["start"] for ln in lines if ln["text"].startswith(prefix))
 
     seg_start = line_start("It has been stopped")
     seg_end = line_start("Satellite radar")
